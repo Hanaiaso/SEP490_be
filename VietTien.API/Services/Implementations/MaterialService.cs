@@ -1,0 +1,127 @@
+using Microsoft.EntityFrameworkCore;
+using VietTien.API.Data;
+using VietTien.API.DTOs.Material;
+using VietTien.API.Models;
+using VietTien.API.Services.Interfaces;
+
+namespace VietTien.API.Services.Implementations
+{
+    public class MaterialService : IMaterialService
+    {
+        private readonly ApplicationDbContext _context;
+
+        public MaterialService(ApplicationDbContext context)
+        {
+            _context = context;
+        }
+
+        public async Task<IEnumerable<MaterialDto>> GetAllAsync(string? search = null)
+        {
+            var query = _context.Materials.AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var lowerSearch = search.ToLower();
+                query = query.Where(m => m.Name.ToLower().Contains(lowerSearch));
+            }
+
+            var materials = await query.OrderBy(m => m.Name).ToListAsync();
+
+            return materials.Select(MapToDto);
+        }
+
+        public async Task<MaterialDto> GetByIdAsync(Guid id)
+        {
+            var material = await _context.Materials.FindAsync(id);
+            if (material == null)
+            {
+                throw new Exception("Không tìm thấy nguyên liệu.");
+            }
+
+            return MapToDto(material);
+        }
+
+        public async Task<MaterialDto> CreateAsync(CreateMaterialDto dto)
+        {
+            var exists = await _context.Materials.AnyAsync(m => m.Name.ToLower() == dto.Name.ToLower());
+            if (exists)
+            {
+                throw new Exception("Tên nguyên liệu đã tồn tại.");
+            }
+
+            var material = new Material
+            {
+                Id = Guid.NewGuid(),
+                Name = dto.Name,
+                Unit = dto.Unit,
+                SafetyThreshold = dto.SafetyThreshold,
+                CurrentStock = 0 // Tồn kho ban đầu là 0
+            };
+
+            _context.Materials.Add(material);
+            await _context.SaveChangesAsync();
+
+            return MapToDto(material);
+        }
+
+        public async Task<MaterialDto> UpdateAsync(Guid id, UpdateMaterialDto dto)
+        {
+            var material = await _context.Materials.FindAsync(id);
+            if (material == null)
+            {
+                throw new Exception("Không tìm thấy nguyên liệu.");
+            }
+
+            var exists = await _context.Materials.AnyAsync(m => m.Id != id && m.Name.ToLower() == dto.Name.ToLower());
+            if (exists)
+            {
+                throw new Exception("Tên nguyên liệu đã tồn tại.");
+            }
+
+            material.Name = dto.Name;
+            material.Unit = dto.Unit;
+            material.SafetyThreshold = dto.SafetyThreshold;
+
+            await _context.SaveChangesAsync();
+
+            return MapToDto(material);
+        }
+
+        public async Task DeleteAsync(Guid id)
+        {
+            var material = await _context.Materials
+                .Include(m => m.Inventories)
+                .FirstOrDefaultAsync(m => m.Id == id);
+
+            if (material == null)
+            {
+                throw new Exception("Không tìm thấy nguyên liệu.");
+            }
+
+            if (material.Inventories.Any())
+            {
+                throw new Exception("Không thể xóa nguyên liệu đã có dữ liệu tồn kho. Vui lòng kiểm tra lại.");
+            }
+
+            // Kiểm tra các bản ghi lịch sử liên quan (PO, Receipt, Issue, Transfer, Quarantine) nếu cần
+            // Ở đây đơn giản chỉ check Inventory. Trong thực tế có thể dùng Soft Delete cho Material giống Product.
+
+            _context.Materials.Remove(material);
+            await _context.SaveChangesAsync();
+        }
+
+        private static MaterialDto MapToDto(Material m)
+        {
+            return new MaterialDto
+            {
+                Id = m.Id,
+                Name = m.Name,
+                Unit = m.Unit,
+                CurrentStock = m.CurrentStock,
+                SafetyThreshold = m.SafetyThreshold,
+                LastAlertSentDate = m.LastAlertSentDate,
+                IsBelowSafetyThreshold = m.IsBelowSafetyThreshold()
+            };
+        }
+    }
+}

@@ -1,0 +1,47 @@
+## Ignore Visual Studio temporary files, build results, and user settings
+## See https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Release]/
+[Releases]/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+build/
+bin/
+obj/
+
+# Visual Studio 2015/2017/2019/2022 cache directory
+.vs/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userbg
+*.usertasks
+
+# Visual Studio Code
+.vscode/
+
+# Rider
+.idea/
+
+# Local settings (keep template, ignore actual secrets)
+appsettings.Development.json
+appsettings.Local.json
+appsettings.Production.json
+secrets.json
+
+# Publish output
+publish/
+
+# Windows image analyses
+Thumbs.db
+ehthumbs.db
+
+# Folder View profiles
+Desktop.ini

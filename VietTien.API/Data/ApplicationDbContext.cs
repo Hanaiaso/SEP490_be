@@ -1,0 +1,907 @@
+using Microsoft.EntityFrameworkCore;
+using VietTien.API.Models;
+
+namespace VietTien.API.Data
+{
+    public class ApplicationDbContext : DbContext
+    {
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : base(options) { }
+
+        // Đăng ký toàn bộ các thuộc tính DbSet tương ứng với các bảng
+        public DbSet<User> Users => Set<User>();
+        public DbSet<CustomerProfile> CustomerProfiles => Set<CustomerProfile>();
+        public DbSet<Address> Addresses => Set<Address>();
+        public DbSet<Category> Categories => Set<Category>();
+        public DbSet<Product> Products => Set<Product>();
+        public DbSet<ProductMaterial> ProductMaterials => Set<ProductMaterial>();
+        public DbSet<Cart> Carts => Set<Cart>();
+        public DbSet<CartItem> CartItems => Set<CartItem>();
+        public DbSet<Order> Orders => Set<Order>();
+        public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+        public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
+        public DbSet<PaymentException> PaymentExceptions => Set<PaymentException>();
+        public DbSet<Inventory> Inventories => Set<Inventory>();
+        public DbSet<Material> Materials => Set<Material>();
+        public DbSet<ReturnedGoodsLog> ReturnedGoodsLogs => Set<ReturnedGoodsLog>();
+        public DbSet<CustomerDebt> CustomerDebts => Set<CustomerDebt>();
+        public DbSet<EmployeeSalary> EmployeeSalaries => Set<EmployeeSalary>();
+        public DbSet<MonthlyPayroll> MonthlyPayrolls => Set<MonthlyPayroll>();
+        public DbSet<PayrollDetail> PayrollDetails => Set<PayrollDetail>();
+        public DbSet<AiMarketingCampaign> AiMarketingCampaigns => Set<AiMarketingCampaign>();
+
+        // Quotation / Negotiation
+        public DbSet<Quotation> Quotations => Set<Quotation>();
+        public DbSet<QuotationItem> QuotationItems => Set<QuotationItem>();
+        public DbSet<QuotationVersion> QuotationVersions => Set<QuotationVersion>();
+        public DbSet<QuotationVersionItem> QuotationVersionItems => Set<QuotationVersionItem>();
+        public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+
+        // System Notifications
+        public DbSet<Notification> Notifications => Set<Notification>();
+
+        // Warehousing & PO & Replacement
+        public DbSet<Warehouse> Warehouses => Set<Warehouse>();
+        public DbSet<WarehouseLocation> WarehouseLocations => Set<WarehouseLocation>();
+        public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
+        public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
+        public DbSet<Supplier> Suppliers => Set<Supplier>();
+        public DbSet<GoodsReceipt> GoodsReceipts => Set<GoodsReceipt>();
+        public DbSet<GoodsReceiptItem> GoodsReceiptItems => Set<GoodsReceiptItem>();
+        public DbSet<PaymentReallocation> PaymentReallocations => Set<PaymentReallocation>();
+
+        // Advanced Warehouse Modules (v6.0)
+        public DbSet<PickTask> PickTasks => Set<PickTask>();
+        public DbSet<PickTaskItem> PickTaskItems => Set<PickTaskItem>();
+        public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
+        public DbSet<StockTransferItem> StockTransferItems => Set<StockTransferItem>();
+        public DbSet<GoodsIssue> GoodsIssues => Set<GoodsIssue>();
+        public DbSet<GoodsIssueItem> GoodsIssueItems => Set<GoodsIssueItem>();
+        public DbSet<HandoverRecord> HandoverRecords => Set<HandoverRecord>();
+        public DbSet<WarehouseShift> WarehouseShifts => Set<WarehouseShift>();
+        public DbSet<QuarantineLog> QuarantineLogs => Set<QuarantineLog>();
+        public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
+
+        // Phân bổ khách hàng cho Sale (Round-robin)
+        public DbSet<RoundRobinState> RoundRobinStates => Set<RoundRobinState>();
+        public DbSet<RoundRobinParticipant> RoundRobinParticipants => Set<RoundRobinParticipant>();
+        public DbSet<CustomerAssignmentHistory> CustomerAssignmentHistories => Set<CustomerAssignmentHistory>();
+        public DbSet<CreditTransaction> CreditTransactions => Set<CreditTransaction>();
+
+        // LUỒNG 7: Khách hàng yêu cầu đổi Sale phụ trách
+        public DbSet<SalesChangeRequest> SalesChangeRequests => Set<SalesChangeRequest>();
+        public DbSet<SalesChangeRequestOrderDecision> SalesChangeRequestOrderDecisions => Set<SalesChangeRequestOrderDecision>();
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder);
+
+            // =========================================================================
+            // 1. CẤU HÌNH TỰ ĐỘNG SINH SEQUENTIAL GUID TRÊN MSSQL (GIẢI QUYẾT HIỆU NĂNG)
+            // =========================================================================
+            // Giúp MSSQL tự tăng Guid theo thời gian, chống phân mảnh Clustered Index khi INSERT dữ liệu
+            var entitiesWithGuidKey = modelBuilder.Model.GetEntityTypes()
+                .Where(e => e.FindPrimaryKey()?.Properties.Count == 1 &&
+                            e.FindPrimaryKey()?.Properties[0].ClrType == typeof(Guid));
+
+            foreach (var entity in entitiesWithGuidKey)
+            {
+                var pkProperty = entity.FindPrimaryKey()!.Properties[0];
+                modelBuilder.Entity(entity.ClrType).Property(pkProperty.Name)
+                    .HasDefaultValueSql("NEWSEQUENTIALID()");
+            }
+
+            // =========================================================================
+            // 2. ĐỊNH NGHĨA RÕ RÀNG MỐI QUAN HỆ GIỮA CÁC BẢNG (FLUENT API RELATIONSHIPS)
+            // =========================================================================
+
+            modelBuilder.Entity<GoodsReceiptItem>()
+                .HasOne(gri => gri.PurchaseOrderItem)
+                .WithMany()
+                .HasForeignKey(gri => gri.PurchaseOrderItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // --- PHÂN HỆ NGƯỜI DÙNG & HỒ SƠ Khách hàng ---
+            // Quan hệ 1 - 1 giữa User và CustomerProfile
+            modelBuilder.Entity<CustomerProfile>()
+                .HasOne(cp => cp.User)
+                .WithOne(u => u.CustomerProfile)
+                .HasForeignKey<CustomerProfile>(cp => cp.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ Sale phụ trách
+            modelBuilder.Entity<CustomerProfile>()
+                .HasOne(cp => cp.AssignedSalesStaff)
+                .WithMany()
+                .HasForeignKey(cp => cp.AssignedSalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Sale giới thiệu khách (referral khi đăng ký) — self-reference nên bắt buộc Restrict
+            modelBuilder.Entity<User>()
+                .HasOne(u => u.ReferredBySalesStaff)
+                .WithMany()
+                .HasForeignKey(u => u.ReferredBySalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // --- PHÂN HỆ THÔNG BÁO ---
+            modelBuilder.Entity<Notification>()
+                .HasOne(n => n.RecipientUser)
+                .WithMany()
+                .HasForeignKey(n => n.RecipientUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Notification>()
+                .Property(n => n.Type)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+
+            // --- PHÂN HỆ ROUND-ROBIN & LỊCH SỬ PHÂN BỔ ---
+            modelBuilder.Entity<RoundRobinState>()
+                .HasOne(rs => rs.LastAssignedSalesStaff)
+                .WithMany()
+                .HasForeignKey(rs => rs.LastAssignedSalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<RoundRobinState>()
+                .HasOne(rs => rs.UpdatedBy)
+                .WithMany()
+                .HasForeignKey(rs => rs.UpdatedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<RoundRobinParticipant>()
+                .HasOne(rp => rp.SalesStaff)
+                .WithMany()
+                .HasForeignKey(rp => rp.SalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<RoundRobinParticipant>()
+                .HasIndex(rp => rp.SalesStaffId)
+                .IsUnique();
+
+            modelBuilder.Entity<CustomerAssignmentHistory>()
+                .HasOne(h => h.CustomerProfile)
+                .WithMany()
+                .HasForeignKey(h => h.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CustomerAssignmentHistory>()
+                .HasOne(h => h.SalesStaff)
+                .WithMany()
+                .HasForeignKey(h => h.SalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerAssignmentHistory>()
+                .HasOne(h => h.AssignedBy)
+                .WithMany()
+                .HasForeignKey(h => h.AssignedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerAssignmentHistory>()
+                .HasOne(h => h.PreviousSalesStaff)
+                .WithMany()
+                .HasForeignKey(h => h.PreviousSalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerAssignmentHistory>()
+                .Property(h => h.Source)
+                .HasMaxLength(30);
+
+            // --- LUỒNG 7: YÊU CẦU ĐỔI SALE PHỤ TRÁCH ---
+            // Nhiều FK cùng trỏ về Users nên bắt buộc Restrict (tránh multiple cascade paths trên SQL Server)
+            modelBuilder.Entity<SalesChangeRequest>(entity =>
+            {
+                entity.HasOne(r => r.CustomerProfile)
+                    .WithMany()
+                    .HasForeignKey(r => r.CustomerProfileId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(r => r.CurrentSalesStaff)
+                    .WithMany()
+                    .HasForeignKey(r => r.CurrentSalesStaffId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(r => r.DesiredSalesStaff)
+                    .WithMany()
+                    .HasForeignKey(r => r.DesiredSalesStaffId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(r => r.NewSalesStaff)
+                    .WithMany()
+                    .HasForeignKey(r => r.NewSalesStaffId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(r => r.ReviewedBy)
+                    .WithMany()
+                    .HasForeignKey(r => r.ReviewedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(r => r.ExplanationRequestedBy)
+                    .WithMany()
+                    .HasForeignKey(r => r.ExplanationRequestedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.Property(r => r.Reason).HasMaxLength(2000);
+                entity.Property(r => r.ProblemDescription).HasMaxLength(2000);
+
+                // Chỉ cho phép 1 yêu cầu đang mở (Pending=0, MoreInfoRequested=1) cho mỗi khách hàng
+                entity.HasIndex(r => r.CustomerProfileId)
+                    .IsUnique()
+                    .HasFilter("[Status] IN (0, 1)");
+            });
+
+            modelBuilder.Entity<SalesChangeRequestOrderDecision>(entity =>
+            {
+                entity.HasOne(d => d.SalesChangeRequest)
+                    .WithMany(r => r.OrderDecisions)
+                    .HasForeignKey(d => d.SalesChangeRequestId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(d => d.Order)
+                    .WithMany()
+                    .HasForeignKey(d => d.OrderId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // Snapshot Sale phụ trách trên đơn hàng
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.SalesStaff)
+                .WithMany()
+                .HasForeignKey(o => o.SalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<CustomerProfile>()
+                .Property(cp => cp.AssignmentSource)
+                .HasMaxLength(30);
+
+            // Quan hệ 1 - 1 (hoặc 1 - n) giữa CustomerProfile và Cart
+            modelBuilder.Entity<Cart>()
+                .HasOne(c => c.CustomerProfile)
+                .WithMany()
+                .HasForeignKey(c => c.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade); // Xóa profile thì xóa giỏ hàng
+
+            modelBuilder.Entity<CreditTransaction>()
+                .HasOne(ct => ct.CustomerProfile)
+                .WithMany()
+                .HasForeignKey(ct => ct.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CreditTransaction>()
+                .HasOne(ct => ct.Order)
+                .WithMany()
+                .HasForeignKey(ct => ct.OrderId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Quan hệ 1 - n giữa CustomerProfile và Sổ địa chỉ (Addresses)
+            modelBuilder.Entity<Address>()
+                .HasOne(a => a.CustomerProfile)
+                .WithMany(cp => cp.Addresses)
+                .HasForeignKey(a => a.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Cascade); // Xóa tài khoản khách thì xóa luôn sổ địa chỉ kèm theo
+
+            // Cấu hình Address.Type lưu dạng string
+            modelBuilder.Entity<Address>()
+                .Property(a => a.Type)
+                .HasConversion<string>()
+                .HasMaxLength(20);
+
+            // --- PHÂN HỆ SẢN PHẨM & GIỎ HÀNG ---
+            // Quan hệ 1 - n giữa Category và Product
+            modelBuilder.Entity<Product>()
+                .HasOne(p => p.Category)
+                .WithMany(c => c.Products)
+                .HasForeignKey(p => p.CategoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Inventory -> Product (nullable, dùng cho thành phẩm/hàng hóa)
+            modelBuilder.Entity<Inventory>()
+                .HasOne(i => i.Product)
+                .WithMany(p => p.Inventories)
+                .HasForeignKey(i => i.ProductId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Inventory -> Material (nullable, dùng cho nguyên liệu)
+            modelBuilder.Entity<Inventory>()
+                .HasOne(i => i.Material)
+                .WithMany(m => m.Inventories)
+                .HasForeignKey(i => i.MaterialId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Inventory>()
+                .HasOne(i => i.WarehouseLocation)
+                .WithMany(wl => wl.Inventories)
+                .HasForeignKey(i => i.WarehouseLocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Inventory>()
+                .HasOne(i => i.LastUpdatedByUser)
+                .WithMany()
+                .HasForeignKey(i => i.LastUpdatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<WarehouseLocation>()
+                .HasOne(wl => wl.Warehouse)
+                .WithMany(w => w.Locations)
+                .HasForeignKey(wl => wl.WarehouseId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Quan hệ 1 - n giữa Cart và CartItem
+            modelBuilder.Entity<CartItem>()
+                .HasOne(ci => ci.Cart)
+                .WithMany(c => c.Items)
+                .HasForeignKey(ci => ci.CartId)
+                .OnDelete(DeleteBehavior.Cascade); // Xóa giỏ hàng tổng thì tự động dọn sạch item con
+
+            // Quan hệ 1 - n giữa Product và CartItem
+            modelBuilder.Entity<CartItem>()
+                .HasOne(ci => ci.Product)
+                .WithMany(p => p.CartItems)
+                .HasForeignKey(ci => ci.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // --- PHÂN HỆ ĐƠN HÀNG, THANH TOÁN & HOÀN HÀNG ---
+            // Quan hệ 1 - n giữa CustomerProfile và Order
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.CustomerProfile)
+                .WithMany(cp => cp.Orders)
+                .HasForeignKey(o => o.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Self-referencing Order (ReplacementOrder)
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.ReplacementOrder)
+                .WithMany()
+                .HasForeignKey(o => o.ReplacementOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Quan hệ 1 - n giữa Order và Chi tiết đơn hàng (OrderItem)
+            modelBuilder.Entity<OrderItem>()
+                .HasOne(oi => oi.Order)
+                .WithMany(o => o.OrderItems)
+                .HasForeignKey(oi => oi.OrderId)
+                .OnDelete(DeleteBehavior.Cascade); // Hủy/Xóa đơn hàng vật lý (nếu có) thì xóa chi tiết đơn
+
+            // Quan hệ 1 - n giữa Product và OrderItem
+            modelBuilder.Entity<OrderItem>()
+                .HasOne(oi => oi.Product)
+                .WithMany(p => p.OrderItems)
+                .HasForeignKey(oi => oi.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ 1 - n giữa Order và Nhật ký giao dịch SePay (PaymentTransaction)
+            modelBuilder.Entity<PaymentTransaction>()
+                .HasOne(pt => pt.Order)
+                .WithMany(o => o.Transactions)
+                .HasForeignKey(pt => pt.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PaymentTransaction>()
+                .HasOne(pt => pt.ConfirmedBy)
+                .WithMany()
+                .HasForeignKey(pt => pt.ConfirmedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // MGR-05: PaymentException relationships
+            modelBuilder.Entity<PaymentException>()
+                .HasOne(pe => pe.Order)
+                .WithMany(o => o.PaymentExceptions)
+                .HasForeignKey(pe => pe.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PaymentException>()
+                .HasOne(pe => pe.LastRetryBy)
+                .WithMany()
+                .HasForeignKey(pe => pe.LastRetryByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PaymentException>()
+                .HasOne(pe => pe.ResolvedBy)
+                .WithMany()
+                .HasForeignKey(pe => pe.ResolvedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // MGR-05: Order.ManualConfirmedBy relationship
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.ManualConfirmedBy)
+                .WithMany()
+                .HasForeignKey(o => o.ManualConfirmedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ 1 - n giữa Order và Nhật ký hàng hoàn trả Kho (ReturnedGoodsLog)
+            modelBuilder.Entity<ReturnedGoodsLog>()
+                .HasOne(r => r.Order)
+                .WithMany(o => o.ReturnedGoodsLogs)
+                .HasForeignKey(r => r.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // --- PHÂN HỆ KẾ TOÁN, CÔNG NỢ & TIỀN LƯƠNG ---
+            // Quan hệ 1 - n giữa CustomerProfile và Công nợ (CustomerDebt)
+            modelBuilder.Entity<CustomerDebt>()
+                .HasOne(cd => cd.CustomerProfile)
+                .WithMany(cp => cp.Debts)
+                .HasForeignKey(cd => cd.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ 1 - n giữa Order và Công nợ (Mỗi đơn nợ tạo 1 dòng theo dõi tuổi nợ)
+            modelBuilder.Entity<CustomerDebt>()
+                .HasOne(cd => cd.Order)
+                .WithMany(o => o.Debts)
+                .HasForeignKey(cd => cd.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ 1 - 1 giữa User và Hồ sơ lương gốc (EmployeeSalary)
+            modelBuilder.Entity<EmployeeSalary>()
+                .HasOne(es => es.User)
+                .WithOne(u => u.EmployeeSalary)
+                .HasForeignKey<EmployeeSalary>(es => es.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ 1 - n giữa MonthlyPayroll và Chi tiết lương nhân sự từng tháng (PayrollDetail)
+            modelBuilder.Entity<PayrollDetail>()
+                .HasOne(pd => pd.MonthlyPayroll)
+                .WithMany(mp => mp.Details)
+                .HasForeignKey(pd => pd.MonthlyPayrollId)
+                .OnDelete(DeleteBehavior.Cascade); // Xóa bảng lương tháng tổng thì xóa chi tiết của tháng đó
+
+            // --- PHÂN HỆ TRỢ LÝ AI MARKETING ---
+            // Quan hệ 1 - n giữa Product và Chiến dịch AI Marketing
+            modelBuilder.Entity<AiMarketingCampaign>()
+                .HasOne(am => am.Product)
+                .WithMany(p => p.MarketingCampaigns)
+                .HasForeignKey(am => am.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Quan hệ 1 - n giữa User (Admin thực hiện) và Chiến dịch AI Marketing
+            modelBuilder.Entity<AiMarketingCampaign>()
+                .HasOne(am => am.Admin)
+                .WithMany(u => u.MarketingCampaigns)
+                .HasForeignKey(am => am.AdminId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+
+            // --- CẤU HÌNH CHO PHÂN HỆ VẬT LIỆU (MATERIALS) ---
+            // Thiết lập quan hệ Nhiều - Nhiều giữa Product và Material thông qua bảng ProductMaterial (BOM)
+            modelBuilder.Entity<ProductMaterial>()
+                .HasOne(pm => pm.Product)
+                .WithMany() // Nếu cần bạn có thể khai báo ICollection<ProductMaterial> trong Product.cs
+                .HasForeignKey(pm => pm.ProductId)
+                .OnDelete(DeleteBehavior.Cascade); // Xóa sản phẩm thì xóa định mức vật liệu của nó
+
+            modelBuilder.Entity<ProductMaterial>()
+                .HasOne(pm => pm.Material)
+                .WithMany()
+                .HasForeignKey(pm => pm.MaterialId)
+                .OnDelete(DeleteBehavior.Restrict); // Không cho phép xóa vật liệu nếu đang có sản phẩm áp định mức
+
+
+            // --- CẤU HÌNH BẢNG LƯƠNG (MONTHLYPAYROLL & PAYROLLDETAILS) ---
+            // Quan hệ 1 - n giữa Bảng lương tổng (MonthlyPayroll) và Chi tiết (PayrollDetail)
+            modelBuilder.Entity<PayrollDetail>()
+                .HasOne(pd => pd.MonthlyPayroll)
+                .WithMany(mp => mp.Details)
+                .HasForeignKey(pd => pd.MonthlyPayrollId)
+                .OnDelete(DeleteBehavior.Cascade); // Xóa bảng lương tháng tổng thì tự động xóa hết chi tiết lương bên trong
+
+            // RÀNG BUỘC QUAN TRỌNG: Kết nối trực tiếp dòng lương về bảng Người dùng (Users)
+            modelBuilder.Entity<PayrollDetail>()
+                .HasOne(pd => pd.Employee)
+                .WithMany(u => u.PayrollDetails)
+                .HasForeignKey(pd => pd.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict); // Ngăn chặn xóa User nhân viên nếu hệ thống đã chạy bảng lương lịch sử của họ
+
+            // --- PHÂN HỆ ĐÀM PHÁN GIÁ (QUOTATION & CHAT) ---
+            modelBuilder.Entity<Quotation>()
+                .HasOne(q => q.CustomerProfile)
+                .WithMany()
+                .HasForeignKey(q => q.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<Quotation>()
+                .HasOne(q => q.SalesStaff)
+                .WithMany()
+                .HasForeignKey(q => q.SalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<QuotationItem>()
+                .HasOne(qi => qi.Quotation)
+                .WithMany(q => q.Items)
+                .HasForeignKey(qi => qi.QuotationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<QuotationItem>()
+                .HasOne(qi => qi.Product)
+                .WithMany()
+                .HasForeignKey(qi => qi.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ChatMessage>()
+                .HasOne(cm => cm.Quotation)
+                .WithMany(q => q.ChatMessages)
+                .HasForeignKey(cm => cm.QuotationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ChatMessage>()
+                .HasOne(cm => cm.Sender)
+                .WithMany()
+                .HasForeignKey(cm => cm.SenderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // --- MỐI QUAN HỆ CỦA CÁC PHÂN HỆ KHÁC (ĐÃ XÓA CÁC KHAI BÁO TRÙNG LẶP DƯ THỪA) ---
+
+            // Payment Reallocation
+            modelBuilder.Entity<PaymentReallocation>()
+                .HasOne(pr => pr.OriginalOrder)
+                .WithMany()
+                .HasForeignKey(pr => pr.OriginalOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PaymentReallocation>()
+                .HasOne(pr => pr.ReplacementOrder)
+                .WithMany()
+                .HasForeignKey(pr => pr.ReplacementOrderId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            // Purchase Order
+            modelBuilder.Entity<PurchaseOrder>()
+                .HasOne(po => po.CreatedBy)
+                .WithMany()
+                .HasForeignKey(po => po.CreatedById)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PurchaseOrderItem>()
+                .HasOne(poi => poi.PurchaseOrder)
+                .WithMany(po => po.Items)
+                .HasForeignKey(poi => poi.PurchaseOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // PurchaseOrderItem -> Product (nullable)
+            modelBuilder.Entity<PurchaseOrderItem>()
+                .HasOne(poi => poi.Product)
+                .WithMany()
+                .HasForeignKey(poi => poi.ProductId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // PurchaseOrderItem -> Material (nullable)
+            modelBuilder.Entity<PurchaseOrderItem>()
+                .HasOne(poi => poi.Material)
+                .WithMany()
+                .HasForeignKey(poi => poi.MaterialId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // =========================================================================
+            // 2.1 CẤU HÌNH CÁC BẢNG ADVANCED WAREHOUSE MODULES (v6.0)
+            // =========================================================================
+
+            modelBuilder.Entity<PickTask>()
+                .HasOne(pt => pt.Order)
+                .WithMany()
+                .HasForeignKey(pt => pt.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PickTask>()
+                .HasOne(pt => pt.Warehouse)
+                .WithMany()
+                .HasForeignKey(pt => pt.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PickTask>()
+                .HasOne(pt => pt.AssignedUser)
+                .WithMany()
+                .HasForeignKey(pt => pt.AssignedUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<PickTaskItem>()
+                .HasOne(pti => pti.PickTask)
+                .WithMany(pt => pt.Items)
+                .HasForeignKey(pti => pti.PickTaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<StockTransfer>()
+                .HasOne(st => st.SourceWarehouse)
+                .WithMany()
+                .HasForeignKey(st => st.SourceWarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockTransfer>()
+                .HasOne(st => st.DestinationWarehouse)
+                .WithMany()
+                .HasForeignKey(st => st.DestinationWarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockTransfer>()
+                .HasOne(st => st.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(st => st.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockTransferItem>()
+                .HasOne(sti => sti.StockTransfer)
+                .WithMany(st => st.Items)
+                .HasForeignKey(sti => sti.StockTransferId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // StockTransferItem -> Product (nullable)
+            modelBuilder.Entity<StockTransferItem>()
+                .HasOne(sti => sti.Product)
+                .WithMany()
+                .HasForeignKey(sti => sti.ProductId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // StockTransferItem -> Material (nullable)
+            modelBuilder.Entity<StockTransferItem>()
+                .HasOne(sti => sti.Material)
+                .WithMany()
+                .HasForeignKey(sti => sti.MaterialId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<QuotationVersion>()
+                .HasOne(qv => qv.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(qv => qv.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<GoodsIssue>()
+                .HasOne(gi => gi.Warehouse)
+                .WithMany()
+                .HasForeignKey(gi => gi.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<GoodsIssue>()
+                .HasOne(gi => gi.IssuedByUser)
+                .WithMany()
+                .HasForeignKey(gi => gi.IssuedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<GoodsIssueItem>()
+                .HasOne(gii => gii.GoodsIssue)
+                .WithMany(gi => gi.Items)
+                .HasForeignKey(gii => gii.GoodsIssueId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // GoodsIssueItem -> Product (nullable)
+            modelBuilder.Entity<GoodsIssueItem>()
+                .HasOne(gii => gii.Product)
+                .WithMany()
+                .HasForeignKey(gii => gii.ProductId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // GoodsIssueItem -> Material (nullable)
+            modelBuilder.Entity<GoodsIssueItem>()
+                .HasOne(gii => gii.Material)
+                .WithMany()
+                .HasForeignKey(gii => gii.MaterialId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<HandoverRecord>()
+                .HasOne(hr => hr.Order)
+                .WithMany()
+                .HasForeignKey(hr => hr.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<HandoverRecord>()
+                .HasOne(hr => hr.WarehouseStaff)
+                .WithMany()
+                .HasForeignKey(hr => hr.WarehouseStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<HandoverRecord>()
+                .HasOne(hr => hr.SalesStaff)
+                .WithMany()
+                .HasForeignKey(hr => hr.SalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // ─── LUỒNG 5: QuarantineLog ───────────────────────────────────────
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(q => q.Order)
+                .WithMany()
+                .HasForeignKey(q => q.OrderId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(q => q.GoodsReceiptItem)
+                .WithMany()
+                .HasForeignKey(q => q.GoodsReceiptItemId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(q => q.Product)
+                .WithMany()
+                .HasForeignKey(q => q.ProductId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(q => q.Material)
+                .WithMany()
+                .HasForeignKey(q => q.MaterialId)
+                .OnDelete(DeleteBehavior.Restrict)
+                .IsRequired(false);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(ql => ql.Inventory)
+                .WithMany()
+                .HasForeignKey(ql => ql.InventoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(ql => ql.ReceivedByUser)
+                .WithMany()
+                .HasForeignKey(ql => ql.ReceivedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(ql => ql.DispatchedByUser)
+                .WithMany()
+                .HasForeignKey(ql => ql.DispatchedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<QuarantineLog>()
+                .Property(ql => ql.Status)
+                .HasConversion<string>()
+                .HasMaxLength(30);
+
+            // =========================================================================
+            // 3. CẤU HÌNH CÁC CHỈ MỤC ĐỘC NHẤT (UNIQUE INDEXES) & ĐỘ CHÍNH XÁC (PRECISION)
+            // =========================================================================
+
+            // Đảm bảo dữ liệu không bị trùng lặp ở tầng database vật lý
+            modelBuilder.Entity<User>().HasIndex(u => u.Email).IsUnique();
+            modelBuilder.Entity<User>().HasIndex(u => u.PhoneNumber).IsUnique()
+                .HasFilter("[PhoneNumber] IS NOT NULL AND [PhoneNumber] <> ''");
+            modelBuilder.Entity<Order>().HasIndex(o => o.OrderCode).IsUnique();
+
+            // MGR-05: Unique index cho mã giao dịch ngân hàng (chống tạo 2 lần cùng 1 transaction)
+            modelBuilder.Entity<PaymentTransaction>()
+                .HasIndex(pt => pt.TransactionId)
+                .IsUnique()
+                .HasFilter("[TransactionId] != ''");
+
+
+            // Ép MSSQL nhận diện đúng định dạng Decimal(18,2) thay vì bị cảnh báo cắt cụt dữ liệu tài chính
+            var decimalProperties = modelBuilder.Model.GetEntityTypes()
+                .SelectMany(e => e.GetProperties())
+                .Where(p => p.ClrType == typeof(decimal));
+
+            foreach (var property in decimalProperties)
+            {
+                property.SetPrecision(18);
+                property.SetScale(2);
+            }
+
+            // =========================================================================
+            // 4. SEED DATA TÀI KHOẢN MẪU
+            // =========================================================================
+            var defaultPasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY."; // "123456"
+            var baseDate = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            var adminUser = new User { Id = Guid.Parse("11111111-1111-1111-1111-111111111111"), FullName = "Admin Test", Email = "admin.test@viettien.com", PhoneNumber = "0999000001", PasswordHash = defaultPasswordHash, Role = SystemRole.Admin, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var ceoUser = new User { Id = Guid.Parse("22222222-2222-2222-2222-222222222222"), FullName = "CEO Test", Email = "ceo.test@viettien.com", PhoneNumber = "0999000002", PasswordHash = defaultPasswordHash, Role = SystemRole.CEO, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var smUser = new User { Id = Guid.Parse("33333333-3333-3333-3333-333333333333"), FullName = "Sales Manager Test", Email = "salesmanager.test@viettien.com", PhoneNumber = "0999000003", PasswordHash = defaultPasswordHash, Role = SystemRole.SalesManager, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var ssUser = new User { Id = Guid.Parse("44444444-4444-4444-4444-444444444444"), FullName = "Sales Staff Test", Email = "salesstaff.test@viettien.com", PhoneNumber = "0999000004", PasswordHash = defaultPasswordHash, Role = SystemRole.SalesStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var wsUser = new User { Id = Guid.Parse("55555555-5555-5555-5555-555555555555"), FullName = "Warehouse Staff Test", Email = "warehousestaff.test@viettien.com", PhoneNumber = "0999000005", PasswordHash = defaultPasswordHash, Role = SystemRole.WarehouseStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var asUser = new User { Id = Guid.Parse("66666666-6666-6666-6666-666666666666"), FullName = "Accounting Staff Test", Email = "accountingstaff.test@viettien.com", PhoneNumber = "0999000006", PasswordHash = defaultPasswordHash, Role = SystemRole.AccountingStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var customerUser = new User { Id = Guid.Parse("77777777-7777-7777-7777-777777777777"), FullName = "Customer Test", Email = "customer.test@viettien.com", PhoneNumber = "0999000007", PasswordHash = defaultPasswordHash, Role = SystemRole.Customer, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+
+            modelBuilder.Entity<User>().HasData(
+                adminUser, ceoUser, smUser, ssUser, wsUser, asUser, customerUser
+            );
+
+            var customerProfile = new CustomerProfile
+            {
+                Id = Guid.Parse("88888888-8888-8888-8888-888888888888"),
+                UserId = customerUser.Id
+            };
+            
+            modelBuilder.Entity<CustomerProfile>().HasData(customerProfile);
+
+            // Seed Data: Warehouse & Location
+            var defaultWarehouseId = Guid.Parse("ee73f2cc-05fd-4b0e-8a48-61f89a2d345a");
+            modelBuilder.Entity<Warehouse>().HasData(new Warehouse
+            {
+                Id = defaultWarehouseId,
+                Name = "Kho mặc định",
+                Code = "WH-DEFAULT"
+            });
+
+            var defaultLocationId = Guid.Parse("2006d0a6-37a9-46ca-b8a0-bb061ec9f1e9");
+            modelBuilder.Entity<WarehouseLocation>().HasData(new WarehouseLocation
+            {
+                Id = defaultLocationId,
+                WarehouseId = defaultWarehouseId,
+                Name = "Vị trí mặc định",
+                Type = "Normal"
+            });
+
+            // Seed Data: WarehouseShifts
+            modelBuilder.Entity<WarehouseShift>().HasData(
+                new WarehouseShift { Id = Guid.Parse("11111111-1111-4111-a111-111111111111"), Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0), Description = "Ca làm việc buổi sáng" },
+                new WarehouseShift { Id = Guid.Parse("22222222-2222-4222-a222-222222222222"), Name = "Ca Trưa", StartTime = new TimeSpan(14, 0, 0), EndTime = new TimeSpan(22, 0, 0), Description = "Ca làm việc buổi chiều/tối" },
+                new WarehouseShift { Id = Guid.Parse("33333333-3333-4333-a333-333333333333"), Name = "Ca Chiều", StartTime = new TimeSpan(22, 0, 0), EndTime = new TimeSpan(6, 0, 0), Description = "Ca làm việc đêm" }
+            );
+
+            // Seed Data: Categories
+            var catSpongeId = Guid.Parse("bc7b7b78-9319-4574-8f99-01a6cbfb7d5e");
+            var catCartonId = Guid.Parse("cec401fa-bd4a-4d94-bc7a-0d26007445c9");
+            var catTapeId = Guid.Parse("d373bbfa-184c-4eac-9633-38bee5ef6478");
+            var catToolId = Guid.Parse("f69da084-f0e9-4fdf-acc5-7917818991c3");
+
+            modelBuilder.Entity<Category>().HasData(
+                new Category { Id = catSpongeId, Name = "Màng Bọc Chống Sốc", Description = "Màng xốp hơi, xốp nổ, màng PE quấn pallet", IsActive = true },
+                new Category { Id = catCartonId, Name = "Thùng Carton", Description = "Hộp carton đóng hàng 3 lớp, 5 lớp đủ kích thước", IsActive = true },
+                new Category { Id = catTapeId, Name = "Băng Keo / Băng Dính", Description = "Các loại băng keo trong, đục, băng keo 2 mặt, băng keo giấy", IsActive = true },
+                new Category { Id = catToolId, Name = "Dụng Cụ Đóng Gói", Description = "Cắt băng keo, dao rọc giấy, màng co", IsActive = true }
+            );
+
+            // Seed Data: Products
+            var pTapeTrongId = Guid.Parse("659870d7-5b15-4496-a4bb-03ab28900170");
+            var pPeWrapId = Guid.Parse("e24b1960-21d2-4385-8155-17557c0ce8b9");
+            var pBubbleId = Guid.Parse("a3c3e6e5-860a-464c-a073-1b847a9db570");
+            var pTapeDucId = Guid.Parse("3a369d6a-500b-4e11-b127-494e6c74a72e");
+            var pCutToolId = Guid.Parse("aa275908-173a-47fb-a2cb-8eb173c934ef");
+            var pCartonId = Guid.Parse("cc25fd5c-3ad6-4f95-b19f-e86635d1d16d");
+
+            modelBuilder.Entity<Product>().HasData(
+                new Product { Id = pTapeTrongId, CategoryId = catTapeId, Name = "Băng Keo Trong OPP 5F 100 Yard (Cây 6 Cuộn)", Sku = "TAPE-TR5F-100", StandardListedPrice = 65000m, Description = "Băng keo trong suốt dán thùng OPP siêu dính. Độ dày màng 50 mic, không đứt ngang khi kéo dán. Thích hợp đóng gói bưu phẩm, thùng hàng.", Specifications = "Quy Cách: Cây 6 cuộn\nChiều Rộng: 5cm (5F)\nChiều Dài: 100 Yard\nĐộ Dính: 50 Mic", ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689328/82ad4b54-13f5-4ff2-b624-87b0cf08d545.png", IsDiscontinued = false },
+                new Product { Id = pPeWrapId, CategoryId = catSpongeId, Name = "Cuộn Màng Chít PE Quấn Pallet Lõi Cứng", Sku = "WRAP-PE-3KG", StandardListedPrice = 120000m, Description = "Màng co PE quấn hàng hóa, cố định kiện hàng trên pallet, chống bụi bẩn và chống thấm nước.", Specifications = "Trọng Lượng: 3.0 kg\nĐộ Dày: 17 mic\nMàu Sắc: Trong suốt", ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689368/fb41db67-49fd-4213-afa2-3153ac46028f.png", IsDiscontinued = false },
+                new Product { Id = pBubbleId, CategoryId = catSpongeId, Name = "Cuộn Màng Xốp Hơi (Bong Bóng) 1.2m x 100m", Sku = "WRAP-BB-1M2", StandardListedPrice = 250000m, Description = "Màng xốp hơi (bubble wrap) bong bóng khí chống sốc, bảo vệ hàng dễ vỡ trong quá trình vận chuyển.", Specifications = "Kích Thước: Cao 1.2m x Dài 100m\nĐường Kính Hạt: 10mm\nMàu Sắc: Trắng", ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689413/8d00a868-e6f0-4c21-8cd5-8228301b06cc.png", IsDiscontinued = false },
+                new Product { Id = pTapeDucId, CategoryId = catTapeId, Name = "Băng Keo Đục Dán Thùng 5F 100 Yard (Cây 6 Cuộn)", Sku = "TAPE-BR5F-100", StandardListedPrice = 65000m, Description = "Băng keo màu đục, bám dính tốt trên bề mặt giấy carton. Phù hợp đóng gói hàng hóa, bưu phẩm.", Specifications = "Quy Cách: Cây 6 cuộn\nChiều Rộng: 5cm (5F)\nChiều Dài: 100 Yard\nMàu Sắc: Đục / Nâu", ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689446/8a39bfa0-7bbb-4727-baea-86fbfb315512.png", IsDiscontinued = false },
+                new Product { Id = pCutToolId, CategoryId = catToolId, Name = "Dụng Cụ Cắt Băng Keo Cầm Tay 5F Dân Cường", Sku = "TOOL-CUT-5F", StandardListedPrice = 25000m, Description = "Dụng cụ cắt băng keo cầm tay chắc chắn, lưỡi dao sắc bén, chuyên dùng cho băng keo 5cm.", Specifications = "Thương Hiệu: Dân Cường\nChất Liệu: Sắt sơn tĩnh điện\nDùng Cho: Băng keo 5cm (5F)", ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Cat+Bang+Keo", IsDiscontinued = false },
+                new Product { Id = pCartonId, CategoryId = catCartonId, Name = "Thùng Carton 3 Lớp Gửi GHTK 30x20x15cm", Sku = "BOX-3L-302015", StandardListedPrice = 3500m, Description = "Thùng carton đóng hàng 3 lớp sóng B cứng cáp, chịu lực tốt. Kích thước phù hợp gửi hàng qua đơn vị vận chuyển.", Specifications = "Kích Thước: 30x20x15 cm\nCấu Tạo: 3 lớp sóng B\nĐịnh Lượng: 120g", ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Thung+Carton", IsDiscontinued = false }
+            );
+
+            // --- STOCK TRANSACTION (LỊCH SỬ TỒN KHO) ---
+            modelBuilder.Entity<StockTransaction>()
+                .HasOne(st => st.Inventory)
+                .WithMany()
+                .HasForeignKey(st => st.InventoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // StockTransaction -> Product (nullable)
+            modelBuilder.Entity<StockTransaction>()
+                .HasOne(st => st.Product)
+                .WithMany()
+                .HasForeignKey(st => st.ProductId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // StockTransaction -> Material (nullable)
+            modelBuilder.Entity<StockTransaction>()
+                .HasOne(st => st.Material)
+                .WithMany()
+                .HasForeignKey(st => st.MaterialId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockTransaction>()
+                .HasOne(st => st.WarehouseLocation)
+                .WithMany()
+                .HasForeignKey(st => st.WarehouseLocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockTransaction>()
+                .HasOne(st => st.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(st => st.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Seed Data: Inventories
+            modelBuilder.Entity<Inventory>().HasData(
+                new Inventory { Id = Guid.Parse("b115bc37-ab72-40e4-b1fa-274d7b329efe"), ProductId = pPeWrapId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("0f79f912-5b0d-4d7c-ad7b-35fbf4a6497e"), ProductId = pBubbleId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 50, QuarantineQuantity = 50, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("16eaf448-d4e7-4757-b60c-3a3348cbf10c"), ProductId = pTapeTrongId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 1000, QuarantineQuantity = 1000, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("d934b287-a9e9-4d7c-86cf-4e82d97957f6"), ProductId = pCartonId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 5000, QuarantineQuantity = 5000, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("c9e0fca9-3d26-402b-b6a4-58357e527d10"), ProductId = pCutToolId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 200, QuarantineQuantity = 200, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("9925c3cf-e4af-4a88-8840-961d4281f417"), ProductId = pTapeDucId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 9999, ReservedQuantity = 799, QuarantineQuantity = 749, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 }
+            );
+        }
+    }
+}

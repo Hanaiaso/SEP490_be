@@ -1,0 +1,99 @@
+namespace VietTien.API.Models
+{
+    public enum PaymentMethod { COD, SePay, Cash }
+    public enum PaymentStatus { Unpaid, Pending, Paid, PartiallyPaid, Failed }
+    public enum OrderStatus { Draft, PendingPayment, PendingConfirmation, Confirmed, Processing, Completed, CancelRequested, CancelledReallocated, Cancelled, PaidReviewRequired }
+    public enum FulfillmentStatus { Unallocated, Reserved, Allocated, Picking, PartiallyReady, Ready, Consolidating, Consolidated, HandedOver, Fulfilled }
+    public enum DeliveryStatus { NotScheduled, Scheduled, InDelivery, Delivered, Failed, PartiallyDelivered, Rescheduled, Cancelled }
+    public enum RedInvoiceStatus { None, Pending, Issued, SentToCustomer }
+    public class Order
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public Guid CustomerProfileId { get; set; }
+        public string OrderCode { get; set; } = string.Empty; // Mã độc nhất đối soát SePay
+
+        public decimal TotalAmount { get; set; }
+        public decimal DiscountAmount { get; set; }
+        public decimal VatAmount { get; set; }
+        public decimal CreditApplied { get; set; } = 0m;
+        public decimal FinalPayment { get; set; }
+
+        public PaymentMethod PaymentMethod { get; set; }
+        public PaymentStatus PaymentStatus { get; set; }
+        public OrderStatus OrderStatus { get; set; }
+        public FulfillmentStatus FulfillmentStatus { get; set; } = FulfillmentStatus.Unallocated;
+        public DeliveryStatus DeliveryStatus { get; set; } = DeliveryStatus.NotScheduled;
+
+        public Guid? ReplacementOrderId { get; set; }
+
+        // ─── MGR-05: Manual SePay confirmation fields ───
+        /// <summary>Sales Manager xác nhận thanh toán thủ công</summary>
+        public Guid? ManualConfirmedByUserId { get; set; }
+
+        /// <summary>Thời điểm Sales Manager xác nhận</summary>
+        public DateTime? ManualConfirmedAt { get; set; }
+
+        /// <summary>URL bằng chứng đối soát do Sales Manager upload</summary>
+        public string? ManualConfirmEvidenceUrl { get; set; }
+
+        public int? DeliveryVehicleId { get; set; } // Giới hạn từ xe 1 -> xe 5
+        public string? DeliveryShift { get; set; }   // Sáng, Trưa, Chiều
+        public DateTime? ScheduledDeliveryDate { get; set; }
+
+        public Guid? WarehouseStaffId { get; set; } // Nhân viên kho thực hiện đơn hàng
+
+        // Snapshot Sale phụ trách đơn tại thời điểm tạo (LUỒNG 7):
+        // đơn COMPLETED giữ nguyên Sale lịch sử khi khách đổi Sale; chỉ Manager mới chuyển giá trị này khi phê duyệt
+        public Guid? SalesStaffId { get; set; }
+        public bool IsExternalOrder { get; set; } = false; // Nhận diện đơn mua ngoài (External Orders)
+
+        // ─── LUỒNG 5: Giao hàng & Thu COD ───
+        /// <summary>Số lần giao thất bại (>= 3 → hệ thống khóa, escalate manager)</summary>
+        public int FailedDeliveryCount { get; set; } = 0;
+
+        /// <summary>Bị khóa tự động khi FailedDeliveryCount >= 3</summary>
+        public bool IsBlockedForDelivery { get; set; } = false;
+
+        /// <summary>Số tiền thực thu từ khách (COD)</summary>
+        public decimal AmountPaid { get; set; } = 0;
+
+        /// <summary>URL ảnh chữ ký số của khách hàng (Proof of Delivery)</summary>
+        public string? CustomerSignatureUrl { get; set; }
+
+        /// <summary>URL ảnh hiện trường giao hàng (Proof of Delivery)</summary>
+        public string? DeliveryPhotoUrl { get; set; }
+
+        /// <summary>Thời điểm giao hàng thực tế</summary>
+        public DateTime? DeliveredAt { get; set; }
+
+        /// <summary>Thời điểm bắt đầu chuẩn bị/đóng gói hàng</summary>
+        public DateTime? PickingStartedAt { get; set; }
+
+        /// <summary>Thời điểm hoàn thành chuẩn bị/đóng gói hàng</summary>
+        public DateTime? PickingCompletedAt { get; set; }
+
+        // ─── LUỒNG 5: Hủy đơn PAID (CR-06) ───
+        /// <summary>Lý do hủy đơn hàng</summary>
+        public string? CancelReason { get; set; }
+
+        /// <summary>Thời điểm yêu cầu hủy</summary>
+        public DateTime? CancelRequestedAt { get; set; }
+
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public string? InvoicePdfUrl { get; set; }
+
+        public bool RequiresRedInvoice { get; set; } = false;
+        public RedInvoiceStatus RedInvoiceStatus { get; set; } = RedInvoiceStatus.None;
+
+        // Navigation Properties
+        public CustomerProfile CustomerProfile { get; set; } = null!;
+        public ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();
+        public ICollection<PaymentTransaction> Transactions { get; set; } = new List<PaymentTransaction>();
+        public ICollection<CustomerDebt> Debts { get; set; } = new List<CustomerDebt>();
+        public ICollection<ReturnedGoodsLog> ReturnedGoodsLogs { get; set; } = new List<ReturnedGoodsLog>();
+        public Order? ReplacementOrder { get; set; }
+        public User? ManualConfirmedBy { get; set; }
+        public User? SalesStaff { get; set; }
+        public ICollection<PaymentException> PaymentExceptions { get; set; } = new List<PaymentException>();
+    }
+}

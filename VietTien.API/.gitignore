@@ -1,0 +1,61 @@
+## .NET / ASP.NET Core
+
+# Build outputs
+bin/
+obj/
+out/
+
+# Thư mục tạm (do tool build workaround)
+build_out/
+ef_publish/
+*.log
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Rider
+.idea/
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# dotnet publish output
+publish/
+
+# ASP.NET Scaffolding
+ScaffoldingReadMe.txt
+
+# Local secrets & config
+appsettings.Production.json
+appsettings.Staging.json
+*.pfx
+*.p12
+secrets.json
+
+# Entity Framework migrations snapshots không cần track temp
+# (giữ lại Migrations/ folder vì cần cho team)
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+
+# Rider / JetBrains
+*.DotSettings.user
+
+# Generated PDF Invoices
+wwwroot/invoices/
