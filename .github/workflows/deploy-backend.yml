@@ -7,7 +7,7 @@ on:
 
 env:
   # TODO: đổi thành tên App Service thật (Azure Portal → App Service → Overview → Name)
-  AZURE_WEBAPP_NAME: your-app-service-name
+  AZURE_WEBAPP_NAME: VietTien
   DOTNET_VERSION: "8.0.x"
   PROJECT_PATH: VietTien.API/VietTien.API.csproj
 
