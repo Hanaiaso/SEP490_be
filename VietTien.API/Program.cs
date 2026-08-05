@@ -192,12 +192,20 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
+        // Production frontend domain(s) đọc từ config "AllowedOrigins" (comma-separated,
+        // set qua Azure App Service Application settings), cộng thêm origin dev cố định.
+        var productionOrigins = (builder.Configuration["AllowedOrigins"] ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var origins = productionOrigins.Concat(new[]
+        {
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "https://localhost:5173"
+        }).Distinct().ToArray();
+
         policy
-            .WithOrigins(
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "https://localhost:5173"
-            )
+            .WithOrigins(origins)
             .AllowAnyHeader()
             .AllowAnyMethod()
             .AllowCredentials();
@@ -253,6 +261,19 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddHostedService<ScheduledJobRunnerBackgroundService>();
 
 var app = builder.Build();
+
+// Tự động áp dụng migration còn thiếu mỗi khi app khởi động (single-instance deploy,
+// không có bước "dotnet ef database update" riêng trong pipeline CI/CD).
+// Guard IsRelational(): VietTien.IntegrationTests thay ApplicationDbContext bằng EF InMemory
+// (CustomWebApplicationFactory) — provider đó không hỗ trợ Migrate() và sẽ throw nếu gọi thẳng.
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    if (db.Database.IsRelational())
+    {
+        db.Database.Migrate();
+    }
+}
 
 // Lưới an toàn cuối cùng cho exception chưa được controller tự bắt -> phải đứng trước mọi
 // middleware khác trong pipeline để bọc được toàn bộ downstream (static files, CORS, auth, controllers).
