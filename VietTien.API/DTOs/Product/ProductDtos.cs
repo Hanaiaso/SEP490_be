@@ -1,4 +1,6 @@
+using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
+using VietTien.API.Infrastructure.Validation;
 
 namespace VietTien.API.DTOs.Product
 {
@@ -57,13 +59,29 @@ namespace VietTien.API.DTOs.Product
 
     public class CreateProductDto
     {
+        [Required(ErrorMessage = "Tên sản phẩm là bắt buộc.")]
+        [MaxLength(300, ErrorMessage = "Tên sản phẩm không được vượt quá 300 ký tự.")]
         public string Name { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "SKU là bắt buộc.")]
+        [MaxLength(50, ErrorMessage = "SKU không được vượt quá 50 ký tự.")]
         public string Sku { get; set; } = string.Empty;
+
+        [Range(0.01, double.MaxValue, ErrorMessage = "Giá niêm yết phải lớn hơn 0")]
         public decimal StandardListedPrice { get; set; }
+
+        [Required(ErrorMessage = "Danh mục là bắt buộc.")]
         public Guid CategoryId { get; set; }
+
+        [Required(ErrorMessage = "Đơn vị tính là bắt buộc.")]
+        [MaxLength(50, ErrorMessage = "Đơn vị tính không được vượt quá 50 ký tự.")]
         public string Unit { get; set; } = "Cái";
+
         public string? Description { get; set; }
+
         public string? Specifications { get; set; }
+
+        [ImageFile(5)]
         public IFormFile? ImageFile { get; set; }
     }
 }

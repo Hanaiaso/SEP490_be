@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using VietTien.API.Models;
 
 namespace VietTien.API.DTOs.SalesChange
@@ -7,8 +8,14 @@ namespace VietTien.API.DTOs.SalesChange
     /// <summary>Form tạo yêu cầu đổi Sale (multipart — kèm file bằng chứng)</summary>
     public class CreateSalesChangeRequestDto
     {
+        [Required(ErrorMessage = "Lý do là bắt buộc.")]
+        [MaxLength(2000, ErrorMessage = "Lý do không được vượt quá 2000 ký tự.")]
         public string Reason { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Mô tả vấn đề là bắt buộc.")]
+        [MaxLength(2000, ErrorMessage = "Mô tả vấn đề không được vượt quá 2000 ký tự.")]
         public string ProblemDescription { get; set; } = string.Empty;
+
         public Guid? DesiredSalesStaffId { get; set; }
         public List<IFormFile>? Files { get; set; }
     }

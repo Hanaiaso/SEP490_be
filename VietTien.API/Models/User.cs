@@ -9,6 +9,7 @@ namespace VietTien.API.Models
         public string? AvatarUrl { get; set; }
         public string PasswordHash { get; set; } = string.Empty;
         public SystemRole Role { get; set; } = SystemRole.Customer;
+        public bool IsActive { get; set; } = true; // Admin khóa/mở tài khoản (không xóa cứng)
         public string? ReferralCode { get; set; } // Dành cho Sale Staff
 
         // Khách hàng nhập mã giới thiệu khi đăng ký → Sale giới thiệu (WF-01, nguồn REFERRAL)
@@ -22,11 +23,21 @@ namespace VietTien.API.Models
         public bool IsEmailVerified { get; set; } = false;
         public string? OtpCode { get; set; }
         public DateTime? OtpExpiry { get; set; }
+        public int EmailOtpSendCount { get; set; } = 0;
+        public DateTime? EmailOtpWindowStart { get; set; }
+        public int EmailOtpSendCountDaily { get; set; } = 0;
+        public DateTime? EmailOtpDayWindowStart { get; set; }
 
         // Phone Verification (SMS)
         public bool IsPhoneVerified { get; set; } = false;
         public string? PhoneOtpCode { get; set; }
         public DateTime? PhoneOtpExpiry { get; set; }
+        public int PhoneOtpSendCount { get; set; } = 0;
+        public DateTime? PhoneOtpWindowStart { get; set; }
+        public int PhoneOtpFailedAttempts { get; set; } = 0;
+
+        // Warehouse scoping (WarehouseStaff chỉ được thao tác trên kho được gán)
+        public Guid? AssignedWarehouseId { get; set; }
 
         // Password Reset
         public string? PasswordResetToken { get; set; }

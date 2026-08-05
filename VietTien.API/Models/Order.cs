@@ -1,8 +1,8 @@
 namespace VietTien.API.Models
 {
     public enum PaymentMethod { COD, SePay, Cash }
-    public enum PaymentStatus { Unpaid, Pending, Paid, PartiallyPaid, Failed }
-    public enum OrderStatus { Draft, PendingPayment, PendingConfirmation, Confirmed, Processing, Completed, CancelRequested, CancelledReallocated, Cancelled, PaidReviewRequired }
+    public enum PaymentStatus { Unpaid, Pending, Paid, PartiallyPaid, Failed, Refunded }
+    public enum OrderStatus { Draft, PendingPayment, PendingConfirmation, Confirmed, Processing, Completed, CancelRequested, CancelledReallocated, Cancelled, PaidReviewRequired, Returned }
     public enum FulfillmentStatus { Unallocated, Reserved, Allocated, Picking, PartiallyReady, Ready, Consolidating, Consolidated, HandedOver, Fulfilled }
     public enum DeliveryStatus { NotScheduled, Scheduled, InDelivery, Delivered, Failed, PartiallyDelivered, Rescheduled, Cancelled }
     public enum RedInvoiceStatus { None, Pending, Issued, SentToCustomer }
@@ -25,6 +25,9 @@ namespace VietTien.API.Models
         public DeliveryStatus DeliveryStatus { get; set; } = DeliveryStatus.NotScheduled;
 
         public Guid? ReplacementOrderId { get; set; }
+
+        /// <summary>Thời điểm OrderStatus chuyển sang Confirmed (dùng tính KPI ProcessingSpeed). Null nếu đơn tạo trước khi field này tồn tại hoặc chưa từng Confirmed.</summary>
+        public DateTime? ConfirmedAt { get; set; }
 
         // ─── MGR-05: Manual SePay confirmation fields ───
         /// <summary>Sales Manager xác nhận thanh toán thủ công</summary>
@@ -63,6 +66,9 @@ namespace VietTien.API.Models
         /// <summary>URL ảnh hiện trường giao hàng (Proof of Delivery)</summary>
         public string? DeliveryPhotoUrl { get; set; }
 
+        /// <summary>Mã lý do khi khách từ chối nhận hàng (bắt buộc khi RecordDeliveryResultDto.CustomerRejected = true)</summary>
+        public string? DeliveryRejectionReasonCode { get; set; }
+
         /// <summary>Thời điểm giao hàng thực tế</summary>
         public DateTime? DeliveredAt { get; set; }
 
@@ -95,5 +101,6 @@ namespace VietTien.API.Models
         public User? ManualConfirmedBy { get; set; }
         public User? SalesStaff { get; set; }
         public ICollection<PaymentException> PaymentExceptions { get; set; } = new List<PaymentException>();
+        public ICollection<ReturnExchangeRequest> ReturnExchangeRequests { get; set; } = new List<ReturnExchangeRequest>();
     }
 }

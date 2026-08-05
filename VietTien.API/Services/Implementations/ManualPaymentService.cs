@@ -13,10 +13,12 @@ namespace VietTien.API.Services.Implementations
     public class ManualPaymentService : IManualPaymentService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IInventoryReservationService _inventoryReservationService;
 
-        public ManualPaymentService(ApplicationDbContext context)
+        public ManualPaymentService(ApplicationDbContext context, IInventoryReservationService inventoryReservationService)
         {
             _context = context;
+            _inventoryReservationService = inventoryReservationService;
         }
 
         // ──────────────────────────────────────────────────────────
@@ -120,6 +122,7 @@ namespace VietTien.API.Services.Implementations
             if (allocationResult.Success)
             {
                 order.OrderStatus = OrderStatus.Confirmed;
+                order.ConfirmedAt = DateTime.UtcNow;
                 await CreatePickTaskAsync(order, ct);
             }
             else
@@ -171,6 +174,7 @@ namespace VietTien.API.Services.Implementations
             if (allocationResult.Success)
             {
                 order.OrderStatus = OrderStatus.Confirmed;
+                order.ConfirmedAt = DateTime.UtcNow;
                 await CreatePickTaskAsync(order, ct);
 
                 // Đánh dấu PaymentException là RESOLVED
@@ -279,41 +283,24 @@ namespace VietTien.API.Services.Implementations
         /// <summary>
         /// Thử phân bổ tồn kho cho toàn bộ OrderItem.
         /// Nếu bất kỳ SKU nào không đủ tồn → toàn bộ fail (không làm âm tồn).
+        /// Dùng chung IInventoryReservationService (atomic guarded UPDATE) để tránh race
+        /// khi có 2 xác nhận thanh toán thủ công xử lý đồng thời cùng 1 SKU ít tồn.
+        /// Đơn SePay luôn đã giữ mềm (ReservedQuantity) từ lúc checkout — phải trả lại phần đó
+        /// trước khi Allocate, nếu không sẽ đếm trùng (vừa Reserved vừa Allocated cho cùng 1 đơn).
         /// </summary>
         private async Task<AllocationResult> TryAllocateInventoryAsync(Order order, CancellationToken ct)
         {
-            // Load tất cả inventory cho các product trong đơn
-            var productIds = order.OrderItems.Select(oi => oi.ProductId).Distinct().ToList();
-            var inventories = await _context.Inventories
-                .Where(inv => inv.ProductId != null && productIds.Contains(inv.ProductId.Value))
-                .ToListAsync(ct);
-
-            // Kiểm tra trước — không sửa gì cả nếu có SKU thiếu tồn
-            foreach (var item in order.OrderItems)
+            var items = order.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)).ToList();
+            try
             {
-                var inv = inventories.FirstOrDefault(i => i.ProductId == item.ProductId);
-                if (inv is null)
-                    return new AllocationResult(false, "INSUFFICIENT_AVAILABLE_STOCK",
-                        $"Không tìm thấy tồn kho cho sản phẩm {item.Product?.Name ?? item.ProductId.ToString()}.");
-
-                // AvailableQuantity là computed property, tính thủ công
-                var available = Math.Max(0,
-                    inv.OnHandQuantity - inv.ReservedQuantity - inv.AllocatedQuantity
-                    - inv.DamagedQuantity - inv.QuarantineQuantity);
-
-                if (available < item.Quantity)
-                    return new AllocationResult(false, "INSUFFICIENT_AVAILABLE_STOCK",
-                        $"Sản phẩm '{item.Product?.Name}' chỉ còn {available} đơn vị khả dụng, cần {item.Quantity}.");
+                await _inventoryReservationService.ReleaseReservedAsync(items, ct);
+                await _inventoryReservationService.AllocateAsync(items, ct);
+                return new AllocationResult(true);
             }
-
-            // Đủ tồn — thực hiện allocation
-            foreach (var item in order.OrderItems)
+            catch (Exception ex)
             {
-                var inv = inventories.First(i => i.ProductId == item.ProductId);
-                inv.AllocatedQuantity += item.Quantity;
+                return new AllocationResult(false, "INSUFFICIENT_AVAILABLE_STOCK", ex.Message);
             }
-
-            return new AllocationResult(true);
         }
 
         /// <summary>Tạo PickTask cho đơn hàng sau khi allocation thành công</summary>

@@ -46,6 +46,13 @@ namespace VietTien.API.Models
         SYS_22_AiMarketingPendingApproval,
         SYS_23_PaidOrderCancelledUnresolved,
         SYS_24_CustomerRequestedCancel,
-        SYS_25_CancelRequestResult
+        SYS_25_CancelRequestResult,
+        SYS_26_WebhookRetryExhausted,
+        SYS_27_QuotationNegotiationLimitReached,
+        SYS_28_QuotationExpired,
+        SYS_29_UpcomingDeliveryReminder,
+        SYS_30_AccountStatusChanged,
+        SYS_31_RoleChanged,
+        SYS_32_PaymentAnomaly
     }
 }

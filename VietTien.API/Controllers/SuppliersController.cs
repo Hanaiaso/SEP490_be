@@ -32,6 +32,10 @@ namespace VietTien.API.Controllers
                 var result = await _supplierService.GetByIdAsync(id);
                 return Ok(result);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -46,6 +50,10 @@ namespace VietTien.API.Controllers
                 var result = await _supplierService.CreateAsync(request);
                 return Ok(result);
             }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -59,6 +67,14 @@ namespace VietTien.API.Controllers
             {
                 var result = await _supplierService.UpdateAsync(id, request);
                 return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
             }
             catch (Exception ex)
             {

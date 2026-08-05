@@ -99,6 +99,9 @@ namespace VietTien.API.DTOs.Order
         public int FailedDeliveryCount { get; set; }
         public decimal AmountPaid      { get; set; }
 
+        // Đổi trả
+        public List<ReturnExchangeRequestSnapshotDto> ReturnExchangeRequests { get; set; } = new();
+
         // Hóa đơn PDF – URL Cloudinary (BR-OH-12, BR-OH-13)
         public string? InvoicePdfUrl  { get; set; }
 

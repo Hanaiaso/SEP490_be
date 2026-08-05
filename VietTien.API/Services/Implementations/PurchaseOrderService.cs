@@ -10,11 +10,13 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly INotificationService _notificationService;
+        private readonly ILogger<PurchaseOrderService> _logger;
 
-        public PurchaseOrderService(ApplicationDbContext context, INotificationService notificationService)
+        public PurchaseOrderService(ApplicationDbContext context, INotificationService notificationService, ILogger<PurchaseOrderService> logger)
         {
             _context = context;
             _notificationService = notificationService;
+            _logger = logger;
         }
 
         public async Task<PurchaseOrderDto> CreateAsync(Guid ceoId, CreatePurchaseOrderRequest request)
@@ -139,10 +141,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<PurchaseOrderDto> UpdateDraftAsync(Guid id, Guid ceoId, CreatePurchaseOrderRequest request)
         {
             var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == id);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
             
             if (po.Status != PurchaseOrderStatus.Draft)
-                throw new Exception("Can only update Draft Purchase Orders");
+                throw new InvalidOperationException("Can only update Draft Purchase Orders");
 
             po.SupplierId = request.SupplierId;
             po.WarehouseId = request.WarehouseId;
@@ -170,10 +172,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<PurchaseOrderDto> IssueAsync(Guid id, Guid ceoId)
         {
             var po = await _context.PurchaseOrders.FindAsync(id);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status != PurchaseOrderStatus.Draft)
-                throw new Exception("Can only issue Draft Purchase Orders");
+                throw new InvalidOperationException("Can only issue Draft Purchase Orders");
 
             po.Status = PurchaseOrderStatus.Issued;
             po.IssuedAt = DateTime.UtcNow;
@@ -185,23 +187,32 @@ namespace VietTien.API.Services.Implementations
         public async Task<PurchaseOrderDto> SendToWarehouseAsync(Guid id, Guid ceoId)
         {
             var po = await _context.PurchaseOrders.FindAsync(id);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status != PurchaseOrderStatus.Issued)
-                throw new Exception("Can only send Issued Purchase Orders to warehouse");
+                throw new InvalidOperationException("Can only send Issued Purchase Orders to warehouse");
 
             po.Status = PurchaseOrderStatus.SentToWarehouse;
 
             await _context.SaveChangesAsync();
 
-            await _notificationService.CreateRoleNotificationAsync(
-                NotificationType.SYS_18_POSentToWarehouse,
-                SystemRole.WarehouseStaff,
-                "PO mới được gửi tới kho",
-                $"Purchase Order {po.Code} vừa được gửi tới kho để chuẩn bị nhập hàng.",
-                po.Id,
-                "PurchaseOrder"
-            );
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_18_POSentToWarehouse,
+                    SystemRole.WarehouseStaff,
+                    "PO mới được gửi tới kho",
+                    $"Purchase Order {po.Code} vừa được gửi tới kho để chuẩn bị nhập hàng.",
+                    po.Id,
+                    "PurchaseOrder"
+                );
+            }
+            catch (Exception ex)
+            {
+                // PO đã chuyển trạng thái SentToWarehouse thành công (đã commit) -> lỗi gửi thông báo
+                // không được làm request báo lỗi cho client, chỉ log để theo dõi.
+                _logger.LogError(ex, "Lỗi gửi thông báo PO {PoId} tới kho", po.Id);
+            }
 
             return await GetByIdAsync(po.Id);
         }
@@ -245,7 +256,7 @@ namespace VietTien.API.Services.Implementations
                 .Include(po => po.Items).ThenInclude(i => i.Material)
                 .FirstOrDefaultAsync(po => po.Id == id);
 
-            if (p == null) throw new Exception("Purchase Order not found");
+            if (p == null) throw new KeyNotFoundException("Purchase Order not found");
 
             return new PurchaseOrderDto
             {
@@ -284,11 +295,11 @@ namespace VietTien.API.Services.Implementations
         public async Task<PurchaseOrderDto> CancelAsync(Guid id, Guid ceoId)
         {
             var po = await _context.PurchaseOrders.FindAsync(id);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status == PurchaseOrderStatus.PartiallyReceived || po.Status == PurchaseOrderStatus.FullyReceived || po.Status == PurchaseOrderStatus.Closed)
             {
-                throw new Exception("Cannot cancel PO that has been partially or fully received.");
+                throw new InvalidOperationException("Cannot cancel PO that has been partially or fully received.");
             }
 
             po.Status = PurchaseOrderStatus.Cancelled;
@@ -299,10 +310,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<PurchaseOrderDto> ResolveDiscrepancyAsync(Guid id, Guid ceoId, DiscrepancyResolutionRequest request)
         {
             var po = await _context.PurchaseOrders.FindAsync(id);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status != PurchaseOrderStatus.DiscrepancyReview)
-                throw new Exception("PO is not in DiscrepancyReview status");
+                throw new InvalidOperationException("PO is not in DiscrepancyReview status");
 
             // Logic to resolve: Add note and close it or keep it open.
             // Simplified: Add note to PO and close it.
@@ -316,7 +327,11 @@ namespace VietTien.API.Services.Implementations
         public async Task<PurchaseOrderDto> ClosePurchaseOrderAsync(Guid id, Guid ceoId)
         {
             var po = await _context.PurchaseOrders.FindAsync(id);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
+
+            if (po.Status != PurchaseOrderStatus.FullyReceived)
+                throw new InvalidOperationException("Chỉ có thể đóng PO đã nhận đủ hàng (FullyReceived) và không còn sai lệch cần xử lý. " +
+                    "PO đang ở trạng thái DiscrepancyReview phải qua ResolveDiscrepancy trước.");
 
             po.Status = PurchaseOrderStatus.Closed;
             await _context.SaveChangesAsync();

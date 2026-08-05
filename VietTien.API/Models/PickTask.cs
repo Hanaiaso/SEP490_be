@@ -12,7 +12,12 @@ namespace VietTien.API.Models
         public Guid? AssignedUserId { get; set; }
 
         public PickTaskStatus Status { get; set; } = PickTaskStatus.Pending;
-        
+
+        // Concurrency token: chống 2 nhân viên kho cùng "Nhận lệnh xuất kho" trong cùng khoảng ngắn
+        // ghi đè AssignedUserId của nhau -> throw DbUpdateConcurrencyException, middleware map sẵn thành 409.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? CompletedAt { get; set; }
         

@@ -30,7 +30,7 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationDto> CreateQuotationFromCartAsync(Guid userId, CreateQuotationRequest request)
         {
             var profile = await _userRepo.GetCustomerProfileByUserIdAsync(userId);
-            if (profile == null) throw new Exception("Customer profile not found");
+            if (profile == null) throw new KeyNotFoundException("Customer profile not found");
 
             var cart = await _cartRepo.GetCartByCustomerIdAsync(profile.Id);
             if (cart == null || !cart.Items.Any()) throw new Exception("Cart is empty");
@@ -64,14 +64,23 @@ namespace VietTien.API.Services.Implementations
 
             if (profile.AssignedSalesStaffId != null)
             {
-                await _notificationService.CreateNotificationAsync(
-                    NotificationType.SYS_16_NewQuotationRequest,
-                    profile.AssignedSalesStaffId.Value,
-                    "Yêu cầu báo giá mới",
-                    $"Khách hàng {profile.User.FullName} vừa tạo yêu cầu báo giá trị giá {originalTotal:N0}đ.",
-                    quotation.Id,
-                    "Quotation"
-                );
+                // Báo giá đã được lưu thành công ở trên -> lỗi gửi notification không được
+                // làm fail request tạo báo giá, chỉ log để theo dõi.
+                try
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_16_NewQuotationRequest,
+                        profile.AssignedSalesStaffId.Value,
+                        "Yêu cầu báo giá mới",
+                        $"Khách hàng {profile.User.FullName} vừa tạo yêu cầu báo giá trị giá {originalTotal:N0}đ.",
+                        quotation.Id,
+                        "Quotation"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[QuotationService] Error sending new quotation request notification: {ex.Message}");
+                }
             }
 
             return await GetQuotationByIdAsync(quotation.Id, userId, "Customer");
@@ -80,12 +89,12 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationDto> GetQuotationByIdAsync(Guid quotationId, Guid userId, string userRole)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null) throw new Exception("Quotation not found");
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
 
             if (userRole == "Customer" && q.CustomerProfile.UserId != userId)
-                throw new Exception("Unauthorized to view this quotation");
+                throw new UnauthorizedAccessException("Unauthorized to view this quotation");
             if (userRole == "SalesStaff" && q.SalesStaffId != null && q.SalesStaffId != userId)
-                throw new Exception("Assigned to another sales staff");
+                throw new InvalidOperationException("Assigned to another sales staff");
 
             return MapToDto(q);
         }
@@ -132,9 +141,9 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationDto> PickUpQuotationAsync(Guid quotationId, Guid salesStaffId)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null) throw new Exception("Quotation not found");
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
 
-            if (q.SalesStaffId != null) throw new Exception("Already picked up by another sales staff");
+            if (q.SalesStaffId != null) throw new InvalidOperationException("Already picked up by another sales staff");
 
             q.SalesStaffId = salesStaffId;
             q.Status = QuotationStatus.Negotiating;
@@ -148,10 +157,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationVersionDto> CreateVersionAsync(Guid quotationId, Guid salesStaffId, CreateQuotationVersionRequest request)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null) throw new Exception("Quotation not found");
-            if (q.SalesStaffId != salesStaffId) throw new Exception("Unauthorized");
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
+            if (q.SalesStaffId != salesStaffId) throw new UnauthorizedAccessException("Unauthorized");
             if (q.Status == QuotationStatus.CustomerAccepted || q.Status == QuotationStatus.Expired || q.Status == QuotationStatus.Cancelled)
-                throw new Exception("Cannot create version for this quotation state");
+                throw new InvalidOperationException("Cannot create version for this quotation state");
 
             int newVersionNum = q.Versions.Any() ? q.Versions.Max(v => v.VersionNumber) + 1 : 1;
 
@@ -187,14 +196,23 @@ namespace VietTien.API.Services.Implementations
 
             await _unitOfWork.SaveChangesAsync();
 
-            await _notificationService.CreateRoleNotificationAsync(
-                NotificationType.SYS_17_QuotationPendingApproval,
-                SystemRole.SalesManager,
-                "Báo giá cần duyệt",
-                $"Sale vừa gửi báo giá chờ duyệt (tổng đề xuất: {request.ProposedTotal:N0}đ).",
-                quotationId,
-                "Quotation"
-            );
+            // Phiên bản báo giá đã được lưu thành công ở trên -> lỗi gửi notification không được
+            // làm fail request gửi báo giá, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_17_QuotationPendingApproval,
+                    SystemRole.SalesManager,
+                    "Báo giá cần duyệt",
+                    $"Sale vừa gửi báo giá chờ duyệt (tổng đề xuất: {request.ProposedTotal:N0}đ).",
+                    quotationId,
+                    "Quotation"
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[QuotationService] Error sending quotation pending approval notification: {ex.Message}");
+            }
 
             return MapToVersionDto(version);
         }
@@ -202,13 +220,13 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationVersionDto> ManagerReviewVersionAsync(Guid quotationId, Guid managerId, ManagerReviewRequest request)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null) throw new Exception("Quotation not found");
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
 
             var version = q.Versions.FirstOrDefault(v => v.Status == QuotationVersionStatus.PendingManager);
-            if (version == null) throw new Exception("No version pending manager review");
+            if (version == null) throw new InvalidOperationException("No version pending manager review");
 
             if (version.Status != QuotationVersionStatus.PendingManager)
-                throw new Exception("Version is not pending manager review");
+                throw new InvalidOperationException("Version is not pending manager review");
 
             version.ManagerNote = request.ManagerNote;
             version.ManagerApprovedByUserId = managerId;
@@ -235,13 +253,13 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationVersionDto> CeoReviewVersionAsync(Guid quotationId, Guid ceoId, CeoReviewRequest request)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null) throw new Exception("Quotation not found");
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
 
             var version = q.Versions.FirstOrDefault(v => v.Status == QuotationVersionStatus.PendingCeo);
-            if (version == null) throw new Exception("No version pending CEO review");
+            if (version == null) throw new InvalidOperationException("No version pending CEO review");
 
             if (version.Status != QuotationVersionStatus.PendingCeo)
-                throw new Exception("Version is not pending CEO review");
+                throw new InvalidOperationException("Version is not pending CEO review");
 
             version.CeoNote = request.CeoNote;
             version.CeoApprovedByUserId = ceoId;
@@ -267,16 +285,18 @@ namespace VietTien.API.Services.Implementations
             return MapToVersionDto(version);
         }
 
+        private const int MaxNegotiationRounds = 5;
+
         public async Task<QuotationVersionDto> CustomerDecisionAsync(Guid quotationId, Guid customerId, CustomerDecisionRequest request)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null || q.CustomerProfile.UserId != customerId) throw new Exception("Unauthorized or Quotation not found");
+            if (q == null || q.CustomerProfile.UserId != customerId) throw new UnauthorizedAccessException("Unauthorized or Quotation not found");
 
             var version = q.Versions.FirstOrDefault(v => v.Status == QuotationVersionStatus.CeoApproved);
-            if (version == null) throw new Exception("No approved version for customer decision");
+            if (version == null) throw new InvalidOperationException("No approved version for customer decision");
 
             if (version.Status != QuotationVersionStatus.CeoApproved)
-                throw new Exception("Version is not approved by CEO");
+                throw new InvalidOperationException("Version is not approved by CEO");
 
             if (version.ValidUntil.HasValue && version.ValidUntil.Value < DateTime.UtcNow)
             {
@@ -285,7 +305,7 @@ namespace VietTien.API.Services.Implementations
                 await _quotationRepo.UpdateVersionAsync(version);
                 await _quotationRepo.UpdateAsync(q);
                 await _unitOfWork.SaveChangesAsync();
-                throw new Exception("Quotation version has expired");
+                throw new InvalidOperationException("Quotation version has expired");
             }
 
             if (request.IsAccepted)
@@ -297,12 +317,43 @@ namespace VietTien.API.Services.Implementations
             else
             {
                 version.Status = QuotationVersionStatus.CustomerRejected;
-                q.Status = QuotationStatus.Negotiating;
+
+                // Giới hạn tối đa 5 vòng đàm phán (BV-03): từ chối ở vòng thứ 5 trở đi -> đóng báo giá,
+                // không cho tạo thêm vòng mới (CreateVersionAsync đã chặn version mới khi Status=Cancelled).
+                if (version.VersionNumber >= MaxNegotiationRounds)
+                {
+                    q.Status = QuotationStatus.Cancelled;
+                }
+                else
+                {
+                    q.Status = QuotationStatus.Negotiating;
+                }
             }
 
             await _quotationRepo.UpdateVersionAsync(version);
             await _quotationRepo.UpdateAsync(q);
             await _unitOfWork.SaveChangesAsync();
+
+            if (q.Status == QuotationStatus.Cancelled)
+            {
+                // Báo giá đã bị đóng và lưu thành công ở trên -> lỗi gửi notification không được
+                // làm fail request, chỉ log để theo dõi.
+                try
+                {
+                    await _notificationService.CreateRoleNotificationAsync(
+                        NotificationType.SYS_27_QuotationNegotiationLimitReached,
+                        SystemRole.SalesManager,
+                        "Báo giá đạt giới hạn đàm phán",
+                        $"Báo giá đã bị khách từ chối ở vòng {version.VersionNumber}, vượt giới hạn {MaxNegotiationRounds} vòng đàm phán và đã tự động đóng.",
+                        quotationId,
+                        "Quotation"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[QuotationService] Error sending negotiation limit reached notification: {ex.Message}");
+                }
+            }
 
             return MapToVersionDto(version);
         }
@@ -310,10 +361,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<QuotationDto> CancelQuotationAsync(Guid quotationId, Guid customerId)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null || q.CustomerProfile.UserId != customerId) throw new Exception("Unauthorized or Quotation not found");
+            if (q == null || q.CustomerProfile.UserId != customerId) throw new UnauthorizedAccessException("Unauthorized or Quotation not found");
 
             if (q.Status == QuotationStatus.CustomerAccepted)
-                throw new Exception("Cannot cancel an accepted quotation");
+                throw new InvalidOperationException("Cannot cancel an accepted quotation");
 
             q.Status = QuotationStatus.Cancelled;
             await _quotationRepo.UpdateAsync(q);
@@ -325,7 +376,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<ChatMessageDto> SendMessageAsync(Guid quotationId, Guid senderId, SendChatMessageRequest request)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
-            if (q == null) throw new Exception("Quotation not found");
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
+
+            if (q.CustomerProfile.UserId != senderId && q.SalesStaffId != senderId)
+                throw new UnauthorizedAccessException("Bạn không phải là người tham gia báo giá này, không thể gửi tin nhắn.");
 
             var msg = new ChatMessage
             {
@@ -358,6 +412,14 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<IEnumerable<ChatMessageDto>> GetMessagesAsync(Guid quotationId, Guid userId, string userRole)
         {
+            var q = await _quotationRepo.GetByIdAsync(quotationId);
+            if (q == null) throw new KeyNotFoundException("Quotation not found");
+
+            var isParticipant = q.CustomerProfile.UserId == userId || q.SalesStaffId == userId;
+            var isPrivileged = userRole is "SalesManager" or "CEO" or "Admin";
+            if (!isParticipant && !isPrivileged)
+                throw new UnauthorizedAccessException("Bạn không có quyền xem hội thoại của báo giá này.");
+
             var msgs = await _quotationRepo.GetMessagesByQuotationIdAsync(quotationId);
             return msgs.Select(m => new ChatMessageDto
             {

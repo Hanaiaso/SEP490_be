@@ -30,7 +30,10 @@ namespace VietTien.API.DTOs.UserProfile
         public string? WardCode { get; set; }
 
         // Toạ độ từ nút "Lấy vị trí hiện tại" — tuỳ chọn
+        [Range(-90, 90, ErrorMessage = "Vĩ độ (Latitude) phải trong khoảng -90 đến 90")]
         public double? Latitude { get; set; }
+
+        [Range(-180, 180, ErrorMessage = "Kinh độ (Longitude) phải trong khoảng -180 đến 180")]
         public double? Longitude { get; set; }
 
         [Required(ErrorMessage = "Loại địa chỉ không được để trống")]

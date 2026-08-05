@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace VietTien.API.DTOs.Payment
 {
     /// <summary>
@@ -7,18 +9,25 @@ namespace VietTien.API.DTOs.Payment
     public sealed record ManualConfirmPaymentRequest
     {
         /// <summary>Mã giao dịch từ ngân hàng hoặc SePay (bắt buộc, phải unique)</summary>
+        [Required(ErrorMessage = "Mã giao dịch là bắt buộc.")]
+        [MaxLength(200)]
         public string ExternalTransactionId { get; init; } = string.Empty;
 
         /// <summary>Số tiền công ty thực nhận (phải khớp với FinalPayment của đơn hàng)</summary>
+        [Range(0.01, double.MaxValue, ErrorMessage = "Số tiền thực nhận phải lớn hơn 0")]
         public decimal ActualAmount { get; init; }
 
         /// <summary>URL bằng chứng đối soát đã upload (bắt buộc)</summary>
+        [Required(ErrorMessage = "URL bằng chứng đối soát là bắt buộc.")]
+        [MaxLength(1000)]
         public string EvidenceUrl { get; init; } = string.Empty;
 
         /// <summary>Nội dung chuyển khoản thực tế (để audit)</summary>
+        [MaxLength(500)]
         public string? TransferContent { get; init; }
 
         /// <summary>Ghi chú đối soát của Sales Manager</summary>
+        [MaxLength(1000)]
         public string? Note { get; init; }
     }
 

@@ -13,12 +13,14 @@ namespace VietTien.API.Services.Implementations
         private readonly ApplicationDbContext _context;
         private readonly IHubContext<SalesHub> _salesHub;
         private readonly INotificationService _notificationService;
+        private readonly ILogger<WarehouseService> _logger;
 
-        public WarehouseService(ApplicationDbContext context, IHubContext<SalesHub> salesHub, INotificationService notificationService)
+        public WarehouseService(ApplicationDbContext context, IHubContext<SalesHub> salesHub, INotificationService notificationService, ILogger<WarehouseService> logger)
         {
             _context = context;
             _salesHub = salesHub;
             _notificationService = notificationService;
+            _logger = logger;
         }
 
         public async Task<List<WarehouseOrderListDto>> GetOrdersForWarehouseAsync(string tabType, int pageNumber, int pageSize)
@@ -131,7 +133,7 @@ namespace VietTien.API.Services.Implementations
                 .ThenInclude(i => i.Product)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
-            if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             var pickTasks = await _context.PickTasks
                 .Include(pt => pt.Warehouse)
@@ -228,7 +230,7 @@ namespace VietTien.API.Services.Implementations
                 .Include(o => o.OrderItems)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
                 
-            if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             if (order.FulfillmentStatus != FulfillmentStatus.Allocated && order.FulfillmentStatus != FulfillmentStatus.Unallocated && order.FulfillmentStatus != FulfillmentStatus.Picking)
                 throw new Exception("Đơn hàng chưa được phân bổ hoặc không ở trạng thái hợp lệ, không thể xử lý.");
@@ -242,7 +244,7 @@ namespace VietTien.API.Services.Implementations
             if (!existingTasks)
             {
                 var defaultWarehouse = await _context.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH-DEFAULT");
-                if (defaultWarehouse == null) throw new Exception("Không tìm thấy kho mặc định (WH-DEFAULT).");
+                if (defaultWarehouse == null) throw new KeyNotFoundException("Không tìm thấy kho mặc định (WH-DEFAULT).");
 
                 var warehouseTasks = new Dictionary<Guid, PickTask>();
 
@@ -398,7 +400,7 @@ namespace VietTien.API.Services.Implementations
                 .ThenInclude(pti => pti.Product)
                 .FirstOrDefaultAsync(p => p.Id == pickTaskId);
 
-            if (pt == null) throw new Exception("Không tìm thấy lệnh xuất kho.");
+            if (pt == null) throw new KeyNotFoundException("Không tìm thấy lệnh xuất kho.");
 
             return new PickTaskDto
             {
@@ -426,7 +428,7 @@ namespace VietTien.API.Services.Implementations
                 .Include(pt => pt.Order)
                 .FirstOrDefaultAsync(p => p.Id == pickTaskId);
             
-            if (task == null) throw new Exception("Không tìm thấy lệnh xuất kho.");
+            if (task == null) throw new KeyNotFoundException("Không tìm thấy lệnh xuất kho.");
 
             if (task.Status != PickTaskStatus.Pending)
                 throw new Exception("Lệnh xuất kho không ở trạng thái chờ tiếp nhận.");
@@ -454,10 +456,10 @@ namespace VietTien.API.Services.Implementations
         public async Task ReportShortageAsync(Guid orderId, Guid staffId, ShortageAlertRequestDto alert)
         {
             var order = await _context.Orders.Include(o => o.OrderItems).ThenInclude(i => i.Product).FirstOrDefaultAsync(o => o.Id == orderId);
-            if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             if (order.WarehouseStaffId != staffId)
-                throw new Exception("Bạn không có quyền báo cáo cho đơn hàng này.");
+                throw new UnauthorizedAccessException("Bạn không có quyền báo cáo cho đơn hàng này.");
 
             order.OrderStatus = OrderStatus.PendingConfirmation; // Revert to confirmation phase
             order.FulfillmentStatus = FulfillmentStatus.Unallocated;
@@ -466,36 +468,46 @@ namespace VietTien.API.Services.Implementations
 
             var product = order.OrderItems.FirstOrDefault(i => i.ProductId == alert.ProductId)?.Product;
             var productName = product != null ? product.Name : "Không xác định";
-
-            // Bắn SignalR alert về cho Sales (cũ)
             var message = $"Đơn hàng {order.OrderCode} thiếu {alert.MissingQuantity} {productName}. Ghi chú: {alert.Note}";
-            await _salesHub.Clients.Group("SalesStaff").SendAsync("ReceiveShortageAlert", new
-            {
-                OrderId = orderId,
-                OrderCode = order.OrderCode,
-                Message = message
-            });
 
-            // Gửi Notification SYS-07
-            await _notificationService.CreateRoleNotificationAsync(
-                NotificationType.SYS_07_WarehouseShortage,
-                SystemRole.SalesManager,
-                "Kho báo thiếu hàng",
-                message,
-                order.Id,
-                "Order"
-            );
-
-            if (order.CustomerProfile?.AssignedSalesStaffId != null)
+            // Đơn đã revert trạng thái và commit thành công ở trên -> lỗi báo SignalR/Notification
+            // không được làm request báo lỗi cho warehouse staff (client đã thực sự báo thiếu hàng
+            // thành công), chỉ log để theo dõi.
+            try
             {
-                await _notificationService.CreateNotificationAsync(
+                // Bắn SignalR alert về cho Sales (cũ)
+                await _salesHub.Clients.Group("SalesStaff").SendAsync("ReceiveShortageAlert", new
+                {
+                    OrderId = orderId,
+                    OrderCode = order.OrderCode,
+                    Message = message
+                });
+
+                // Gửi Notification SYS-07
+                await _notificationService.CreateRoleNotificationAsync(
                     NotificationType.SYS_07_WarehouseShortage,
-                    order.CustomerProfile.AssignedSalesStaffId.Value,
+                    SystemRole.SalesManager,
                     "Kho báo thiếu hàng",
                     message,
                     order.Id,
                     "Order"
                 );
+
+                if (order.CustomerProfile?.AssignedSalesStaffId != null)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_07_WarehouseShortage,
+                        order.CustomerProfile.AssignedSalesStaffId.Value,
+                        "Kho báo thiếu hàng",
+                        message,
+                        order.Id,
+                        "Order"
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi gửi cảnh báo thiếu hàng cho đơn {OrderId}", order.Id);
             }
         }
 
@@ -507,13 +519,13 @@ namespace VietTien.API.Services.Implementations
                 .ThenInclude(o => o!.OrderItems)
                 .FirstOrDefaultAsync(p => p.Id == pickTaskId);
                 
-            if (task == null) throw new Exception("Không tìm thấy lệnh xuất kho.");
+            if (task == null) throw new KeyNotFoundException("Không tìm thấy lệnh xuất kho.");
 
             if (task.Status != PickTaskStatus.Picking && task.Status != PickTaskStatus.Exception)
                 throw new Exception("Lệnh xuất kho chưa được bắt đầu chuẩn bị (picking).");
 
             var item = task.Items.FirstOrDefault(i => i.ProductId == productId);
-            if (item == null) throw new Exception("Không tìm thấy sản phẩm trong lệnh xuất kho.");
+            if (item == null) throw new KeyNotFoundException("Không tìm thấy sản phẩm trong lệnh xuất kho.");
 
             if (pickedQty > item.QuantityToPick)
                 throw new Exception("Số lượng đóng gói không được vượt quá số lượng yêu cầu của lệnh.");
@@ -547,10 +559,10 @@ namespace VietTien.API.Services.Implementations
                 .Include(pt => pt.Order)
                 .FirstOrDefaultAsync(p => p.Id == pickTaskId);
                 
-            if (task == null) throw new Exception("Không tìm thấy lệnh xuất kho.");
+            if (task == null) throw new KeyNotFoundException("Không tìm thấy lệnh xuất kho.");
 
             if (task.AssignedUserId != null && task.AssignedUserId != staffId)
-                throw new Exception("Bạn không có quyền thao tác trên lệnh này.");
+                throw new UnauthorizedAccessException("Bạn không có quyền thao tác trên lệnh này.");
 
             if (task.Status != PickTaskStatus.Picking && task.Status != PickTaskStatus.Exception)
                 throw new Exception("Lệnh xuất kho chưa được bắt đầu chuẩn bị (picking).");
@@ -581,14 +593,26 @@ namespace VietTien.API.Services.Implementations
                     
                     if (orderWithProfile?.CustomerProfile?.AssignedSalesStaffId != null)
                     {
-                        await _notificationService.CreateNotificationAsync(
-                            NotificationType.SYS_08_OrderReady,
-                            orderWithProfile.CustomerProfile.AssignedSalesStaffId.Value,
-                            "Hàng đã sẵn sàng",
-                            $"Đơn hàng {task.Order.OrderCode} đã được kho soạn xong và sẵn sàng để xử lý tiếp.",
-                            task.Order.Id,
-                            "Order"
-                        );
+                        // Đơn đã chuyển FulfillmentStatus=Ready và commit thành công ở trên -> lỗi
+                        // gửi notification không được làm fail request, chỉ log để theo dõi.
+                        try
+                        {
+                            var isMultiWarehouse = allTasks.Select(t => t.WarehouseId).Distinct().Count() > 1;
+                            await _notificationService.CreateNotificationAsync(
+                                isMultiWarehouse ? NotificationType.SYS_09_AllWarehousesReady : NotificationType.SYS_08_OrderReady,
+                                orderWithProfile.CustomerProfile.AssignedSalesStaffId.Value,
+                                "Hàng đã sẵn sàng",
+                                isMultiWarehouse
+                                    ? $"Đơn hàng {task.Order.OrderCode} đã được tất cả các kho soạn xong và sẵn sàng để xử lý tiếp."
+                                    : $"Đơn hàng {task.Order.OrderCode} đã được kho soạn xong và sẵn sàng để xử lý tiếp.",
+                                task.Order.Id,
+                                "Order"
+                            );
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Lỗi gửi thông báo hàng sẵn sàng cho đơn {OrderId}", task.Order.Id);
+                        }
                     }
                 }
             }
@@ -597,10 +621,10 @@ namespace VietTien.API.Services.Implementations
         public async Task ConsolidateOrderAsync(Guid orderId, Guid staffId)
         {
             var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
-            if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
             
             if (order.WarehouseStaffId != staffId)
-                throw new Exception("Bạn không có quyền thao tác trên đơn hàng này.");
+                throw new UnauthorizedAccessException("Bạn không có quyền thao tác trên đơn hàng này.");
 
             if (order.FulfillmentStatus != FulfillmentStatus.Ready && order.FulfillmentStatus != FulfillmentStatus.Consolidating)
                 throw new Exception("Đơn hàng chưa sẵn sàng để tập kết.");
@@ -613,7 +637,7 @@ namespace VietTien.API.Services.Implementations
         public async Task HandoverOrderAsync(Guid orderId, Guid staffId, HandoverRequestDto dto)
         {
             var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
-            if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             if (order.FulfillmentStatus != FulfillmentStatus.Consolidated)
                 throw new Exception("Đơn hàng chưa được tập kết để bàn giao.");
@@ -662,7 +686,7 @@ namespace VietTien.API.Services.Implementations
                     .Include(o => o.OrderItems)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
                 
-                if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+                if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
                 
                 if (order.FulfillmentStatus != FulfillmentStatus.HandedOver)
                     throw new Exception("Đơn hàng chưa được bàn giao.");
@@ -670,7 +694,7 @@ namespace VietTien.API.Services.Implementations
                 order.FulfillmentStatus = FulfillmentStatus.Fulfilled;
 
                 var warehouseId = await _context.Warehouses.Where(w => w.Code == "WH-DEFAULT").Select(w => w.Id).FirstOrDefaultAsync();
-                if (warehouseId == Guid.Empty) throw new Exception("Không tìm thấy kho mặc định (WH-DEFAULT).");
+                if (warehouseId == Guid.Empty) throw new KeyNotFoundException("Không tìm thấy kho mặc định (WH-DEFAULT).");
 
                 var goodsIssue = new GoodsIssue
                 {

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using VietTien.API.Models;
 
 namespace VietTien.API.DTOs.Warehouse
@@ -39,19 +40,46 @@ namespace VietTien.API.DTOs.Warehouse
         public int? ReceivedQuantity { get; set; }
     }
 
-    public class CreateStockTransferDto
+    public class CreateStockTransferDto : IValidatableObject
     {
+        [Required]
         public Guid SourceWarehouseId { get; set; }
+
+        [Required]
         public Guid DestinationWarehouseId { get; set; }
+
         public DateTime? ExpectedDispatchDate { get; set; }
         public DateTime? ExpectedReceiveDate { get; set; }
+
+        [MaxLength(1000)]
         public string? Note { get; set; }
-        
+
         // Gửi email thông báo cho nhân viên
+        [EmailAddress(ErrorMessage = "Email thông báo không hợp lệ.")]
         public string? NotificationEmail { get; set; }
         public Guid? AssignedStaffId { get; set; } // Nhân viên kho được chọn
 
+        [Required]
+        [MinLength(1, ErrorMessage = "Phiếu chuyển kho phải có ít nhất 1 mặt hàng.")]
         public List<CreateStockTransferItemDto> Items { get; set; } = new();
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (SourceWarehouseId != Guid.Empty && SourceWarehouseId == DestinationWarehouseId)
+            {
+                yield return new ValidationResult(
+                    "Kho nguồn và kho đích không được trùng nhau.",
+                    new[] { nameof(DestinationWarehouseId) });
+            }
+
+            if (ExpectedDispatchDate.HasValue && ExpectedReceiveDate.HasValue
+                && ExpectedReceiveDate.Value < ExpectedDispatchDate.Value)
+            {
+                yield return new ValidationResult(
+                    "Ngày nhận dự kiến phải sau ngày xuất dự kiến.",
+                    new[] { nameof(ExpectedReceiveDate) });
+            }
+        }
     }
 
     public class CreateStockTransferItemDto
@@ -59,15 +87,33 @@ namespace VietTien.API.DTOs.Warehouse
         // Chỉ 1 trong 2 được fill
         public Guid? ProductId { get; set; }
         public Guid? MaterialId { get; set; }
+
+        [Range(1, int.MaxValue, ErrorMessage = "Số lượng phải lớn hơn 0")]
         public int Quantity { get; set; }
     }
 
-    public class UpdateStockTransferDto
+    public class UpdateStockTransferDto : IValidatableObject
     {
         public DateTime? ExpectedDispatchDate { get; set; }
         public DateTime? ExpectedReceiveDate { get; set; }
+
+        [MaxLength(1000)]
         public string? Note { get; set; }
+
+        [Required]
+        [MinLength(1, ErrorMessage = "Phiếu chuyển kho phải có ít nhất 1 mặt hàng.")]
         public List<CreateStockTransferItemDto> Items { get; set; } = new();
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (ExpectedDispatchDate.HasValue && ExpectedReceiveDate.HasValue
+                && ExpectedReceiveDate.Value < ExpectedDispatchDate.Value)
+            {
+                yield return new ValidationResult(
+                    "Ngày nhận dự kiến phải sau ngày xuất dự kiến.",
+                    new[] { nameof(ExpectedReceiveDate) });
+            }
+        }
     }
 
     public class ReceiveStockTransferDto

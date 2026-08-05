@@ -1,12 +1,17 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace VietTien.API.DTOs.Order
 {
     public class SalesOrderQueryDto
     {
+        [Range(1, int.MaxValue, ErrorMessage = "Số trang phải lớn hơn 0")]
         public int Page { get; set; } = 1;
+
+        [Range(1, 100, ErrorMessage = "Kích thước trang phải trong khoảng 1-100")]
         public int PageSize { get; set; } = 10;
+
         public string? SearchQuery { get; set; }
         public string? Status { get; set; }
         public string? PaymentMethod { get; set; }
@@ -46,8 +51,25 @@ namespace VietTien.API.DTOs.Order
         public int FailedDeliveryCount { get; set; }
         public decimal AmountPaid { get; set; }
         public string? CustomerEmail { get; set; }
+        public string? OrderNote { get; set; }
+        public List<ReturnExchangeRequestSnapshotDto> ReturnExchangeRequests { get; set; } = new();
         public string? CompanyName { get; set; }
         public List<SalesOrderItemDto> Items { get; set; } = new List<SalesOrderItemDto>();
+    }
+
+    public class ReturnExchangeRequestSnapshotDto
+    {
+        public Guid Id { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
+        public string? ManagerNote { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public string RequestedBy { get; set; } = string.Empty;
+        public string? EvidenceUrls { get; set; }
+        public Guid? ReplacementOrderId { get; set; }
+        public string? ReplacementOrderCode { get; set; }
+        public List<SalesOrderItemDto> ReturnItems { get; set; } = new();
+        public List<SalesOrderItemDto> ExchangeItems { get; set; } = new();
     }
 
     public class SalesOrderItemDto

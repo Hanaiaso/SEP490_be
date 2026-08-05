@@ -12,6 +12,8 @@ namespace VietTien.API.Services.Interfaces
         Task<GoodsIssueDto> GetGoodsIssueByIdAsync(Guid id);
         Task<GoodsIssueDto> CreateGoodsIssueAsync(CreateGoodsIssueRequestDto request, Guid staffId);
         Task<GoodsIssueDto> UploadProofAsync(Guid issueId, IFormFile file);
+        Task<GoodsIssueDto> UpdateHandoverInfoAsync(Guid issueId, UpdateGoodsIssueHandoverDto dto);
         Task<GoodsIssueDto> PostGoodsIssueAsync(Guid issueId, Guid staffId);
+        Task<GoodsIssueDto> CreateReversalAsync(Guid issueId, CreateReversalRequestDto dto, Guid staffId);
     }
 }

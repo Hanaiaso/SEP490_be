@@ -108,6 +108,7 @@ namespace VietTien.API.Controllers
             }
         }
 
+
         // =====================================================================
         // LUỒNG 5 – BƯỚC 5: QUARANTINE (ĐỔI TRẢ HÀNG LỖI)
         // =====================================================================
@@ -223,7 +224,7 @@ namespace VietTien.API.Controllers
         /// Nếu 'damaged': chuyển sang Damaged (tăng DamagedQty, giảm QuarantineQty).
         /// </summary>
         [HttpPost("quarantine/{id:guid}/dispatch")]
-        [Authorize(Roles = "SalesManager,Admin")]
+        [Authorize(Roles = "SalesManager,WarehouseStaff,Admin")]
         public async Task<IActionResult> DispatchQuarantine(Guid id, [FromBody] QuarantineDispatchDto dto)
         {
             try
@@ -241,16 +242,37 @@ namespace VietTien.API.Controllers
                 var action = dto.Action?.ToLower() ?? "available";
                 var inventory = log.Inventory;
 
+                if (inventory == null)
+                {
+                    // Auto-healing cho dữ liệu cũ (chưa có liên kết Inventory)
+                    if (log.ProductId != null)
+                        inventory = await _context.Inventories.FirstOrDefaultAsync(i => i.ProductId == log.ProductId);
+                    else if (log.MaterialId != null)
+                        inventory = await _context.Inventories.FirstOrDefaultAsync(i => i.MaterialId == log.MaterialId);
+
+                    if (inventory != null)
+                    {
+                        log.InventoryId = inventory.Id;
+                        log.Inventory = inventory;
+                        // Phục hồi lại QuarantineQuantity vì dữ liệu cũ lúc nhập chưa được cộng
+                        inventory.QuarantineQuantity += log.Quantity;
+                    }
+                    else
+                    {
+                        return BadRequest(new { message = "Lỗi dữ liệu: Bản ghi cách ly này không được liên kết với tồn kho (Inventory). Vui lòng kiểm tra lại dữ liệu cũ." });
+                    }
+                }
+
                 if (action == "available")
                 {
                     // Hàng đạt → giảm QuarantineQuantity (tự động AvailableQuantity tăng)
-                    inventory.QuarantineQuantity -= log.Quantity;
+                    inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - log.Quantity);
                     log.Status = QuarantineStatus.ApprovedAvailable;
                 }
                 else if (action == "damaged")
                 {
                     // Hàng hỏng → chuyển sang DamagedQuantity
-                    inventory.QuarantineQuantity -= log.Quantity;
+                    inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - log.Quantity);
                     inventory.DamagedQuantity += log.Quantity;
                     log.Status = QuarantineStatus.ApprovedDamaged;
                 }
@@ -285,7 +307,7 @@ namespace VietTien.API.Controllers
         }
         
         [HttpGet("staff")]
-        [Authorize]
+        [Authorize(Roles = "CEO,WarehouseStaff,Admin")]
         public async Task<IActionResult> GetStaff([FromServices] Data.ApplicationDbContext context)
         {
             try

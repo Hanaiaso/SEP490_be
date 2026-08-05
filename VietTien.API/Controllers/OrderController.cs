@@ -12,10 +12,12 @@ namespace VietTien.API.Controllers
     public class OrderController : ControllerBase
     {
         private readonly IOrderService _orderService;
+        private readonly ICloudinaryService _cloudinaryService;
 
-        public OrderController(IOrderService orderService)
+        public OrderController(IOrderService orderService, ICloudinaryService cloudinaryService)
         {
             _orderService = orderService;
+            _cloudinaryService = cloudinaryService;
         }
 
         private Guid GetUserId()
@@ -28,6 +30,8 @@ namespace VietTien.API.Controllers
             return userId;
         }
 
+        private string GetUserRole() => User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+
         [HttpGet("checkout-summary")]
         public async Task<ActionResult<OrderPreviewDto>> GetCheckoutSummary()
         {
@@ -36,6 +40,10 @@ namespace VietTien.API.Controllers
                 var userId = GetUserId();
                 var preview = await _orderService.GetCheckoutSummaryAsync(userId);
                 return Ok(preview);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -54,6 +62,10 @@ namespace VietTien.API.Controllers
                 var response = await _orderService.PlaceOrderAsync(userId, request);
                 return Ok(response);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -65,8 +77,12 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var response = await _orderService.GenerateSePayQrAsync(orderId);
+                var response = await _orderService.GenerateSePayQrAsync(orderId, GetUserId(), GetUserRole());
                 return Ok(response);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -79,8 +95,12 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var response = await _orderService.GetPaymentStatusAsync(orderId);
+                var response = await _orderService.GetPaymentStatusAsync(orderId, GetUserId(), GetUserRole());
                 return Ok(response);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -99,6 +119,10 @@ namespace VietTien.API.Controllers
                 var response = await _orderService.PlaceDirectOrderAsync(request);
                 return Ok(response);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -111,8 +135,14 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var stats = await _orderService.GetSalesDashboardStatsAsync();
+                // business.md bước 6: SalesStaff chỉ xem đúng phạm vi của mình; SalesManager/Admin giữ nguyên toàn hệ thống.
+                Guid? scopedSalesStaffId = User.IsInRole("SalesStaff") ? GetUserId() : null;
+                var stats = await _orderService.GetSalesDashboardStatsAsync(scopedSalesStaffId);
                 return Ok(stats);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -129,6 +159,14 @@ namespace VietTien.API.Controllers
                 await _orderService.ConfirmDirectOrderPaymentAsync(orderId);
                 return Ok(new { message = "Thanh toán thành công." });
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -142,8 +180,12 @@ namespace VietTien.API.Controllers
 
             try
             {
-                await _orderService.UploadInvoicePdfAsync(orderId, request.PdfBase64);
+                await _orderService.UploadInvoicePdfAsync(orderId, request.PdfBase64, GetUserId(), GetUserRole());
                 return Ok(new { message = "Upload hóa đơn PDF thành công." });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -197,6 +239,29 @@ namespace VietTien.API.Controllers
         }
 
  
+        [AllowAnonymous]
+        [HttpGet("track")]
+        public async Task<ActionResult<OrderHistoryDetailDto>> TrackOrderPublic([FromQuery] string query)
+        {
+            try
+            {
+                var result = await _orderService.TrackOrderPublicAsync(query);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpGet("my-stats")]
         public async Task<ActionResult<SpendingStatsDto>> GetMySpendingStats([FromQuery] SpendingStatsQueryDto query)
         {
@@ -271,12 +336,22 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var result = await _orderService.GetSalesOrderDetailAsync(id);
+                Guid? salesStaffId = null;
+                if (User.IsInRole("SalesStaff"))
+                {
+                    salesStaffId = GetUserId();
+                }
+
+                var result = await _orderService.GetSalesOrderDetailAsync(id, salesStaffId);
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -375,6 +450,73 @@ namespace VietTien.API.Controllers
             catch (InvalidOperationException ex)
             {
                 return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+        [HttpPost("{id:guid}/exchange-request")]
+        [Authorize(Roles = "SalesManager,Admin,SalesStaff,Customer")]
+        public async Task<IActionResult> CreateReturnExchangeRequest(Guid id, [FromBody] CreateReturnExchangeRequestDto request)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+            try
+            {
+                var userId = GetUserId();
+                await _orderService.CreateReturnExchangeRequestAsync(id, userId, request);
+                return Ok(new { message = "Đã gửi yêu cầu đổi/trả hàng thành công. Vui lòng chờ xử lý." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("exchange-request/{requestId:guid}/process")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> ProcessReturnExchangeRequest(Guid requestId, [FromBody] ProcessReturnExchangeRequestDto request)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+            try
+            {
+                var managerId = GetUserId();
+                await _orderService.ProcessReturnExchangeRequestAsync(requestId, managerId, request);
+                return Ok(new { message = "Đã xử lý yêu cầu đổi/trả hàng thành công." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("upload-evidence")]
+        [Authorize(Roles = "SalesManager,Admin,SalesStaff,Customer")]
+        public async Task<IActionResult> UploadEvidence(IFormFile file)
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest(new { message = "Vui lòng chọn file." });
+
+            try
+            {
+                var url = await _cloudinaryService.UploadEvidenceAsync(file, "viettien/return-exchange-evidence");
+                return Ok(new { url });
             }
             catch (Exception ex)
             {

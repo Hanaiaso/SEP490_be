@@ -19,8 +19,21 @@ namespace VietTien.API.Services.Implementations
         private readonly IEmailService _emailService;
         private readonly INotificationService _notificationService;
         private readonly ICloudinaryService _cloudinaryService;
+        private readonly ISystemConfigService _systemConfigService;
+        private readonly IDiscountTierService _discountTierService;
+        private readonly IInventoryReservationService _inventoryReservationService;
 
-        public OrderService(IUnitOfWork unitOfWork, ApplicationDbContext context, IConfiguration configuration, ICartService cartService, IEmailService emailService, INotificationService notificationService, ICloudinaryService cloudinaryService)
+        public OrderService(
+            IUnitOfWork unitOfWork,
+            ApplicationDbContext context,
+            IConfiguration configuration,
+            ICartService cartService,
+            IEmailService emailService,
+            INotificationService notificationService,
+            ICloudinaryService cloudinaryService,
+            ISystemConfigService systemConfigService,
+            IDiscountTierService discountTierService,
+            IInventoryReservationService inventoryReservationService)
         {
             _unitOfWork = unitOfWork;
             _context = context;
@@ -29,32 +42,54 @@ namespace VietTien.API.Services.Implementations
             _emailService = emailService;
             _notificationService = notificationService;
             _cloudinaryService = cloudinaryService;
+            _systemConfigService = systemConfigService;
+            _discountTierService = discountTierService;
+            _inventoryReservationService = inventoryReservationService;
         }
 
         private async Task<CustomerProfile> GetCustomerProfileAsync(Guid userId)
         {
             var profile = await _unitOfWork.Users.GetCustomerProfileByUserIdAsync(userId);
             if (profile == null)
-                throw new Exception("Customer Profile not found.");
+                throw new KeyNotFoundException("Customer Profile not found.");
             return profile;
         }
 
-        private (decimal discountAmount, decimal discountPercentage) CalculateDiscount(decimal totalAmount)
+        private static readonly HashSet<string> StaffRolesWithOrderAccess = new(StringComparer.OrdinalIgnoreCase)
         {
-            if (totalAmount >= 100_000_000)
-                throw new Exception("Đơn hàng trên 100 triệu vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+            "SalesStaff", "SalesManager", "AccountingStaff", "CEO", "Admin"
+        };
 
-            decimal discountPercentage = 0;
-            if (totalAmount >= 71_000_000)
-                discountPercentage = 0.08m; // 8%
-            else if (totalAmount >= 51_000_000)
-                discountPercentage = 0.07m; // 7%
-            else if (totalAmount >= 31_000_000)
-                discountPercentage = 0.06m; // 6%
-            else if (totalAmount >= 10_000_000)
-                discountPercentage = 0.05m; // 5%
+        /// <summary>
+        /// Chặn IDOR: chỉ khách hàng sở hữu đơn hàng hoặc nhân viên nghiệp vụ mới được truy cập
+        /// thông tin thanh toán/hóa đơn của đơn hàng.
+        /// </summary>
+        private async Task EnsureOrderAccessAsync(Order order, Guid callerUserId, string callerRole)
+        {
+            if (StaffRolesWithOrderAccess.Contains(callerRole ?? string.Empty))
+                return;
 
-            return (totalAmount * discountPercentage, discountPercentage);
+            var profile = await _unitOfWork.Users.GetCustomerProfileByUserIdAsync(callerUserId);
+            if (profile == null || order.CustomerProfileId != profile.Id)
+                throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
+        }
+
+        private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(decimal totalAmount)
+        {
+            // Ngưỡng chuyển sang luồng báo giá B2B (CR-01) — đọc từ Admin System Config (Phase 1),
+            // cùng key QUOTATION_MIN_VALUE đã seed sẵn 100 triệu, fallback nếu chưa cấu hình.
+            var quotationMinValueRaw = await _systemConfigService.GetEffectiveValueAsync("QUOTATION_MIN_VALUE");
+            var quotationMinValue = decimal.TryParse(quotationMinValueRaw, out var parsedMinValue) ? parsedMinValue : 100_000_000m;
+
+            if (totalAmount >= quotationMinValue)
+                throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+
+            var discountPercentage = await _discountTierService.GetApplicableDiscountPercentAsync(totalAmount);
+
+            // VND không có đơn vị nhỏ hơn 1 đồng — làm tròn về đồng nguyên trước khi lưu/đẩy sang SePay.
+            var discountAmount = Math.Round(totalAmount * discountPercentage, 0, MidpointRounding.AwayFromZero);
+
+            return (discountAmount, discountPercentage);
         }
 
         public async Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId)
@@ -66,14 +101,14 @@ namespace VietTien.API.Services.Implementations
                 throw new Exception("Giỏ hàng trống.");
 
             var baseTotal = cart.Items.Sum(i => i.TotalPrice);
-            var (discountAmount, discountPercentage) = CalculateDiscount(baseTotal);
+            var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal);
 
             var totalAfterDiscount = baseTotal - discountAmount;
             
             // VAT 10% sau chiết khấu nếu khách hàng có cấu hình MST trong hồ sơ
             var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
             decimal vatPercentage = requiresVat ? 0.10m : 0m;
-            decimal vatAmount = totalAfterDiscount * vatPercentage;
+            decimal vatAmount = Math.Round(totalAfterDiscount * vatPercentage, 0, MidpointRounding.AwayFromZero);
             decimal finalPayment = totalAfterDiscount + vatAmount;
 
             return new OrderPreviewDto
@@ -97,82 +132,113 @@ namespace VietTien.API.Services.Implementations
             if (cart == null || !cart.Items.Any() || cartEntity == null)
                 throw new Exception("Giỏ hàng trống.");
 
-            var baseTotal = cart.Items.Sum(i => i.TotalPrice);
-            var (discountAmount, discountPercentage) = CalculateDiscount(baseTotal);
-            var totalAfterDiscount = baseTotal - discountAmount;
-            decimal vatAmount = request.RequiresRedInvoice ? (totalAfterDiscount * 0.10m) : 0m;
-            decimal finalPayment = totalAfterDiscount + vatAmount;
+            Order order;
 
-            // --- Xử lý áp dụng Credit ---
-            decimal creditApplied = 0m;
-            if (profile.AvailableCredit > 0)
+            // Gộp giữ tồn (Reserve) + tạo Order + ghi CreditTransaction vào 1 transaction duy nhất:
+            // trước đây ReserveAsync tự commit độc lập, nên nếu bước ghi CreditTransaction phía sau
+            // thất bại thì Order/cart đã tạo (SaveChanges lần 1) không được rollback theo, để lại đơn
+            // "ma" không có ledger Credit khớp. Nay rollback 1 lần duy nhất undo toàn bộ, kể cả tồn đã giữ.
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
             {
-                creditApplied = Math.Min(finalPayment, profile.AvailableCredit);
-                profile.AvailableCredit -= creditApplied;
-                finalPayment -= creditApplied;
-                
-                // Cập nhật CustomerProfile
-                _unitOfWork.Users.Update(profile.User); // Nếu Entity tracking, hoặc gọi phương thức repo update profile
-            }
+                // Giữ mềm tồn kho ngay tại checkout để tránh oversell khi nhiều khách đặt đồng thời.
+                // Ném Exception (không đủ tồn) nếu bất kỳ SKU nào hết hàng — chặn đơn trước khi tạo.
+                await _inventoryReservationService.ReserveAsync(
+                    cart.Items.Select(i => (i.ProductId, i.Quantity)));
 
-            var orderCode = $"VT{DateTime.UtcNow:yyyyMMddHHmmss}{new Random().Next(100, 999)}";
-            
-            var orderStatus = request.PaymentMethod == PaymentMethod.COD ? OrderStatus.PendingConfirmation : OrderStatus.Draft;
-            var paymentStatus = PaymentStatus.Pending;
-            var fulfillmentStatus = request.PaymentMethod == PaymentMethod.COD ? FulfillmentStatus.Reserved : FulfillmentStatus.Unallocated;
+                var baseTotal = cart.Items.Sum(i => i.TotalPrice);
+                var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal);
+                var totalAfterDiscount = baseTotal - discountAmount;
+                // Cùng nguồn sự thật với GetCheckoutSummaryAsync (preview): VAT áp dụng theo hồ sơ có MST,
+                // KHÔNG theo cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác với việc tính VAT).
+                var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
+                decimal vatAmount = requiresVat ? Math.Round(totalAfterDiscount * 0.10m, 0, MidpointRounding.AwayFromZero) : 0m;
+                decimal finalPayment = totalAfterDiscount + vatAmount;
 
-            // Nếu thanh toán toàn bộ bằng Credit
-            if (finalPayment == 0)
-            {
-                paymentStatus = PaymentStatus.Paid;
-                orderStatus = OrderStatus.Confirmed; // Bỏ qua Draft/PendingConfirmation vì đã trả đủ
-                // Nếu là SePay/COD nhưng trả 100% credit thì coi như COD đã xác nhận hoặc SePay đã thanh toán
-            }
-
-            var order = new Order
-            {
-                CustomerProfileId = profile.Id,
-                OrderCode = orderCode,
-                TotalAmount = baseTotal,
-                DiscountAmount = discountAmount,
-                VatAmount = vatAmount,
-                CreditApplied = creditApplied,
-                FinalPayment = finalPayment,
-                PaymentMethod = request.PaymentMethod,
-                PaymentStatus = paymentStatus,
-                OrderStatus = orderStatus,
-                FulfillmentStatus = fulfillmentStatus,
-                CreatedAt = DateTime.UtcNow,
-                RequiresRedInvoice = request.RequiresRedInvoice,
-                SalesStaffId = profile.AssignedSalesStaffId // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
-            };
-
-            foreach (var item in cart.Items)
-            {
-                order.OrderItems.Add(new OrderItem
+                // --- Xử lý áp dụng Credit ---
+                decimal creditApplied = 0m;
+                if (profile.AvailableCredit > 0)
                 {
-                    ProductId = item.ProductId,
-                    Quantity = item.Quantity,
-                    PriceSnapshot = item.UnitPrice,
-                    CostSnapshot = 0 
-                });
-            }
+                    creditApplied = Math.Min(finalPayment, profile.AvailableCredit);
+                    profile.AvailableCredit -= creditApplied;
+                    finalPayment -= creditApplied;
 
-            await _unitOfWork.Orders.CreateOrderAsync(order);
-            await _unitOfWork.Carts.ClearCartAsync(cartEntity.Id);
-            await _unitOfWork.SaveChangesAsync();
+                    // Cập nhật CustomerProfile
+                    _unitOfWork.Users.Update(profile.User); // Nếu Entity tracking, hoặc gọi phương thức repo update profile
+                }
 
-            if (creditApplied > 0)
-            {
-                _context.CreditTransactions.Add(new CreditTransaction
+                var orderCode = $"VT{DateTime.UtcNow:yyyyMMddHHmmss}{new Random().Next(100, 999)}";
+
+                var orderStatus = request.PaymentMethod == PaymentMethod.COD ? OrderStatus.PendingConfirmation : OrderStatus.Draft;
+                var paymentStatus = PaymentStatus.Pending;
+                var fulfillmentStatus = request.PaymentMethod == PaymentMethod.COD ? FulfillmentStatus.Reserved : FulfillmentStatus.Unallocated;
+                DateTime? confirmedAt = null;
+
+                // Nếu thanh toán toàn bộ bằng Credit
+                if (finalPayment == 0)
+                {
+                    paymentStatus = PaymentStatus.Paid;
+                    orderStatus = OrderStatus.Confirmed; // Bỏ qua Draft/PendingConfirmation vì đã trả đủ
+                    confirmedAt = DateTime.UtcNow;
+                    // Nếu là SePay/COD nhưng trả 100% credit thì coi như COD đã xác nhận hoặc SePay đã thanh toán
+                }
+
+                order = new Order
                 {
                     CustomerProfileId = profile.Id,
-                    Amount = -creditApplied,
-                    Description = $"Thanh toán cho đơn hàng {order.OrderCode}",
-                    OrderId = order.Id,
-                    CreatedAt = DateTime.UtcNow
-                });
-                await _context.SaveChangesAsync();
+                    OrderCode = orderCode,
+                    TotalAmount = baseTotal,
+                    DiscountAmount = discountAmount,
+                    VatAmount = vatAmount,
+                    CreditApplied = creditApplied,
+                    FinalPayment = finalPayment,
+                    PaymentMethod = request.PaymentMethod,
+                    PaymentStatus = paymentStatus,
+                    OrderStatus = orderStatus,
+                    ConfirmedAt = confirmedAt,
+                    FulfillmentStatus = fulfillmentStatus,
+                    CreatedAt = DateTime.UtcNow,
+                    RequiresRedInvoice = request.RequiresRedInvoice,
+                    SalesStaffId = profile.AssignedSalesStaffId // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
+                };
+
+                foreach (var item in cart.Items)
+                {
+                    order.OrderItems.Add(new OrderItem
+                    {
+                        ProductId = item.ProductId,
+                        Quantity = item.Quantity,
+                        PriceSnapshot = item.UnitPrice,
+                        CostSnapshot = 0
+                    });
+                }
+
+                await _unitOfWork.Orders.CreateOrderAsync(order);
+                await _unitOfWork.Carts.ClearCartAsync(cartEntity.Id);
+                await _unitOfWork.SaveChangesAsync();
+
+                if (creditApplied > 0)
+                {
+                    _context.CreditTransactions.Add(new CreditTransaction
+                    {
+                        CustomerProfileId = profile.Id,
+                        Amount = -creditApplied,
+                        Description = $"Thanh toán cho đơn hàng {order.OrderCode}",
+                        OrderId = order.Id,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                    await _context.SaveChangesAsync();
+                }
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                // Rollback nguyên tử: undo cả phần giữ tồn (ReserveAsync đã tham gia transaction này,
+                // không tự commit riêng nữa) lẫn Order/CreditTransaction — không cần gọi
+                // ReleaseReservedAsync thủ công như trước.
+                await transaction.RollbackAsync();
+                throw;
             }
 
             // Notify assigned sales staff (SYS-02)
@@ -207,10 +273,14 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
-        public async Task<SePayQrResponseDto> GenerateSePayQrAsync(Guid orderId)
+        public async Task<SePayQrResponseDto> GenerateSePayQrAsync(Guid orderId, Guid callerUserId, string callerRole)
         {
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
             if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            await EnsureOrderAccessAsync(order, callerUserId, callerRole);
+
+            if (order.PaymentStatus == PaymentStatus.Paid)
+                throw new InvalidOperationException("Đơn hàng đã thanh toán, không thể sinh mã QR mới.");
 
             var bankAccount = _configuration["SePaySettings:BankAccount"];
             var bankId = _configuration["SePaySettings:BankId"];
@@ -247,81 +317,248 @@ namespace VietTien.API.Services.Implementations
             var order = await _unitOfWork.Orders.GetOrderByCodeAsync(orderCode);
             if (order == null || order.PaymentStatus == PaymentStatus.Paid) return;
 
-            if (payload.transferAmount >= order.FinalPayment)
+            // SRS BV-01: đối soát phải khớp CHÍNH XÁC với FinalPayment. Trả thiếu HOẶC trả thừa đều
+            // không được tự động set Paid — phải để lại dấu vết (PaymentException) cho nhân viên đối
+            // soát, không được return im lặng (tiền đã thật sự vào tài khoản công ty).
+            if (payload.transferAmount != order.FinalPayment)
             {
-                order.PaymentStatus = PaymentStatus.Paid;
-                if (order.OrderCode.StartsWith("VT-DT-", StringComparison.OrdinalIgnoreCase))
+                var mismatchRefCode = !string.IsNullOrEmpty(payload.referenceCode) ? payload.referenceCode : payload.referenceNumber;
+                string anomalyMessage;
+                if (payload.transferAmount < order.FinalPayment)
                 {
-                    order.OrderStatus = OrderStatus.Completed;
+                    var shortfall = order.FinalPayment - payload.transferAmount;
+                    anomalyMessage = $"Webhook SePay báo nhận {payload.transferAmount:N0}đ (mã đối soát: {mismatchRefCode ?? "N/A"}) cho đơn {order.OrderCode} nhưng còn THIẾU {shortfall:N0}đ so với FinalPayment {order.FinalPayment:N0}đ. Đơn giữ nguyên Pending, cần đối soát thủ công.";
+                    await CreateOrUpdatePaymentExceptionAsync(order, "UNDERPAYMENT", anomalyMessage);
                 }
-                
-                var refCode = !string.IsNullOrEmpty(payload.referenceCode) ? payload.referenceCode : payload.referenceNumber;
-                var transaction = new PaymentTransaction
+                else
                 {
-                    OrderId = order.Id,
-                    TransactionId = !string.IsNullOrEmpty(refCode) ? refCode : Guid.NewGuid().ToString(),
-                    Amount = payload.transferAmount,
-                    AccountNumber = payload.accountNumber,
-                    ReferenceCode = transferContentText,
-                    IsSuccess = true,
-                    Timestamp = DateTime.UtcNow
-                };
-
-                await _context.PaymentTransactions.AddAsync(transaction);
-                await _unitOfWork.Orders.UpdateOrderAsync(order);
+                    var overage = payload.transferAmount - order.FinalPayment;
+                    anomalyMessage = $"Webhook SePay báo nhận {payload.transferAmount:N0}đ (mã đối soát: {mismatchRefCode ?? "N/A"}) cho đơn {order.OrderCode} nhưng THỪA {overage:N0}đ so với FinalPayment {order.FinalPayment:N0}đ. Không tự động ghi Paid, cần đối soát/hoàn tiền thủ công.";
+                    await CreateOrUpdatePaymentExceptionAsync(order, "OVERPAYMENT", anomalyMessage);
+                }
                 await _unitOfWork.SaveChangesAsync();
+                await NotifyPaymentAnomalyAsync(order, "Thanh toán không khớp đơn hàng", anomalyMessage);
+                return;
+            }
 
-                // Load full details for email invoice notification
-                try
+            // Chống trùng khi SePay gửi lại (redelivery) cùng một giao dịch ngân hàng gần như đồng thời:
+            // nếu mã đối soát này đã được ghi nhận cho đơn hàng thì bỏ qua, không tạo PaymentTransaction thứ 2.
+            var refCode = !string.IsNullOrEmpty(payload.referenceCode) ? payload.referenceCode : payload.referenceNumber;
+            if (!string.IsNullOrEmpty(refCode))
+            {
+                var alreadyRecorded = await _context.PaymentTransactions
+                    .AnyAsync(t => t.OrderId == order.Id && t.TransactionId == refCode);
+                if (alreadyRecorded) return;
+            }
+
+            if (order.OrderStatus == OrderStatus.Cancelled || order.OrderStatus == OrderStatus.CancelledReallocated)
+            {
+                // Đơn đã bị hủy (vd. hết hạn giữ chỗ 15') trước khi tiền về — tồn kho có thể đã được
+                // giải phóng/bán cho đơn khác. KHÔNG áp dụng thanh toán (không set Paid, không tạo
+                // PaymentTransaction) để tránh vừa "Cancelled" vừa "Paid" và không làm sai lệch báo cáo
+                // doanh thu theo PaymentStatus. Chỉ mở ngoại lệ để nhân viên đối soát/hoàn tiền thủ công.
+                var cancelledAnomalyMessage = $"Webhook SePay báo nhận {payload.transferAmount:N0}đ (mã đối soát: {refCode ?? "N/A"}) cho đơn {order.OrderCode} nhưng đơn đã ở trạng thái {order.OrderStatus} trước đó.";
+                await CreateOrUpdatePaymentExceptionAsync(order, "PAID_AFTER_CANCELLATION", cancelledAnomalyMessage);
+                await _unitOfWork.SaveChangesAsync();
+                await NotifyPaymentAnomalyAsync(order, "Nhận tiền cho đơn đã hủy", cancelledAnomalyMessage);
+                return;
+            }
+
+            order.PaymentStatus = PaymentStatus.Paid;
+
+            var transaction = new PaymentTransaction
+            {
+                OrderId = order.Id,
+                TransactionId = !string.IsNullOrEmpty(refCode) ? refCode : Guid.NewGuid().ToString(),
+                Amount = payload.transferAmount,
+                AccountNumber = payload.accountNumber,
+                ReferenceCode = transferContentText,
+                IsSuccess = true,
+                Timestamp = DateTime.UtcNow
+            };
+            await _context.PaymentTransactions.AddAsync(transaction);
+
+            if (order.OrderCode.StartsWith("VT-DT-", StringComparison.OrdinalIgnoreCase))
+            {
+                order.OrderStatus = OrderStatus.Completed;
+            }
+            else
+            {
+                var allocationResult = await TryAllocateInventoryAsync(order);
+                if (allocationResult.Success)
                 {
-                    var fullOrder = await _context.Orders
-                        .Include(o => o.CustomerProfile)
-                        .ThenInclude(c => c.User)
-                        .Include(o => o.OrderItems)
-                        .ThenInclude(oi => oi.Product)
-                        .FirstOrDefaultAsync(o => o.Id == order.Id);
+                    order.OrderStatus = OrderStatus.Confirmed;
+                    order.ConfirmedAt = DateTime.UtcNow;
+                    await CreatePickTaskAsync(order);
+                }
+                else
+                {
+                    order.OrderStatus = OrderStatus.PaidReviewRequired;
+                    await CreateOrUpdatePaymentExceptionAsync(order, allocationResult.ErrorCode, allocationResult.ErrorMessage);
+                }
+            }
 
-                    if (fullOrder != null)
+            await _unitOfWork.Orders.UpdateOrderAsync(order);
+            await _unitOfWork.SaveChangesAsync();
+
+            // Load full details for email invoice notification
+            try
+            {
+                var fullOrder = await _context.Orders
+                    .Include(o => o.CustomerProfile)
+                    .ThenInclude(c => c.User)
+                    .Include(o => o.OrderItems)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == order.Id);
+
+                if (fullOrder != null)
+                {
+                    // Send confirmation email to Customer
+                    var customerEmail = fullOrder.CustomerProfile?.User?.Email ?? fullOrder.CustomerProfile?.InvoiceEmail;
+                    var customerName = fullOrder.CustomerProfile?.Representative ?? fullOrder.CustomerProfile?.CompanyName ?? "Khách hàng";
+                    if (!string.IsNullOrEmpty(customerEmail))
                     {
-                        // Send confirmation email to Customer
-                        var customerEmail = fullOrder.CustomerProfile?.User?.Email ?? fullOrder.CustomerProfile?.InvoiceEmail;
-                        var customerName = fullOrder.CustomerProfile?.Representative ?? fullOrder.CustomerProfile?.CompanyName ?? "Khách hàng";
-                        if (!string.IsNullOrEmpty(customerEmail))
-                        {
-                            await _emailService.SendOrderInvoiceEmailAsync(customerEmail, customerName, fullOrder, isSalesNotify: false);
-                        }
+                        await _emailService.SendOrderInvoiceEmailAsync(customerEmail, customerName, fullOrder, isSalesNotify: false);
+                    }
 
-                        // Send notification email to Sales/Admin
-                        var salesEmail = _configuration["EmailSettings:SenderEmail"] ?? "sales@viettien.vn";
-                        await _emailService.SendOrderInvoiceEmailAsync(salesEmail, "Bộ phận Bán hàng VietTien", fullOrder, isSalesNotify: true);
+                    // Send notification email to Sales/Admin
+                    var salesEmail = _configuration["EmailSettings:SenderEmail"] ?? "sales@viettien.vn";
+                    await _emailService.SendOrderInvoiceEmailAsync(salesEmail, "Bộ phận Bán hàng VietTien", fullOrder, isSalesNotify: true);
 
-                        // Notify assigned sales staff (SYS-05)
-                        if (fullOrder.CustomerProfile?.AssignedSalesStaffId != null)
-                        {
-                            await _notificationService.CreateNotificationAsync(
-                                NotificationType.SYS_05_SePaySuccess,
-                                fullOrder.CustomerProfile.AssignedSalesStaffId.Value,
-                                $"Thanh toán thành công {fullOrder.OrderCode}",
-                                $"Khách hàng đã thanh toán {payload.transferAmount:N0}đ qua SePay cho đơn hàng {fullOrder.OrderCode}.",
-                                fullOrder.Id,
-                                "Order"
-                            );
-                        }
+                    // Notify assigned sales staff (SYS-05)
+                    if (fullOrder.CustomerProfile?.AssignedSalesStaffId != null)
+                    {
+                        await _notificationService.CreateNotificationAsync(
+                            NotificationType.SYS_05_SePaySuccess,
+                            fullOrder.CustomerProfile.AssignedSalesStaffId.Value,
+                            $"Thanh toán thành công {fullOrder.OrderCode}",
+                            $"Khách hàng đã thanh toán {payload.transferAmount:N0}đ qua SePay cho đơn hàng {fullOrder.OrderCode}.",
+                            fullOrder.Id,
+                            "Order"
+                        );
                     }
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[SePay Webhook] Error sending invoice emails: {ex.Message}");
-                }
-                
-                // TODO: Trigger event xuống kho chuẩn bị đơn hàng (FIFO)
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SePay Webhook] Error sending invoice emails: {ex.Message}");
             }
         }
 
-        public async Task<PaymentStatusResponseDto> GetPaymentStatusAsync(Guid orderId)
+        private record InventoryAllocationResult(bool Success, string ErrorCode = "", string ErrorMessage = "");
+
+        /// <summary>
+        /// Thử phân bổ tồn kho cho đơn đã Paid qua SePay — trả phần giữ mềm (Reserved) rồi Allocate,
+        /// dùng chung cơ chế atomic guarded UPDATE của IInventoryReservationService (giống ManualPaymentService)
+        /// để tránh đếm trùng và tránh oversell khi nhiều đơn cùng tranh chấp tồn kho ít.
+        /// </summary>
+        private async Task<InventoryAllocationResult> TryAllocateInventoryAsync(Order order)
+        {
+            var items = order.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)).ToList();
+            try
+            {
+                await _inventoryReservationService.ReleaseReservedAsync(items);
+                await _inventoryReservationService.AllocateAsync(items);
+                return new InventoryAllocationResult(true);
+            }
+            catch (Exception ex)
+            {
+                return new InventoryAllocationResult(false, "INSUFFICIENT_AVAILABLE_STOCK", ex.Message);
+            }
+        }
+
+        /// <summary>Tạo PickTask cho đơn hàng sau khi allocation thành công (webhook SePay tự động).</summary>
+        private async Task CreatePickTaskAsync(Order order)
+        {
+            var warehouseId = await _context.Inventories
+                .Where(inv => inv.ProductId != null && order.OrderItems.Select(oi => oi.ProductId).Contains(inv.ProductId.Value))
+                .Select(inv => inv.WarehouseLocation.WarehouseId)
+                .FirstOrDefaultAsync();
+
+            if (warehouseId == Guid.Empty) return;
+
+            var existingPickTask = await _context.PickTasks
+                .AnyAsync(pt => pt.OrderId == order.Id && pt.Status == PickTaskStatus.Pending);
+
+            if (!existingPickTask)
+            {
+                var pickTask = new PickTask
+                {
+                    OrderId = order.Id,
+                    WarehouseId = warehouseId,
+                    Status = PickTaskStatus.Pending,
+                    CreatedAt = DateTime.UtcNow,
+                    Note = "Tạo tự động sau khi xác nhận thanh toán SePay (webhook)",
+                    Items = order.OrderItems.Select(oi => new PickTaskItem
+                    {
+                        ProductId = oi.ProductId,
+                        QuantityToPick = oi.Quantity,
+                        PickedQuantity = 0
+                    }).ToList()
+                };
+
+                await _context.PickTasks.AddAsync(pickTask);
+            }
+        }
+
+        /// <summary>Tạo hoặc cập nhật PaymentException khi allocation thất bại hoặc khi tiền về sau khi đơn đã hủy.</summary>
+        private async Task CreateOrUpdatePaymentExceptionAsync(Order order, string reasonCode, string description)
+        {
+            var existing = await _context.PaymentExceptions
+                .FirstOrDefaultAsync(pe => pe.OrderId == order.Id && pe.Status == "OPEN");
+
+            if (existing is not null)
+            {
+                existing.ReasonCode = reasonCode;
+                existing.Description = description;
+            }
+            else
+            {
+                await _context.PaymentExceptions.AddAsync(new PaymentException
+                {
+                    OrderId = order.Id,
+                    ReasonCode = reasonCode,
+                    Description = description,
+                    Status = "OPEN",
+                    RetryCount = 0,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        // PaymentException đã được lưu thành công ở trên -> lỗi gửi notification không được làm
+        // fail luồng xử lý webhook, chỉ log để theo dõi.
+        private async Task NotifyPaymentAnomalyAsync(Order order, string title, string message)
+        {
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_32_PaymentAnomaly,
+                    SystemRole.AccountingStaff,
+                    title,
+                    message,
+                    order.Id,
+                    "Order");
+
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_32_PaymentAnomaly,
+                    SystemRole.SalesManager,
+                    title,
+                    message,
+                    order.Id,
+                    "Order");
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending payment anomaly notification: {notifyEx.Message}");
+            }
+        }
+
+        public async Task<PaymentStatusResponseDto> GetPaymentStatusAsync(Guid orderId, Guid callerUserId, string callerRole)
         {
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
             if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            await EnsureOrderAccessAsync(order, callerUserId, callerRole);
 
             return new PaymentStatusResponseDto
             {
@@ -340,6 +577,10 @@ namespace VietTien.API.Services.Implementations
             if (string.IsNullOrEmpty(phone))
             {
                 phone = "0000000000";
+            }
+            else if (!System.Text.RegularExpressions.Regex.IsMatch(phone, @"^0\d{9}$"))
+            {
+                throw new InvalidOperationException("Số điện thoại không đúng định dạng.");
             }
 
             CustomerProfile? customerProfile = null;
@@ -442,6 +683,14 @@ namespace VietTien.API.Services.Implementations
                 SalesStaffId = customerProfile.AssignedSalesStaffId // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
             };
 
+            // Đối chiếu số học cơ bản để chặn sai lệch/gõ nhầm giữa các trường tiền client gửi lên
+            // (không ép khớp catalog vì nhân viên bán trực tiếp được phép thương lượng giá tại quầy).
+            var itemsTotal = request.Items.Sum(i => i.Price * i.Quantity);
+            if (itemsTotal != request.TotalAmount)
+                throw new Exception("Tổng tiền hàng (TotalAmount) không khớp với tổng đơn giá x số lượng của các mặt hàng.");
+            if (request.TotalAmount - request.DiscountAmount + request.VatAmount != request.FinalPayment)
+                throw new Exception("Số tiền thanh toán cuối cùng (FinalPayment) không khớp với TotalAmount - DiscountAmount + VatAmount.");
+
             foreach (var item in request.Items)
             {
                 var product = await _context.Products.FindAsync(item.ProductId);
@@ -449,19 +698,6 @@ namespace VietTien.API.Services.Implementations
                 {
                     throw new Exception($"Không tìm thấy sản phẩm với ID: {item.ProductId}");
                 }
-
-                var inventory = await _context.Inventories.FirstOrDefaultAsync(i => i.ProductId == item.ProductId);
-                if (inventory == null)
-                {
-                    throw new Exception($"Không tìm thấy thông tin kho cho sản phẩm {product.Name}.");
-                }
-
-                if (inventory.AvailableQuantity < item.Quantity)
-                {
-                    throw new Exception("Stock depleted by another transaction. Please refresh inventory data.");
-                }
-
-                inventory.OnHandQuantity -= item.Quantity;
 
                 order.OrderItems.Add(new OrderItem
                 {
@@ -472,14 +708,34 @@ namespace VietTien.API.Services.Implementations
                 });
             }
 
+            // Gộp trừ OnHand (DeductOnHandAsync) + tạo Order vào 1 transaction duy nhất: trước đây
+            // DeductOnHandAsync tự commit riêng, nếu SaveChangesAsync tạo Order ngay sau đó thất bại
+            // (vd trùng OrderCode, lỗi DB nhất thời) thì tồn kho vật lý đã bị trừ thật (mất tồn) nhưng
+            // không có Order tương ứng, không có cách khôi phục. Nay rollback 1 lần undo cả 2.
+            await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                // Trừ thẳng OnHand bằng atomic guarded UPDATE (bán trực tiếp tại quầy — hàng rời kho ngay).
+                // Ném Exception nếu có SKU nào không đủ khả dụng, kể cả khi 2 giao dịch tranh chấp đồng thời.
+                try
+                {
+                    await _inventoryReservationService.DeductOnHandAsync(
+                        request.Items.Select(i => (i.ProductId, i.Quantity)));
+                }
+                catch (Exception)
+                {
+                    throw new Exception("Stock depleted by another transaction. Please refresh inventory data.");
+                }
+
                 await _unitOfWork.Orders.CreateOrderAsync(order);
                 await _unitOfWork.SaveChangesAsync();
+
+                await transaction.CommitAsync();
             }
-            catch (DbUpdateConcurrencyException)
+            catch
             {
-                throw new Exception("Stock depleted by another transaction. Please refresh inventory data.");
+                await transaction.RollbackAsync();
+                throw;
             }
 
             return new DirectOrderResponseDto
@@ -498,12 +754,17 @@ namespace VietTien.API.Services.Implementations
             return match.Success ? match.Value.ToUpper() : null;
         }
 
-        public async Task<SalesDashboardStatsDto> GetSalesDashboardStatsAsync()
+        public async Task<SalesDashboardStatsDto> GetSalesDashboardStatsAsync(Guid? scopedSalesStaffId = null)
         {
             var today = DateTime.UtcNow.Date;
 
             // 1. KPI aggregates
-            var allOrders = await _context.Orders.ToListAsync();
+            // scopedSalesStaffId = null -> SalesManager/Admin xem toàn hệ thống (giữ nguyên hành vi cũ).
+            // scopedSalesStaffId có giá trị -> SalesStaff chỉ xem đơn của chính mình (business.md bước 6).
+            var ordersQuery = _context.Orders.AsQueryable();
+            if (scopedSalesStaffId.HasValue)
+                ordersQuery = ordersQuery.Where(o => o.SalesStaffId == scopedSalesStaffId.Value);
+            var allOrders = await ordersQuery.ToListAsync();
             var newOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Draft);
             var processingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed);
             var shippingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Processing);
@@ -524,6 +785,7 @@ namespace VietTien.API.Services.Implementations
             // 2. Recent orders (top 10)
             var recentOrdersList = await _context.Orders
                 .Include(o => o.CustomerProfile)
+                .Where(o => scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId)
                 .OrderByDescending(o => o.CreatedAt)
                 .Take(10)
                 .Select(o => new DashboardOrderDto
@@ -543,7 +805,8 @@ namespace VietTien.API.Services.Implementations
             // 3. Urgent orders (top 5 oldest pending orders)
             var urgentOrdersList = await _context.Orders
                 .Include(o => o.CustomerProfile)
-                .Where(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed)
+                .Where(o => (o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed)
+                            && (scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId))
                 .OrderBy(o => o.CreatedAt)
                 .Take(5)
                 .ToListAsync();
@@ -585,7 +848,8 @@ namespace VietTien.API.Services.Implementations
             var warehouseList = await _context.Orders
                 .Include(o => o.CustomerProfile)
                 .Include(o => o.OrderItems)
-                .Where(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed)
+                .Where(o => (o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed)
+                            && (scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId))
                 .OrderByDescending(o => o.CreatedAt)
                 .Take(5)
                 .Select(o => new DashboardWarehouseQueueDto
@@ -600,7 +864,8 @@ namespace VietTien.API.Services.Implementations
             // 5. Quote requests (top 5 pending/negotiating quotations)
             var quotationsList = await _context.Quotations
                 .Include(q => q.CustomerProfile)
-                .Where(q => q.Status == QuotationStatus.Draft || q.Status == QuotationStatus.Negotiating)
+                .Where(q => (q.Status == QuotationStatus.Draft || q.Status == QuotationStatus.Negotiating)
+                            && (scopedSalesStaffId == null || q.SalesStaffId == scopedSalesStaffId))
                 .OrderByDescending(q => q.RequestDate)
                 .Take(5)
                 .Select(q => new DashboardQuoteRequestDto
@@ -615,7 +880,8 @@ namespace VietTien.API.Services.Implementations
             // 6. Top Products (top 5 by revenue)
             var topProductsList = await _context.OrderItems
                 .Include(oi => oi.Product)
-                .Where(oi => oi.Order.PaymentStatus == PaymentStatus.Paid)
+                .Where(oi => oi.Order.PaymentStatus == PaymentStatus.Paid
+                            && (scopedSalesStaffId == null || oi.Order.SalesStaffId == scopedSalesStaffId))
                 .GroupBy(oi => new { oi.ProductId, oi.Product.Name })
                 .Select(g => new DashboardTopProductDto
                 {
@@ -630,7 +896,8 @@ namespace VietTien.API.Services.Implementations
             var revenueDays = new List<DashboardRevenueDayDto>();
             var sevenDaysAgo = today.AddDays(-6);
             var paidOrdersIn7Days = await _context.Orders
-                .Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt >= sevenDaysAgo)
+                .Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt >= sevenDaysAgo
+                            && (scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId))
                 .ToListAsync();
 
             var culture = new System.Globalization.CultureInfo("vi-VN");
@@ -667,7 +934,13 @@ namespace VietTien.API.Services.Implementations
         public async Task ConfirmDirectOrderPaymentAsync(Guid orderId)
         {
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
-            if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+
+            if (order.OrderStatus == OrderStatus.Cancelled || order.OrderStatus == OrderStatus.CancelledReallocated)
+                throw new InvalidOperationException("Đơn hàng đã bị hủy, không thể xác nhận thanh toán.");
+
+            if (order.PaymentStatus == PaymentStatus.Paid)
+                throw new InvalidOperationException("Đơn hàng đã được xác nhận thanh toán trước đó.");
 
             order.PaymentStatus = PaymentStatus.Paid;
             order.OrderStatus = OrderStatus.Completed; // Delivered upon counter cash payment confirmation
@@ -676,10 +949,11 @@ namespace VietTien.API.Services.Implementations
             await _unitOfWork.SaveChangesAsync();
         }
 
-        public async Task UploadInvoicePdfAsync(Guid orderId, string pdfBase64)
+        public async Task UploadInvoicePdfAsync(Guid orderId, string pdfBase64, Guid callerUserId, string callerRole)
         {
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
             if (order == null) throw new Exception("Không tìm thấy đơn hàng.");
+            await EnsureOrderAccessAsync(order, callerUserId, callerRole);
 
             if (!string.IsNullOrEmpty(pdfBase64))
             {
@@ -917,15 +1191,154 @@ namespace VietTien.API.Services.Implementations
                 CanRequestVat    = canRequestVat,
                 VatDeadline      = canRequestVat ? vatDeadline : null,
                 Items            = itemDtos,
+                ReturnExchangeRequests = order.ReturnExchangeRequests.Select(req => new ReturnExchangeRequestSnapshotDto
+                {
+                    Id = req.Id,
+                    Status = req.Status.ToString(),
+                    Reason = req.Reason,
+                    ManagerNote = req.ManagerNote,
+                    CreatedAt = req.CreatedAt,
+                    RequestedBy = req.RequestedBy?.FullName ?? "",
+                    EvidenceUrls = req.EvidenceUrls,
+                    ReplacementOrderId = req.ReplacementOrderId,
+                    ReplacementOrderCode = req.ReplacementOrder?.OrderCode,
+                    ReturnItems = req.ReturnItems.Select(ri => new SalesOrderItemDto
+                    {
+                        ProductId = ri.ProductId,
+                        ProductName = ri.Product?.Name ?? "",
+                        ProductSku = ri.Product?.Sku ?? "",
+                        Quantity = ri.Quantity,
+                        PriceSnapshot = ri.PriceSnapshot,
+                        LineTotal = ri.PriceSnapshot * ri.Quantity
+                    }).ToList(),
+                    ExchangeItems = req.ExchangeItems.Select(ei => new SalesOrderItemDto
+                    {
+                        ProductId = ei.ProductId,
+                        ProductName = ei.Product?.Name ?? "",
+                        ProductSku = ei.Product?.Sku ?? "",
+                        Quantity = ei.Quantity,
+                        PriceSnapshot = ei.PriceSnapshot,
+                        LineTotal = ei.PriceSnapshot * ei.Quantity
+                    }).ToList()
+                }).ToList()
+            };
+        }
+
+        public async Task<OrderHistoryDetailDto> TrackOrderPublicAsync(string search)
+        {
+            if (string.IsNullOrWhiteSpace(search))
+                throw new ArgumentException("Vui lòng nhập mã đơn hàng hoặc số điện thoại để tra cứu.");
+
+            var term = search.Trim().ToLower();
+
+            var order = await _context.Orders
+                .Include(o => o.CustomerProfile).ThenInclude(cp => cp.User)
+                .Include(o => o.CustomerProfile.Addresses)
+                .Include(o => o.OrderItems).ThenInclude(oi => oi.Product)
+                .Include(o => o.ReturnExchangeRequests).ThenInclude(req => req.ReturnItems).ThenInclude(ri => ri.Product)
+                .Include(o => o.ReturnExchangeRequests).ThenInclude(req => req.ExchangeItems).ThenInclude(ei => ei.Product)
+                .Include(o => o.ReturnExchangeRequests).ThenInclude(req => req.ReplacementOrder)
+                .OrderByDescending(o => o.CreatedAt)
+                .FirstOrDefaultAsync(o => o.OrderCode.ToLower() == term || 
+                                          (o.CustomerProfile != null && o.CustomerProfile.User != null && o.CustomerProfile.User.PhoneNumber != null && o.CustomerProfile.User.PhoneNumber.ToLower() == term) ||
+                                          (o.CustomerProfile != null && o.CustomerProfile.CompanyPhone != null && o.CustomerProfile.CompanyPhone.ToLower() == term));
+
+            if (order == null)
+                throw new KeyNotFoundException($"Không tìm thấy đơn hàng tương ứng với '{search}'. Vui lòng kiểm tra lại mã đơn hàng hoặc số điện thoại.");
+
+            const int vatWindowHours = 168;
+            var vatDeadline = order.CreatedAt.AddHours(vatWindowHours);
+            var canRequestVat = order.OrderStatus == OrderStatus.Completed
+                                && DateTime.UtcNow < vatDeadline
+                                && order.RedInvoiceStatus == RedInvoiceStatus.None;
+
+            var itemDtos = order.OrderItems.Select(oi => new OrderItemDetailDto
+            {
+                ProductId = oi.ProductId,
+                ProductName = oi.Product?.Name ?? "(Sản phẩm đã bị xóa)",
+                ProductSku = oi.Product?.Sku ?? string.Empty,
+                ProductImage = oi.Product?.ImageUrl,
+                Quantity = oi.Quantity,
+                PriceSnapshot = oi.PriceSnapshot,
+                LineTotal = oi.PriceSnapshot * oi.Quantity,
+            }).ToList();
+
+            var customerName = order.CustomerProfile?.User?.FullName ?? order.CustomerProfile?.CompanyName ?? "Khách hàng";
+
+            return new OrderHistoryDetailDto
+            {
+                Id = order.Id,
+                OrderCode = order.OrderCode,
+                CreatedAt = order.CreatedAt,
+                TotalAmount = order.TotalAmount,
+                DiscountAmount = order.DiscountAmount,
+                VatAmount = order.VatAmount,
+                FinalPayment = order.FinalPayment,
+                PaymentMethod = order.PaymentMethod.ToString(),
+                PaymentStatus = order.PaymentStatus.ToString(),
+                OrderStatus = order.OrderStatus.ToString(),
+                RedInvoiceStatus = order.RedInvoiceStatus.ToString(),
+                CustomerName = customerName,
+                // Tra cứu công khai (chỉ cần biết mã đơn) — không lộ SĐT/địa chỉ đầy đủ (NFR-SEC06).
+                CustomerPhone = null,
+                ShippingAddress = null,
+                DeliveryShift = order.DeliveryShift,
+                DeliveryVehicleId = order.DeliveryVehicleId,
+                DeliveryStatus = order.DeliveryStatus.ToString(),
+                ScheduledDeliveryDate = order.ScheduledDeliveryDate,
+                DeliveredAt = order.DeliveredAt,
+                CustomerSignatureUrl = order.CustomerSignatureUrl,
+                DeliveryPhotoUrl = order.DeliveryPhotoUrl,
+                FailedDeliveryCount = order.FailedDeliveryCount,
+                AmountPaid = order.AmountPaid,
+                InvoicePdfUrl = order.InvoicePdfUrl,
+                CanRequestVat = canRequestVat,
+                VatDeadline = canRequestVat ? vatDeadline : null,
+                Items = itemDtos,
+                ReturnExchangeRequests = order.ReturnExchangeRequests.Select(req => new ReturnExchangeRequestSnapshotDto
+                {
+                    Id = req.Id,
+                    Status = req.Status.ToString(),
+                    Reason = req.Reason,
+                    ManagerNote = req.ManagerNote,
+                    CreatedAt = req.CreatedAt,
+                    RequestedBy = req.RequestedBy?.FullName ?? "",
+                    EvidenceUrls = req.EvidenceUrls,
+                    ReplacementOrderId = req.ReplacementOrderId,
+                    ReplacementOrderCode = req.ReplacementOrder?.OrderCode,
+                    ReturnItems = req.ReturnItems.Select(ri => new SalesOrderItemDto
+                    {
+                        ProductId = ri.ProductId,
+                        ProductName = ri.Product?.Name ?? "",
+                        ProductSku = ri.Product?.Sku ?? "",
+                        Quantity = ri.Quantity,
+                        PriceSnapshot = ri.PriceSnapshot,
+                        LineTotal = ri.PriceSnapshot * ri.Quantity
+                    }).ToList(),
+                    ExchangeItems = req.ExchangeItems.Select(ei => new SalesOrderItemDto
+                    {
+                        ProductId = ei.ProductId,
+                        ProductName = ei.Product?.Name ?? "",
+                        ProductSku = ei.Product?.Sku ?? "",
+                        Quantity = ei.Quantity,
+                        PriceSnapshot = ei.PriceSnapshot,
+                        LineTotal = ei.PriceSnapshot * ei.Quantity
+                    }).ToList()
+                }).ToList()
             };
         }
 
         public async Task RequestVatInvoiceAsync(Guid userId, Guid orderId)
         {
             var profile = await GetCustomerProfileAsync(userId);
-            var order   = await _unitOfWork.Orders.GetOrderDetailForCustomerAsync(orderId, profile.Id);
+            // Dùng GetOrderByIdAsync (tracked, không Include CustomerProfile) thay vì
+            // GetOrderDetailForCustomerAsync (AsNoTracking + Include CustomerProfile) để tránh
+            // EF double-tracking: profile ở trên đã được track, còn order.CustomerProfile từ query
+            // AsNoTracking là một instance khác cùng khóa chính, khiến UpdateOrderAsync() bên dưới
+            // ném InvalidOperationException khi track lại (Defect VT-01).
+            var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
 
-            if (order == null)
+            if (order == null || order.CustomerProfileId != profile.Id)
                 throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             if (order.OrderStatus != OrderStatus.Completed)
@@ -947,6 +1360,9 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<PagedResultDto<SalesOrderListDto>> GetSalesOrdersAsync(SalesOrderQueryDto query, Guid? salesStaffId = null)
         {
+            query.Page = query.Page < 1 ? 1 : query.Page;
+            query.PageSize = query.PageSize < 1 ? 10 : (query.PageSize > 100 ? 100 : query.PageSize);
+
             var queryable = _context.Orders
                 .Include(o => o.CustomerProfile)
                 .ThenInclude(cp => cp.User)
@@ -1019,7 +1435,7 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
-        public async Task<SalesOrderDetailDto> GetSalesOrderDetailAsync(Guid orderId)
+        public async Task<SalesOrderDetailDto> GetSalesOrderDetailAsync(Guid orderId, Guid? salesStaffId = null)
         {
             var order = await _context.Orders
                 .Include(o => o.CustomerProfile)
@@ -1027,9 +1443,24 @@ namespace VietTien.API.Services.Implementations
                 .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
                 .Include(o => o.CustomerProfile.Addresses)
+                .Include(o => o.ReturnExchangeRequests)
+                    .ThenInclude(req => req.ReturnItems)
+                        .ThenInclude(ri => ri.Product)
+                .Include(o => o.ReturnExchangeRequests)
+                    .ThenInclude(req => req.ExchangeItems)
+                        .ThenInclude(ei => ei.Product)
+                .Include(o => o.ReturnExchangeRequests)
+                    .ThenInclude(req => req.RequestedBy)
                 .FirstOrDefaultAsync(o => o.Id == orderId);
 
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+
+            if (salesStaffId.HasValue && order.SalesStaffId != salesStaffId.Value)
+            {
+                // Chặn IDOR: cùng cơ chế scope theo snapshot Sale phụ trách (o.SalesStaffId) đã dùng ở
+                // GetSalesOrdersAsync — Sale khác không được xem chi tiết đơn không phải của mình.
+                throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
+            }
 
             var defaultAddress = order.CustomerProfile.Addresses?.FirstOrDefault(a => a.IsDefault) 
                                  ?? order.CustomerProfile.Addresses?.FirstOrDefault();
@@ -1070,6 +1501,34 @@ namespace VietTien.API.Services.Implementations
                 PickingStartedAt = order.PickingStartedAt,
                 PickingCompletedAt = order.PickingCompletedAt,
                 InvoicePdfUrl = order.InvoicePdfUrl,
+                ReturnExchangeRequests = order.ReturnExchangeRequests.Select(req => new ReturnExchangeRequestSnapshotDto
+                {
+                    Id = req.Id,
+                    Status = req.Status.ToString(),
+                    Reason = req.Reason,
+                    ManagerNote = req.ManagerNote,
+                    CreatedAt = req.CreatedAt,
+                    RequestedBy = req.RequestedBy?.FullName ?? "",
+                    EvidenceUrls = req.EvidenceUrls,
+                    ReturnItems = req.ReturnItems.Select(ri => new SalesOrderItemDto
+                    {
+                        ProductId = ri.ProductId,
+                        ProductName = ri.Product?.Name ?? "",
+                        ProductSku = ri.Product?.Sku ?? "",
+                        Quantity = ri.Quantity,
+                        PriceSnapshot = ri.PriceSnapshot,
+                        LineTotal = ri.PriceSnapshot * ri.Quantity
+                    }).ToList(),
+                    ExchangeItems = req.ExchangeItems.Select(ei => new SalesOrderItemDto
+                    {
+                        ProductId = ei.ProductId,
+                        ProductName = ei.Product?.Name ?? "",
+                        ProductSku = ei.Product?.Sku ?? "",
+                        Quantity = ei.Quantity,
+                        PriceSnapshot = ei.PriceSnapshot,
+                        LineTotal = ei.PriceSnapshot * ei.Quantity
+                    }).ToList()
+                }).ToList(),
                 Items = order.OrderItems.Select(oi => new SalesOrderItemDto
                 {
                     ProductId = oi.ProductId,
@@ -1094,79 +1553,65 @@ namespace VietTien.API.Services.Implementations
             if (order.PaymentMethod == PaymentMethod.SePay && order.PaymentStatus != PaymentStatus.Paid)
                 throw new InvalidOperationException("Đơn hàng SePay phải được thanh toán trước khi xác nhận.");
 
-            order.OrderStatus = OrderStatus.Confirmed;
-            if (order.FulfillmentStatus == FulfillmentStatus.Reserved || order.FulfillmentStatus == FulfillmentStatus.Unallocated)
+            // Gộp release+allocate tồn kho + tạo pick task + cập nhật OrderStatus vào 1 transaction duy
+            // nhất: trước đây ReleaseReservedAsync/AllocateAsync tự commit riêng và không có try/catch
+            // bọc quanh -> nếu AllocateAsync throw (vd hết hàng do giao dịch khác chen ngang giữa lúc
+            // checkout và lúc confirm), tồn đã release (mất bảo vệ) nhưng Order vẫn "PendingConfirmation"
+            // trong DB vì exception ném ra trước khi SaveChanges chạy tới — không có cách khôi phục.
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
             {
-                order.FulfillmentStatus = FulfillmentStatus.Allocated;
-                
-                // --- GENERATE PICK TASKS ---
-                // Get WH-DEFAULT
-                var defaultWarehouse = await _context.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH-DEFAULT");
-                if (defaultWarehouse == null) throw new Exception("Không tìm thấy kho mặc định (WH-DEFAULT).");
-
-                var pickTasksToCreate = new List<PickTask>();
-                var warehouseTasks = new Dictionary<Guid, PickTask>();
-
-                PickTask GetOrCreateTask(Guid warehouseId)
+                order.OrderStatus = OrderStatus.Confirmed;
+                order.ConfirmedAt = DateTime.UtcNow;
+                if (order.FulfillmentStatus == FulfillmentStatus.Reserved || order.FulfillmentStatus == FulfillmentStatus.Unallocated)
                 {
-                    if (!warehouseTasks.TryGetValue(warehouseId, out var task))
+                    order.FulfillmentStatus = FulfillmentStatus.Allocated;
+
+                    // Chuyển giữ mềm (Reserved, đặt lúc checkout) sang giữ chắc (Allocated) cho đơn này.
+                    var orderItemQuantities = order.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)).ToList();
+                    await _inventoryReservationService.ReleaseReservedAsync(orderItemQuantities);
+                    await _inventoryReservationService.AllocateAsync(orderItemQuantities);
+
+                    // --- GENERATE PICK TASKS ---
+                    // Get WH-DEFAULT
+                    var defaultWarehouse = await _context.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH-DEFAULT");
+                    if (defaultWarehouse == null) throw new Exception("Không tìm thấy kho mặc định (WH-DEFAULT).");
+
+                    var pickTasksToCreate = new List<PickTask>();
+                    var warehouseTasks = new Dictionary<Guid, PickTask>();
+
+                    PickTask GetOrCreateTask(Guid warehouseId)
                     {
-                        task = new PickTask
+                        if (!warehouseTasks.TryGetValue(warehouseId, out var task))
                         {
-                            Id = Guid.NewGuid(),
-                            OrderId = order.Id,
-                            WarehouseId = warehouseId,
-                            Status = PickTaskStatus.Pending,
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        warehouseTasks[warehouseId] = task;
-                        pickTasksToCreate.Add(task);
-                    }
-                    return task;
-                }
-
-                foreach (var item in order.OrderItems)
-                {
-                    var quantityRemaining = item.Quantity;
-
-                    // 1. Check WH-DEFAULT first
-                    var defaultInv = await _context.Inventories
-                        .Include(inv => inv.WarehouseLocation)
-                        .ThenInclude(wl => wl.Warehouse)
-                        .FirstOrDefaultAsync(inv => inv.ProductId == item.ProductId && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Id == defaultWarehouse.Id);
-
-                    if (defaultInv != null && defaultInv.OnHandQuantity > 0)
-                    {
-                        var takeQty = Math.Min(quantityRemaining, defaultInv.OnHandQuantity);
-                        var task = GetOrCreateTask(defaultWarehouse.Id);
-                        task.Items.Add(new PickTaskItem
-                        {
-                            PickTaskId = task.Id,
-                            ProductId = item.ProductId,
-                            QuantityToPick = takeQty,
-                            PickedQuantity = 0
-                        });
-                        quantityRemaining -= takeQty;
-                        // To be perfectly accurate in a high-concurrency environment, we might want to deduct allocated quantity from inventory. 
-                        // But since we just generate tasks, we assume staff will pick based on tasks.
+                            task = new PickTask
+                            {
+                                Id = Guid.NewGuid(),
+                                OrderId = order.Id,
+                                WarehouseId = warehouseId,
+                                Status = PickTaskStatus.Pending,
+                                CreatedAt = DateTime.UtcNow
+                            };
+                            warehouseTasks[warehouseId] = task;
+                            pickTasksToCreate.Add(task);
+                        }
+                        return task;
                     }
 
-                    // 2. If still remaining, check other warehouses
-                    if (quantityRemaining > 0)
+                    foreach (var item in order.OrderItems)
                     {
-                        var otherInvs = await _context.Inventories
+                        var quantityRemaining = item.Quantity;
+
+                        // 1. Check WH-DEFAULT first
+                        var defaultInv = await _context.Inventories
                             .Include(inv => inv.WarehouseLocation)
                             .ThenInclude(wl => wl.Warehouse)
-                            .Where(inv => inv.ProductId == item.ProductId && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Id != defaultWarehouse.Id && inv.OnHandQuantity > 0)
-                            .OrderByDescending(inv => inv.OnHandQuantity) // Greedily take from largest stock
-                            .ToListAsync();
+                            .FirstOrDefaultAsync(inv => inv.ProductId == item.ProductId && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Id == defaultWarehouse.Id);
 
-                        foreach (var inv in otherInvs)
+                        if (defaultInv != null && defaultInv.OnHandQuantity > 0)
                         {
-                            if (quantityRemaining <= 0) break;
-
-                            var takeQty = Math.Min(quantityRemaining, inv.OnHandQuantity);
-                            var task = GetOrCreateTask(inv.WarehouseLocation!.WarehouseId);
+                            var takeQty = Math.Min(quantityRemaining, defaultInv.OnHandQuantity);
+                            var task = GetOrCreateTask(defaultWarehouse.Id);
                             task.Items.Add(new PickTaskItem
                             {
                                 PickTaskId = task.Id,
@@ -1175,53 +1620,108 @@ namespace VietTien.API.Services.Implementations
                                 PickedQuantity = 0
                             });
                             quantityRemaining -= takeQty;
+                            // To be perfectly accurate in a high-concurrency environment, we might want to deduct allocated quantity from inventory.
+                            // But since we just generate tasks, we assume staff will pick based on tasks.
                         }
 
+                        // 2. If still remaining, check other warehouses
                         if (quantityRemaining > 0)
                         {
-                            // Edge case: if absolutely not enough stock everywhere, we still put the remainder in WH-DEFAULT to let them figure it out (or shortage alert).
-                            var task = GetOrCreateTask(defaultWarehouse.Id);
-                            var existingItem = task.Items.FirstOrDefault(i => i.ProductId == item.ProductId);
-                            if (existingItem != null) {
-                                existingItem.QuantityToPick += quantityRemaining;
-                            } else {
+                            var otherInvs = await _context.Inventories
+                                .Include(inv => inv.WarehouseLocation)
+                                .ThenInclude(wl => wl.Warehouse)
+                                .Where(inv => inv.ProductId == item.ProductId && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Id != defaultWarehouse.Id && inv.OnHandQuantity > 0)
+                                .OrderByDescending(inv => inv.OnHandQuantity) // Greedily take from largest stock
+                                .ToListAsync();
+
+                            foreach (var inv in otherInvs)
+                            {
+                                if (quantityRemaining <= 0) break;
+
+                                var takeQty = Math.Min(quantityRemaining, inv.OnHandQuantity);
+                                var task = GetOrCreateTask(inv.WarehouseLocation!.WarehouseId);
                                 task.Items.Add(new PickTaskItem
                                 {
                                     PickTaskId = task.Id,
                                     ProductId = item.ProductId,
-                                    QuantityToPick = quantityRemaining,
+                                    QuantityToPick = takeQty,
                                     PickedQuantity = 0
                                 });
+                                quantityRemaining -= takeQty;
+                            }
+
+                            if (quantityRemaining > 0)
+                            {
+                                // Edge case: if absolutely not enough stock everywhere, we still put the remainder in WH-DEFAULT to let them figure it out (or shortage alert).
+                                var task = GetOrCreateTask(defaultWarehouse.Id);
+                                var existingItem = task.Items.FirstOrDefault(i => i.ProductId == item.ProductId);
+                                if (existingItem != null) {
+                                    existingItem.QuantityToPick += quantityRemaining;
+                                } else {
+                                    task.Items.Add(new PickTaskItem
+                                    {
+                                        PickTaskId = task.Id,
+                                        ProductId = item.ProductId,
+                                        QuantityToPick = quantityRemaining,
+                                        PickedQuantity = 0
+                                    });
+                                }
                             }
                         }
                     }
+
+                    if (pickTasksToCreate.Any())
+                    {
+                        _context.PickTasks.AddRange(pickTasksToCreate);
+                    }
                 }
 
-                if (pickTasksToCreate.Any())
-                {
-                    _context.PickTasks.AddRange(pickTasksToCreate);
-                }
+                await _unitOfWork.Orders.UpdateOrderAsync(order);
+                await _unitOfWork.SaveChangesAsync();
+
+                await transaction.CommitAsync();
             }
-            
-            await _unitOfWork.Orders.UpdateOrderAsync(order);
-            await _unitOfWork.SaveChangesAsync();
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
         public async Task RejectOrderAsync(Guid orderId, Guid salesStaffId, string reason)
         {
+            if (string.IsNullOrWhiteSpace(reason))
+                throw new InvalidOperationException("Vui lòng nhập lý do từ chối đơn hàng.");
+
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             if (order.OrderStatus != OrderStatus.PendingConfirmation)
                 throw new InvalidOperationException("Chỉ đơn hàng đang 'Chờ xác nhận' mới có thể bị từ chối.");
 
-            order.OrderStatus = OrderStatus.Cancelled;
-            order.FulfillmentStatus = FulfillmentStatus.Unallocated;
+            // Gộp release tồn + cập nhật OrderStatus vào 1 transaction duy nhất (cùng pattern đã áp
+            // dụng cho ConfirmOrderAsync/PlaceOrderAsync...): ReleaseReservedAsync giờ tham gia
+            // transaction này thay vì tự commit riêng -> rollback nguyên tử nếu SaveChanges thất bại.
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                // Đơn ở PendingConfirmation luôn còn đang giữ mềm (Reserved) từ lúc checkout — trả lại.
+                await _inventoryReservationService.ReleaseReservedAsync(
+                    order.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)));
 
-            // Log reason logic could go here or as a note on the order if we have a note field.
-            // For now, we just cancel it.
+                order.OrderStatus = OrderStatus.Cancelled;
+                order.FulfillmentStatus = FulfillmentStatus.Unallocated;
+                order.CancelReason = reason;
 
-            await _unitOfWork.Orders.UpdateOrderAsync(order);
-            await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.Orders.UpdateOrderAsync(order);
+                await _unitOfWork.SaveChangesAsync();
+
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
 
         public async Task RequestCancelOrderAsync(Guid orderId, Guid customerId, RequestCancelOrderDto request)
@@ -1237,22 +1737,33 @@ namespace VietTien.API.Services.Implementations
             if (!validStatuses.Contains(order.OrderStatus))
                 throw new InvalidOperationException($"Không thể yêu cầu hủy đơn hàng ở trạng thái {order.OrderStatus}.");
 
+            if (order.DeliveryStatus == DeliveryStatus.InDelivery)
+                throw new InvalidOperationException("Không thể yêu cầu hủy đơn hàng đang trên đường giao.");
+
             order.OrderStatus = OrderStatus.CancelRequested;
             await _unitOfWork.Orders.UpdateOrderAsync(order);
+            await _unitOfWork.SaveChangesAsync();
 
+            // Đơn đã chuyển CancelRequested và commit thành công ở trên -> lỗi gửi thông báo cho Sale
+            // không được làm request báo lỗi cho khách (yêu cầu hủy đã ghi nhận thật), chỉ log để theo dõi.
             if (customerProfile.AssignedSalesStaffId.HasValue)
             {
-                await _notificationService.CreateNotificationAsync(
-                    NotificationType.SYS_24_CustomerRequestedCancel,
-                    customerProfile.AssignedSalesStaffId.Value,
-                    "Yêu cầu hủy đơn",
-                    $"Khách hàng yêu cầu hủy đơn {order.OrderCode}. Lý do: {request.Reason}",
-                    order.Id,
-                    "Order"
-                );
+                try
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_24_CustomerRequestedCancel,
+                        customerProfile.AssignedSalesStaffId.Value,
+                        "Yêu cầu hủy đơn",
+                        $"Khách hàng yêu cầu hủy đơn {order.OrderCode}. Lý do: {request.Reason}",
+                        order.Id,
+                        "Order"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[OrderService] Error sending cancel-request notification: {ex.Message}");
+                }
             }
-
-            await _unitOfWork.SaveChangesAsync();
         }
 
         public async Task ProcessCancelRequestAsync(Guid orderId, Guid salesStaffId, ProcessCancelRequestDto request)
@@ -1260,89 +1771,115 @@ namespace VietTien.API.Services.Implementations
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
-            if (order.OrderStatus != OrderStatus.CancelRequested && !request.IsApproved)
-                throw new InvalidOperationException("Không thể từ chối hủy khi đơn hàng không ở trạng thái yêu cầu hủy.");
-
-            bool wasCancelRequested = order.OrderStatus == OrderStatus.CancelRequested;
+            if (order.OrderStatus != OrderStatus.CancelRequested)
+                throw new InvalidOperationException(
+                    request.IsApproved
+                        ? "Không thể duyệt hủy khi đơn hàng không ở trạng thái yêu cầu hủy."
+                        : "Không thể từ chối hủy khi đơn hàng không ở trạng thái yêu cầu hủy.");
 
             var profile = await _context.CustomerProfiles.FindAsync(order.CustomerProfileId);
             var customerUserId = profile?.UserId ?? Guid.Empty;
 
-            if (!request.IsApproved)
-            {
-                // Khôi phục trạng thái
-                if (order.PaymentMethod == PaymentMethod.SePay && order.PaymentStatus != PaymentStatus.Paid)
-                    order.OrderStatus = OrderStatus.PendingPayment;
-                else if (order.PaymentMethod == PaymentMethod.COD && order.FulfillmentStatus == FulfillmentStatus.Unallocated)
-                    order.OrderStatus = OrderStatus.PendingConfirmation;
-                else if (order.FulfillmentStatus != FulfillmentStatus.Unallocated)
-                    order.OrderStatus = OrderStatus.Processing; // hoặc Confirmed tùy logic, lấy chung là Confirmed
-                else 
-                    order.OrderStatus = OrderStatus.Confirmed;
-                
-                if (customerUserId != Guid.Empty)
-                {
-                    await _notificationService.CreateNotificationAsync(
-                        NotificationType.SYS_25_CancelRequestResult,
-                        customerUserId,
-                        "Yêu cầu hủy đơn bị từ chối",
-                        $"Yêu cầu hủy đơn {order.OrderCode} không được chấp thuận. Lý do: {request.Reason}",
-                        order.Id,
-                        "Order"
-                    );
-                }
-            }
-            else
-            {
-                order.OrderStatus = OrderStatus.Cancelled;
-                order.FulfillmentStatus = FulfillmentStatus.Unallocated;
+            // Thông báo cho khách được gửi SAU khi transaction dưới đây commit thành công (không phải
+            // giữa chừng như trước) — lỗi gửi thông báo không được làm hỏng việc hủy/từ chối hủy đã
+            // ghi nhận thật. Biến local dưới đây chỉ để chuẩn bị nội dung, gửi thật ở cuối method.
+            string notificationTitle;
+            string notificationMessage;
 
-                // Hoàn lại tiền (nếu đã thanh toán) và Credit đã dùng
-                decimal amountToRefund = 0m;
-                if (order.PaymentStatus == PaymentStatus.Paid || order.PaymentStatus == PaymentStatus.PartiallyPaid)
+            // Gộp release tồn (nếu duyệt hủy) + hoàn Credit + cập nhật OrderStatus vào 1 transaction
+            // duy nhất: trước đây ReleaseAllocatedAsync/ReleaseReservedAsync tự commit riêng, tách biệt
+            // với SaveChanges cập nhật status/hoàn Credit ngay sau đó -> lỗi SaveChanges để lại tồn đã
+            // thả nhưng đơn/CreditTransaction không khớp.
+            await using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                if (!request.IsApproved)
                 {
-                    amountToRefund += order.FinalPayment; // Nếu mới thanh toán một phần thì đáng ra cần check amount paid thực tế, ở đây tạm dùng FinalPayment
-                }
-                amountToRefund += order.CreditApplied;
+                    // Khôi phục trạng thái
+                    if (order.PaymentMethod == PaymentMethod.SePay && order.PaymentStatus != PaymentStatus.Paid)
+                        order.OrderStatus = OrderStatus.PendingPayment;
+                    else if (order.PaymentMethod == PaymentMethod.COD && order.FulfillmentStatus == FulfillmentStatus.Unallocated)
+                        order.OrderStatus = OrderStatus.PendingConfirmation;
+                    else if (order.FulfillmentStatus != FulfillmentStatus.Unallocated)
+                        order.OrderStatus = OrderStatus.Processing; // hoặc Confirmed tùy logic, lấy chung là Confirmed
+                    else
+                        order.OrderStatus = OrderStatus.Confirmed;
 
-                if (amountToRefund > 0)
+                    notificationTitle = "Yêu cầu hủy đơn bị từ chối";
+                    notificationMessage = $"Yêu cầu hủy đơn {order.OrderCode} không được chấp thuận. Lý do: {request.Reason}";
+                }
+                else
                 {
-                    if (profile != null)
+                    // Trả lại phần tồn kho đang giữ trước khi đổi trạng thái — Allocated (đã Confirmed)
+                    // trả AllocatedQuantity, còn lại (chỉ mới giữ mềm lúc checkout) trả ReservedQuantity.
+                    var orderItemQuantities = order.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)).ToList();
+                    if (order.FulfillmentStatus == FulfillmentStatus.Allocated)
+                        await _inventoryReservationService.ReleaseAllocatedAsync(orderItemQuantities);
+                    else
+                        await _inventoryReservationService.ReleaseReservedAsync(orderItemQuantities);
+
+                    order.OrderStatus = OrderStatus.Cancelled;
+                    order.FulfillmentStatus = FulfillmentStatus.Unallocated;
+
+                    // Hoàn lại tiền (nếu đã thanh toán) và Credit đã dùng
+                    decimal amountToRefund = 0m;
+                    if (order.PaymentStatus == PaymentStatus.Paid || order.PaymentStatus == PaymentStatus.PartiallyPaid)
                     {
-                        profile.AvailableCredit += amountToRefund;
-                        // profile đã được track bởi EF Core, không cần gọi Update() thủ công
-                        
-                        _context.CreditTransactions.Add(new CreditTransaction
-                        {
-                            CustomerProfileId = profile.Id,
-                            Amount = amountToRefund,
-                            Description = $"Hoàn tiền từ đơn hàng hủy {order.OrderCode}",
-                            OrderId = order.Id,
-                            CreatedAt = DateTime.UtcNow
-                        });
+                        amountToRefund += order.FinalPayment; // Nếu mới thanh toán một phần thì đáng ra cần check amount paid thực tế, ở đây tạm dùng FinalPayment
                     }
+                    amountToRefund += order.CreditApplied;
+
+                    if (amountToRefund > 0)
+                    {
+                        if (profile != null)
+                        {
+                            profile.AvailableCredit += amountToRefund;
+                            // profile đã được track bởi EF Core, không cần gọi Update() thủ công
+
+                            _context.CreditTransactions.Add(new CreditTransaction
+                            {
+                                CustomerProfileId = profile.Id,
+                                Amount = amountToRefund,
+                                Description = $"Hoàn tiền từ đơn hàng hủy {order.OrderCode}",
+                                OrderId = order.Id,
+                                CreatedAt = DateTime.UtcNow
+                            });
+                        }
+                    }
+
+                    notificationTitle = "Yêu cầu hủy đơn được chấp thuận";
+                    notificationMessage = $"Yêu cầu hủy đơn {order.OrderCode} đã được xử lý thành công.";
                 }
 
-                // Nếu là COD, trả lại reservation/allocation (TODO)
+                await _unitOfWork.Orders.UpdateOrderAsync(order);
+                await _unitOfWork.SaveChangesAsync();
 
-                if (customerUserId != Guid.Empty)
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            if (customerUserId != Guid.Empty)
+            {
+                try
                 {
-                    string notifTitle = wasCancelRequested ? "Yêu cầu hủy đơn được chấp thuận" : "Đơn hàng đã bị hủy";
-                    string notifBody = wasCancelRequested ? $"Yêu cầu hủy đơn {order.OrderCode} đã được xử lý thành công." : $"Đơn hàng {order.OrderCode} đã bị hủy. Lý do: {request.Reason}";
-
                     await _notificationService.CreateNotificationAsync(
                         NotificationType.SYS_25_CancelRequestResult,
                         customerUserId,
-                        notifTitle,
-                        notifBody,
+                        notificationTitle,
+                        notificationMessage,
                         order.Id,
                         "Order"
                     );
                 }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[OrderService] Error sending cancel-request-result notification: {ex.Message}");
+                }
             }
-
-            await _unitOfWork.Orders.UpdateOrderAsync(order);
-            await _unitOfWork.SaveChangesAsync();
         }
 
         // =====================================================================
@@ -1354,8 +1891,9 @@ namespace VietTien.API.Services.Implementations
             if (dto.OrderIds == null || !dto.OrderIds.Any())
                 throw new Exception("Danh sách đơn hàng không được rỗng.");
 
-            if (dto.VehicleId < 1 || dto.VehicleId > 5)
-                throw new Exception("Mã xe không hợp lệ (phải từ 1 đến 5).");
+            var vehicleActive = await _context.Vehicles.AnyAsync(v => v.VehicleNumber == dto.VehicleId && v.IsActive);
+            if (!vehicleActive)
+                throw new Exception("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
 
             var validShifts = new[] { "Sáng", "Trưa", "Chiều" };
             if (!validShifts.Contains(dto.Shift))
@@ -1499,6 +2037,14 @@ namespace VietTien.API.Services.Implementations
             if (order.IsBlockedForDelivery)
                 throw new InvalidOperationException("Đơn hàng đã bị khóa do thất bại quá 3 lần. Vui lòng liên hệ Sales Manager.");
 
+            // Đơn đã thanh toán qua SePay -> không được thu tiền mặt (COD) lần nữa (tránh thu trùng).
+            if (order.PaymentStatus == PaymentStatus.Paid && dto.AmountCollected > 0)
+                throw new InvalidOperationException("Đơn hàng đã được thanh toán qua SePay, không được thu thêm tiền mặt (COD).");
+
+            // Khách từ chối nhận hàng -> bắt buộc chọn lý do (không được để trống).
+            if (dto.CustomerRejected && string.IsNullOrWhiteSpace(dto.RejectionReasonCode))
+                throw new InvalidOperationException("Vui lòng chọn lý do khi khách từ chối nhận hàng.");
+
             // Ràng buộc: Không cho phép giao hàng trước ngày hẹn dự kiến
             var localNow = DateTime.UtcNow.AddHours(7);
             var localToday = localNow.Date;
@@ -1510,6 +2056,8 @@ namespace VietTien.API.Services.Implementations
             var outcome = dto.DeliveryOutcome?.ToLower() ?? "delivered";
             bool debtCreated = false;
             decimal? remainingDebt = null;
+            bool signatureUploadFailed = false;
+            bool photoUploadFailed = false;
 
             // ─ Lưu ảnh chữ ký lên Cloudinary
             if (!string.IsNullOrEmpty(dto.CustomerSignatureBase64))
@@ -1523,7 +2071,11 @@ namespace VietTien.API.Services.Implementations
                     );
                     order.CustomerSignatureUrl = sigUrl;
                 }
-                catch (Exception ex) { Console.WriteLine($"[Delivery] Cloudinary Sig upload error: {ex.Message}"); }
+                catch (Exception ex)
+                {
+                    signatureUploadFailed = true;
+                    Console.WriteLine($"[Delivery] Cloudinary Sig upload error: {ex.Message}");
+                }
             }
 
             // ─ Lưu ảnh hiện trường lên Cloudinary
@@ -1538,7 +2090,11 @@ namespace VietTien.API.Services.Implementations
                     );
                     order.DeliveryPhotoUrl = photoUrl;
                 }
-                catch (Exception ex) { Console.WriteLine($"[Delivery] Cloudinary Photo upload error: {ex.Message}"); }
+                catch (Exception ex)
+                {
+                    photoUploadFailed = true;
+                    Console.WriteLine($"[Delivery] Cloudinary Photo upload error: {ex.Message}");
+                }
             }
 
             if (outcome == "delivered" || outcome == "partially_delivered")
@@ -1585,10 +2141,16 @@ namespace VietTien.API.Services.Implementations
             }
             else // failed
             {
+                if (dto.CustomerRejected)
+                    order.DeliveryRejectionReasonCode = dto.RejectionReasonCode;
+
                 order.FailedDeliveryCount++;
                 order.DeliveryStatus = DeliveryStatus.Failed;
 
-                if (order.FailedDeliveryCount >= 3)
+                var deliveryFailureThresholdRaw = await _systemConfigService.GetEffectiveValueAsync("DELIVERY_FAILURE_MANAGER_THRESHOLD");
+                var deliveryFailureThreshold = int.TryParse(deliveryFailureThresholdRaw, out var parsedThreshold) ? parsedThreshold : 3;
+
+                if (order.FailedDeliveryCount >= deliveryFailureThreshold)
                 {
                     order.IsBlockedForDelivery = true;
                     order.DeliveryStatus = DeliveryStatus.Failed;
@@ -1601,6 +2163,69 @@ namespace VietTien.API.Services.Implementations
 
             await _context.SaveChangesAsync();
 
+            // Đơn đã cập nhật trạng thái và commit thành công ở trên -> lỗi gửi notification không
+            // được làm fail request ghi nhận kết quả giao hàng, chỉ log để theo dõi.
+            if (order.IsBlockedForDelivery)
+            {
+                try
+                {
+                    await _notificationService.CreateRoleNotificationAsync(
+                        NotificationType.SYS_12_DeliveryFailedThirdTime,
+                        SystemRole.SalesManager,
+                        "Đơn hàng bị khóa do giao thất bại nhiều lần",
+                        $"Đơn hàng {order.OrderCode} đã giao thất bại {order.FailedDeliveryCount} lần và đã bị khóa, cần xử lý.",
+                        order.Id,
+                        "Order"
+                    );
+                }
+                catch (Exception notifyEx)
+                {
+                    Console.WriteLine($"[OrderService] Error sending delivery failed notification: {notifyEx.Message}");
+                }
+            }
+            else if (debtCreated)
+            {
+                try
+                {
+                    await _notificationService.CreateRoleNotificationAsync(
+                        NotificationType.SYS_13_CodUnderpaid,
+                        SystemRole.SalesManager,
+                        "Thu COD thiếu tiền",
+                        $"Đơn hàng {order.OrderCode} thu thiếu {remainingDebt:N0}đ, đã tạo sổ công nợ.",
+                        order.Id,
+                        "Order"
+                    );
+
+                    if (order.CustomerProfile?.AssignedSalesStaffId != null)
+                    {
+                        await _notificationService.CreateNotificationAsync(
+                            NotificationType.SYS_13_CodUnderpaid,
+                            order.CustomerProfile.AssignedSalesStaffId.Value,
+                            "Thu COD thiếu tiền",
+                            $"Đơn hàng {order.OrderCode} thu thiếu {remainingDebt:N0}đ, đã tạo sổ công nợ.",
+                            order.Id,
+                            "Order"
+                        );
+                    }
+                }
+                catch (Exception notifyEx)
+                {
+                    Console.WriteLine($"[OrderService] Error sending COD underpaid notification: {notifyEx.Message}");
+                }
+            }
+
+            var message = order.IsBlockedForDelivery
+                ? "Đơn hàng đã bị khóa do thất bại giao hàng vượt ngưỡng cho phép. Hệ thống đã chuyển hồ sơ lên Sales Manager."
+                : debtCreated ? $"Giao hàng thành công. Khách còn nợ {remainingDebt:N0}đ. Đã tạo sổ công nợ."
+                : "Giao hàng và thu tiền thành công.";
+
+            if (signatureUploadFailed || photoUploadFailed)
+            {
+                message += " Lưu ý: lỗi tải lên " +
+                    (signatureUploadFailed && photoUploadFailed ? "chữ ký và ảnh hiện trường" : signatureUploadFailed ? "chữ ký" : "ảnh hiện trường") +
+                    " — vui lòng chụp/upload lại bằng chứng giao hàng.";
+            }
+
             return new DeliveryResultResponseDto
             {
                 OrderId = order.Id,
@@ -1610,12 +2235,319 @@ namespace VietTien.API.Services.Implementations
                 DebtRecordCreated = debtCreated,
                 RemainingDebt = remainingDebt,
                 IsBlockedByFailures = order.IsBlockedForDelivery,
-                Message = order.IsBlockedForDelivery
-                    ? "Đơn hàng đã bị khóa do thất bại 3 lần liên tiếp. Hệ thống đã chuyển hồ sơ lên Sales Manager."
-                    : debtCreated ? $"Giao hàng thành công. Khách còn nợ {remainingDebt:N0}đ. Đã tạo sổ công nợ."
-                    : "Giao hàng và thu tiền thành công."
+                Message = message,
+                SignatureUploadFailed = signatureUploadFailed,
+                PhotoUploadFailed = photoUploadFailed
             };
         }
+
+        public async Task CreateReturnExchangeRequestAsync(Guid orderId, Guid requestedByUserId, CreateReturnExchangeRequestDto dto)
+        {
+            var order = await _context.Orders
+                .Include(o => o.CustomerProfile)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+
+            var isOwner = order.CustomerProfile != null && order.CustomerProfile.UserId == requestedByUserId;
+            if (!isOwner)
+            {
+                var requester = await _context.Users.FindAsync(requestedByUserId);
+                var isStaff = requester != null &&
+                              (requester.Role == SystemRole.SalesStaff || requester.Role == SystemRole.SalesManager ||
+                               requester.Role == SystemRole.Admin);
+                if (!isStaff)
+                    throw new UnauthorizedAccessException("Bạn không có quyền tạo yêu cầu đổi/trả trên đơn hàng này.");
+            }
+
+            if (order.OrderStatus != OrderStatus.Completed ||
+                (order.DeliveryStatus != DeliveryStatus.Delivered && order.DeliveryStatus != DeliveryStatus.PartiallyDelivered))
+            {
+                throw new InvalidOperationException("Chỉ được yêu cầu đổi/trả đối với các đơn đã giao thành công.");
+            }
+
+            var request = new ReturnExchangeRequest
+            {
+                OrderId = orderId,
+                CustomerProfileId = order.CustomerProfileId,
+                RequestedByUserId = requestedByUserId,
+                Reason = dto.Reason,
+                EvidenceUrls = dto.EvidenceUrls,
+                Status = ReturnExchangeStatus.Pending,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            foreach (var item in dto.ReturnItems)
+            {
+                var orderItem = await _context.OrderItems.FirstOrDefaultAsync(oi => oi.OrderId == orderId && oi.ProductId == item.ProductId)
+                                ?? throw new InvalidOperationException($"Sản phẩm {item.ProductId} không có trong đơn gốc.");
+                if (item.Quantity > orderItem.Quantity) throw new InvalidOperationException($"Số lượng trả vượt quá số lượng mua đối với sản phẩm {item.ProductId}.");
+
+                request.ReturnItems.Add(new ReturnExchangeRequestItem
+                {
+                    ProductId = item.ProductId,
+                    Quantity = item.Quantity,
+                    PriceSnapshot = orderItem.PriceSnapshot
+                });
+            }
+
+            foreach (var item in dto.ExchangeItems)
+            {
+                var product = await _context.Products.FindAsync(item.ProductId)
+                              ?? throw new InvalidOperationException($"Không tìm thấy sản phẩm mới {item.ProductId}.");
+
+                request.ExchangeItems.Add(new ReturnExchangeRequestNewItem
+                {
+                    ProductId = item.ProductId,
+                    Quantity = item.Quantity,
+                    PriceSnapshot = product.StandardListedPrice
+                });
+            }
+
+            _context.ReturnExchangeRequests.Add(request);
+            await _context.SaveChangesAsync();
+
+            // Yêu cầu đã được lưu thành công ở trên -> lỗi gửi notification không được làm fail
+            // request tạo yêu cầu đổi/trả, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_21_QualityReturnRequested,
+                    SystemRole.SalesManager,
+                    "Yêu cầu đổi/trả hàng mới",
+                    $"Đơn hàng {order.OrderCode} có yêu cầu đổi/trả hàng mới, lý do: {dto.Reason}",
+                    request.Id,
+                    "ReturnExchangeRequest"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending return/exchange request notification: {notifyEx.Message}");
+            }
+        }
+
+        public async Task ProcessReturnExchangeRequestAsync(Guid requestId, Guid managerId, ProcessReturnExchangeRequestDto dto)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var request = await _context.ReturnExchangeRequests
+                    .Include(r => r.ReturnItems)
+                    .Include(r => r.ExchangeItems)
+                    .Include(r => r.CustomerProfile)
+                    .Include(r => r.Order).ThenInclude(o => o.Debts)
+                    .FirstOrDefaultAsync(r => r.Id == requestId);
+
+                if (request == null) throw new KeyNotFoundException("Không tìm thấy yêu cầu.");
+                if (request.Status != ReturnExchangeStatus.Pending) throw new InvalidOperationException("Yêu cầu này đã được xử lý trước đó.");
+
+                request.ProcessedByUserId = managerId;
+                request.ProcessedAt = DateTime.UtcNow;
+                request.ManagerNote = dto.ManagerNote;
+
+                if (!dto.IsApproved)
+                {
+                    request.Status = ReturnExchangeStatus.Rejected;
+                    await _context.SaveChangesAsync();
+                    await transaction.CommitAsync();
+                    return;
+                }
+
+                request.Status = ReturnExchangeStatus.Approved;
+                request.Order.OrderStatus = OrderStatus.Returned;
+
+                decimal returnTotalValue = request.ReturnItems.Sum(ri => ri.PriceSnapshot * ri.Quantity);
+                decimal exchangeTotalValue = request.ExchangeItems.Sum(ei => ei.PriceSnapshot * ei.Quantity);
+                
+                decimal offsetAmount = returnTotalValue;
+
+                var activeDebts = request.Order.Debts.Where(d => d.Status == DebtStatus.InDebt).ToList();
+                foreach (var debt in activeDebts)
+                {
+                    if (offsetAmount <= 0) break;
+                    
+                    if (offsetAmount >= debt.DebtAmount)
+                    {
+                        offsetAmount -= debt.DebtAmount;
+                        debt.DebtAmount = 0;
+                        debt.Status = DebtStatus.Settled;
+                    }
+                    else
+                    {
+                        debt.DebtAmount -= offsetAmount;
+                        offsetAmount = 0;
+                    }
+                }
+
+                if (offsetAmount > 0)
+                {
+                    request.CustomerProfile.AvailableCredit += offsetAmount;
+                    _context.CreditTransactions.Add(new CreditTransaction
+                    {
+                        CustomerProfileId = request.CustomerProfileId,
+                        Amount = offsetAmount,
+                        Description = $"Hoàn tiền từ trả hàng đơn {request.Order.OrderCode}",
+                        OrderId = request.OrderId,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                }
+
+                if (request.ExchangeItems.Any())
+                {
+                    var replacementCode = $"VT-EX-{DateTime.UtcNow:yyyyMMddHHmmss}{new Random().Next(100, 999)}";
+                    var newOrder = new Order
+                    {
+                        CustomerProfileId = request.CustomerProfileId,
+                        OrderCode = replacementCode,
+                        TotalAmount = exchangeTotalValue,
+                        FinalPayment = exchangeTotalValue,
+                        PaymentMethod = PaymentMethod.COD,
+                        PaymentStatus = PaymentStatus.Pending,
+                        OrderStatus = OrderStatus.Confirmed,
+                        ConfirmedAt = DateTime.UtcNow,
+                        CreatedAt = DateTime.UtcNow,
+                        ReplacementOrderId = request.OrderId
+                    };
+
+                    if (request.CustomerProfile.AvailableCredit > 0)
+                    {
+                        decimal creditToApply = Math.Min(exchangeTotalValue, request.CustomerProfile.AvailableCredit);
+                        newOrder.CreditApplied = creditToApply;
+                        newOrder.FinalPayment -= creditToApply;
+                        request.CustomerProfile.AvailableCredit -= creditToApply;
+
+                        _context.CreditTransactions.Add(new CreditTransaction
+                        {
+                            CustomerProfileId = request.CustomerProfileId,
+                            Amount = -creditToApply,
+                            Description = $"Thanh toán cho đơn đổi hàng {replacementCode}",
+                            // OrderId sẽ để null tạm vì newOrder chưa sinh Id nếu chưa save
+                            CreatedAt = DateTime.UtcNow
+                        });
+
+                        if (newOrder.FinalPayment <= 0)
+                        {
+                            newOrder.PaymentStatus = PaymentStatus.Paid;
+                            newOrder.OrderStatus = OrderStatus.Confirmed;
+                            newOrder.ConfirmedAt = DateTime.UtcNow;
+                        }
+                    }
+
+                    var newOrderItems = request.ExchangeItems.Select(ei => new OrderItem
+                    {
+                        ProductId = ei.ProductId,
+                        Quantity = ei.Quantity,
+                        PriceSnapshot = ei.PriceSnapshot,
+                        Order = newOrder
+                    }).ToList();
+                    
+                    newOrder.OrderItems = newOrderItems;
+                    await _context.Orders.AddAsync(newOrder);
+                }
+
+                foreach (var ri in request.ReturnItems)
+                {
+                    _context.ReturnedGoodsLogs.Add(new ReturnedGoodsLog
+                    {
+                        OrderId = request.OrderId,
+                        WarehouseStaffId = managerId,
+                        Condition = "Chờ kiểm tra",
+                        QuantityReturned = ri.Quantity,
+                        InspectionDate = DateTime.UtcNow
+                    });
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        // =====================================================================
+        // BƯỚC 5: THU HỒI HÀNG LỖI TỪ KHÁCH HÀNG (PICKUP LOGISTICS)
+        // =====================================================================
+
+        public async Task<List<PendingPickupDto>> GetPendingPickupsAsync(Guid userId)
+        {
+            // Trả về danh sách ReturnExchangeRequest đã duyệt nhưng chưa lấy xong
+            var requests = await _context.ReturnExchangeRequests
+                .Include(r => r.Order)
+                .Include(r => r.CustomerProfile)
+                    .ThenInclude(c => c.User)
+                .Include(r => r.CustomerProfile)
+                    .ThenInclude(c => c.Addresses)
+                .Include(r => r.ReturnItems)
+                    .ThenInclude(ri => ri.Product)
+                .Where(r => r.Status == ReturnExchangeStatus.Approved && r.PickupStatus != PickupStatus.PickedUp)
+                .OrderByDescending(r => r.CreatedAt)
+                .ToListAsync();
+
+            return requests.Select(r => 
+            {
+                var defaultAddress = r.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
+                                  ?? r.CustomerProfile?.Addresses?.FirstOrDefault();
+                string address = defaultAddress != null
+                    ? $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}"
+                    : r.CustomerProfile?.CompanyAddress ?? "---";
+
+                return new PendingPickupDto
+                {
+                    RequestId = r.Id,
+                    RequestCode = r.Id.ToString().Substring(0, 8).ToUpper(),
+                    OrderId = r.OrderId,
+                    OrderCode = r.Order.OrderCode,
+                    CustomerName = r.CustomerProfile?.Representative ?? r.CustomerProfile?.CompanyName ?? "Khách hàng",
+                    CustomerPhone = r.CustomerProfile?.User?.PhoneNumber ?? r.CustomerProfile?.CompanyPhone ?? "---",
+                    ShippingAddress = address,
+                    PickupStatus = r.PickupStatus.ToString(),
+                    PickupVehicleId = r.PickupVehicleId,
+                    PickupShift = r.PickupShift,
+                    ScheduledPickupDate = r.ScheduledPickupDate,
+                    ReturnProductNames = r.ReturnItems.Select(ri => ri.Product.Name).ToList(),
+                    Items = r.ReturnItems.Select(ri => new PendingPickupItemDto
+                    {
+                        ProductId = ri.ProductId,
+                        ProductName = ri.Product.Name,
+                        Quantity = ri.Quantity,
+                        Reason = r.Reason ?? "Lỗi chất lượng"
+                    }).ToList()
+                };
+            }).ToList();
+        }
+
+        public async Task SchedulePickupAsync(Guid requestId, Guid userId, SchedulePickupRequestDto dto)
+        {
+            var req = await _context.ReturnExchangeRequests.FindAsync(requestId);
+            if (req == null) throw new KeyNotFoundException("Không tìm thấy yêu cầu đổi/trả.");
+
+            if (req.Status != ReturnExchangeStatus.Approved)
+                throw new InvalidOperationException("Chỉ có thể điều xe cho yêu cầu đã được duyệt.");
+
+            req.PickupVehicleId = dto.VehicleId;
+            req.PickupShift = dto.Shift;
+            req.ScheduledPickupDate = dto.PickupDate;
+            req.PickupStatus = PickupStatus.Scheduled;
+
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task ConfirmPickupAsync(Guid requestId, Guid userId)
+        {
+            var req = await _context.ReturnExchangeRequests.FindAsync(requestId);
+            if (req == null) throw new KeyNotFoundException("Không tìm thấy yêu cầu đổi/trả.");
+
+            if (req.PickupStatus != PickupStatus.Scheduled)
+                throw new InvalidOperationException("Yêu cầu chưa được lên lịch điều xe hoặc đã lấy rồi.");
+
+            req.PickupStatus = PickupStatus.PickedUp;
+
+            await _context.SaveChangesAsync();
+        }
+
 
         // =====================================================================
         // LUỒNG 5 – BƯỚC 3: YÊU CẦU HỦY ĐƠN PAID (CR-06)
@@ -1638,6 +2570,24 @@ namespace VietTien.API.Services.Implementations
 
             await _unitOfWork.Orders.UpdateOrderAsync(order);
             await _unitOfWork.SaveChangesAsync();
+
+            // Đơn đã chuyển trạng thái CancelRequested và commit thành công ở trên -> lỗi gửi
+            // notification không được làm fail request, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_23_PaidOrderCancelledUnresolved,
+                    SystemRole.SalesManager,
+                    "Yêu cầu hủy đơn đã thanh toán",
+                    $"Đơn hàng {order.OrderCode} (đã thanh toán {order.FinalPayment:N0}đ) có yêu cầu hủy, lý do: {reason}. Cần duyệt và xử lý hoàn tiền.",
+                    order.Id,
+                    "Order"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending paid order cancel request notification: {notifyEx.Message}");
+            }
         }
 
         // =====================================================================
@@ -1698,6 +2648,7 @@ namespace VietTien.API.Services.Implementations
                     PaymentMethod = originalOrder.PaymentMethod,
                     PaymentStatus = reallocatedToNewOrder >= newOrderTotal ? PaymentStatus.Paid : PaymentStatus.PartiallyPaid,
                     OrderStatus = OrderStatus.Confirmed,
+                    ConfirmedAt = DateTime.UtcNow,
                     CreatedAt = DateTime.UtcNow
                 };
                 foreach (var item in newOrderItems) { item.Order = replacementOrder; }
@@ -1756,6 +2707,137 @@ namespace VietTien.API.Services.Implementations
                     Message = creditToWallet > 0
                         ? $"Đã tạo đơn thay thế {replacementCode}. {creditToWallet:N0}đ đã được chuyển vào ví Credit của khách hàng."
                         : $"Đã tạo đơn thay thế {replacementCode}. Toàn bộ giá trị đơn gốc đã được chuyển sang đơn mới."
+                };
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+        public async Task<ReplacementOrderResponseDto> CreateExchangeReplacementOrderAsync(Guid requestId, Guid userId)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+
+            try
+            {
+                // 1. Get the ExchangeRequest
+                var request = await _context.ReturnExchangeRequests
+                    .Include(r => r.Order)
+                    .Include(r => r.CustomerProfile)
+                    .Include(r => r.ReturnItems)
+                    .Include(r => r.ExchangeItems)
+                    .FirstOrDefaultAsync(r => r.Id == requestId)
+                    ?? throw new KeyNotFoundException("Không tìm thấy yêu cầu đổi trả.");
+
+                if (request.Status != ReturnExchangeStatus.Approved) 
+                {
+                    throw new InvalidOperationException("Yêu cầu chưa được duyệt.");
+                }
+                
+                if (request.ReplacementOrderId != null)
+                    throw new InvalidOperationException("Yêu cầu này đã được tạo đơn thay thế.");
+
+                // 2. Calculate values
+                decimal totalReturnedValue = request.ReturnItems.Sum(ri => ri.Quantity * ri.PriceSnapshot);
+                decimal newOrderTotal = request.ExchangeItems.Sum(ei => ei.Quantity * ei.PriceSnapshot);
+
+                // 3. Financial logic
+                decimal finalPayment = 0;
+                decimal creditApplied = 0;
+                decimal creditToWallet = 0;
+
+                if (newOrderTotal > totalReturnedValue)
+                {
+                    creditApplied = totalReturnedValue;
+                    finalPayment = newOrderTotal - totalReturnedValue;
+                }
+                else if (newOrderTotal == totalReturnedValue)
+                {
+                    creditApplied = newOrderTotal;
+                    finalPayment = 0;
+                }
+                else // newOrderTotal < totalReturnedValue
+                {
+                    creditApplied = newOrderTotal;
+                    finalPayment = 0;
+                    creditToWallet = totalReturnedValue - newOrderTotal;
+                }
+
+                // 4. Create Replacement Order
+                var replacementCode = $"VT-EX-{DateTime.UtcNow:yyyyMMddHHmmss}{new Random().Next(100, 999)}";
+                var replacementOrder = new Order
+                {
+                    CustomerProfileId = request.CustomerProfileId,
+                    OrderCode = replacementCode,
+                    TotalAmount = newOrderTotal,
+                    DiscountAmount = 0,
+                    VatAmount = 0,
+                    CreditApplied = creditApplied,
+                    FinalPayment = finalPayment,
+                    PaymentMethod = PaymentMethod.COD,
+                    PaymentStatus = finalPayment > 0 ? PaymentStatus.Pending : PaymentStatus.Paid,
+                    OrderStatus = OrderStatus.Confirmed,
+                    ConfirmedAt = DateTime.UtcNow,
+                    SalesStaffId = request.Order.SalesStaffId,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                var newOrderItems = new List<OrderItem>();
+                foreach (var ei in request.ExchangeItems)
+                {
+                    newOrderItems.Add(new OrderItem
+                    {
+                        Order = replacementOrder,
+                        ProductId = ei.ProductId,
+                        Quantity = ei.Quantity,
+                        PriceSnapshot = ei.PriceSnapshot,
+                        CostSnapshot = 0
+                    });
+                }
+                replacementOrder.OrderItems = newOrderItems;
+                await _context.Orders.AddAsync(replacementOrder);
+                await _context.SaveChangesAsync(); // to get Id
+
+                request.ReplacementOrderId = replacementOrder.Id;
+
+                // 5. Customer Profile Wallet
+                if (creditToWallet > 0)
+                {
+                    var profile = await _context.CustomerProfiles.FindAsync(request.CustomerProfileId);
+                    if (profile != null)
+                    {
+                        profile.AvailableCredit += creditToWallet;
+                        
+                        var creditReallocation = new PaymentReallocation
+                        {
+                            OriginalOrderId = request.OrderId,
+                            ReplacementOrderId = replacementOrder.Id,
+                            Amount = creditToWallet,
+                            Status = "RefundedToCredit_Exchange",
+                            Timestamp = DateTime.UtcNow
+                        };
+                        await _context.PaymentReallocations.AddAsync(creditReallocation);
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                var updatedProfile = await _context.CustomerProfiles.FindAsync(request.CustomerProfileId);
+
+                return new ReplacementOrderResponseDto
+                {
+                    ReplacementOrderId = replacementOrder.Id,
+                    ReplacementOrderCode = replacementOrder.OrderCode,
+                    NewOrderValue = newOrderTotal,
+                    OriginalPaidAmount = totalReturnedValue,
+                    CreditAllocated = creditToWallet,
+                    ReallocatedAmount = creditApplied,
+                    CustomerCreditBalance = updatedProfile?.AvailableCredit ?? 0,
+                    Message = creditToWallet > 0
+                        ? $"Đã tạo đơn thay thế {replacementCode}. {creditToWallet:N0}đ đã được hoàn vào ví Credit."
+                        : (finalPayment > 0 ? $"Đã tạo đơn thay thế {replacementCode}. Khách cần thanh toán thêm {finalPayment:N0}đ." : $"Đã tạo đơn thay thế {replacementCode} (Đổi ngang).")
                 };
             }
             catch

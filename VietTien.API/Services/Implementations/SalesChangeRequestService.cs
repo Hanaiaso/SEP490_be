@@ -31,17 +31,20 @@ namespace VietTien.API.Services.Implementations
         private readonly ILogger<SalesChangeRequestService> _logger;
         private readonly IHubContext<SalesHub> _salesHub;
         private readonly ICloudinaryService _cloudinary;
+        private readonly INotificationService _notificationService;
 
         public SalesChangeRequestService(
             ApplicationDbContext context,
             ILogger<SalesChangeRequestService> logger,
             IHubContext<SalesHub> salesHub,
-            ICloudinaryService cloudinary)
+            ICloudinaryService cloudinary,
+            INotificationService notificationService)
         {
             _context = context;
             _logger = logger;
             _salesHub = salesHub;
             _cloudinary = cloudinary;
+            _notificationService = notificationService;
         }
 
         // ─── CUSTOMER ─────────────────────────────────────────────────────────────
@@ -115,6 +118,24 @@ namespace VietTien.API.Services.Implementations
                 customerName,
                 message = $"Khách hàng {customerName} yêu cầu đổi Sale phụ trách."
             });
+
+            // Yêu cầu đã được lưu và báo qua SignalR ở trên -> lỗi lưu Notification không được
+            // làm fail request tạo yêu cầu đổi Sale, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_14_CustomerRequestChangeSales,
+                    SystemRole.SalesManager,
+                    "Yêu cầu đổi Sale mới",
+                    $"Khách hàng {customerName} yêu cầu đổi Sale phụ trách.",
+                    request.Id,
+                    "SalesChangeRequest"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[SalesChangeRequestService] Error sending change-sales request notification: {notifyEx.Message}");
+            }
 
             return request.Id;
         }
@@ -432,6 +453,24 @@ namespace VietTien.API.Services.Implementations
                 customerName = DisplayName(request.CustomerProfile),
                 message = $"Yêu cầu đổi Sale của khách hàng {DisplayName(request.CustomerProfile)} đã bị từ chối."
             });
+
+            // Yêu cầu đã được lưu và báo qua SignalR ở trên -> lỗi lưu Notification không được
+            // làm fail request từ chối, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    NotificationType.SYS_15_ChangeSalesRequestResult,
+                    request.CustomerProfile.UserId,
+                    "Yêu cầu đổi Sale bị từ chối",
+                    "Yêu cầu đổi Sale của bạn đã bị từ chối. Xem lý do trong chi tiết yêu cầu.",
+                    request.Id,
+                    "SalesChangeRequest"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[SalesChangeRequestService] Error sending change-sales rejected notification: {notifyEx.Message}");
+            }
         }
 
         // Bước 5 + 6: phê duyệt, chỉ định Sale mới, quyết định giữ/chuyển từng đơn, audit + thông báo
@@ -558,6 +597,24 @@ namespace VietTien.API.Services.Implementations
                 source = AssignmentSource.ManualReassignment,
                 assignedAt = DateTime.UtcNow
             });
+
+            // Yêu cầu đã được phê duyệt, commit và báo qua SignalR ở trên -> lỗi lưu Notification
+            // không được làm fail request phê duyệt, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    NotificationType.SYS_15_ChangeSalesRequestResult,
+                    customerUserId,
+                    "Yêu cầu đổi Sale đã được duyệt",
+                    "Yêu cầu đổi Sale của bạn đã được phê duyệt. Sale mới sẽ liên hệ với bạn.",
+                    requestId,
+                    "SalesChangeRequest"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[SalesChangeRequestService] Error sending change-sales approved notification: {notifyEx.Message}");
+            }
         }
 
         // ─── HELPERS ──────────────────────────────────────────────────────────────

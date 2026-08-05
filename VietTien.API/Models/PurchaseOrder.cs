@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace VietTien.API.Models
 {
     public enum PurchaseOrderStatus { Draft, Issued, SentToWarehouse, PartiallyReceived, FullyReceived, DiscrepancyReview, Closed, Cancelled }
@@ -6,12 +8,18 @@ namespace VietTien.API.Models
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public string Code { get; set; } = string.Empty; // e.g., PO-2026-001
-        
+
         public Guid CreatedById { get; set; } // CEO
         public Guid SupplierId { get; set; }
         public Guid WarehouseId { get; set; } // Kho nhận hàng
 
         public PurchaseOrderStatus Status { get; set; } = PurchaseOrderStatus.Draft;
+
+        // Concurrency token: chống 2 request đồng thời chuyển trạng thái PO (vd CEO double-click Cancel
+        // trong khi kho vừa ResolveDiscrepancy) ghi đè lẫn nhau âm thầm -> throw DbUpdateConcurrencyException,
+        // middleware map sẵn thành 409.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? ExpectedDeliveryDate { get; set; }

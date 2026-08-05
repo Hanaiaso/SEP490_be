@@ -10,10 +10,12 @@ namespace VietTien.API.Controllers
     public class SePayController : ControllerBase
     {
         private readonly IOrderService _orderService;
+        private readonly IWebhookLogService _webhookLogService;
 
-        public SePayController(IOrderService orderService)
+        public SePayController(IOrderService orderService, IWebhookLogService webhookLogService)
         {
             _orderService = orderService;
+            _webhookLogService = webhookLogService;
         }
 
         [HttpPost("sepay-callback")]
@@ -45,14 +47,32 @@ namespace VietTien.API.Controllers
                     providedToken = Request.Query["token"].FirstOrDefault()?.Trim();
                 }
 
-                Console.WriteLine($"[SePay Webhook] Extracted Token: '{providedToken}'");
+                Console.WriteLine($"[SePay Webhook] Token extracted: {(string.IsNullOrEmpty(providedToken) ? "(none)" : "(present)")}");
 
                 var isDevelopment = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
                 if (string.IsNullOrEmpty(providedToken) && !isDevelopment)
                     return Unauthorized(new { success = false, message = "Missing Token" });
 
-                await _orderService.ProcessSePayWebhookAsync(payload, providedToken ?? "");
-                return Ok(new { success = true });
+                // Ghi lại payload đã xác thực (không ghi token) để có thể replay/retry nếu xử lý lỗi.
+                var webhookLogId = await _webhookLogService.LogReceivedAsync(payload);
+
+                try
+                {
+                    await _orderService.ProcessSePayWebhookAsync(payload, providedToken ?? "");
+                    await _webhookLogService.MarkProcessedAsync(webhookLogId);
+                    return Ok(new { success = true });
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Sai token: giữ nguyên hành vi bảo mật cũ (không xử lý), không đưa vào diện tự động retry
+                    // (retry dùng token đáng tin cậy phía server nên sẽ "hợp thức hóa" ngược 1 request sai token nếu cho retry ở đây).
+                    throw;
+                }
+                catch (Exception innerEx)
+                {
+                    await _webhookLogService.MarkFailedAsync(webhookLogId, innerEx);
+                    throw;
+                }
             }
             catch (UnauthorizedAccessException ex)
             {

@@ -45,9 +45,13 @@ namespace VietTien.API.Controllers
                 var result = await _goodsIssueService.GetGoodsIssueByIdAsync(id);
                 return Ok(result);
             }
-            catch (Exception ex)
+            catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
             }
         }
 
@@ -62,6 +66,10 @@ namespace VietTien.API.Controllers
 
                 var result = await _goodsIssueService.CreateGoodsIssueAsync(request, Guid.Parse(staffIdStr));
                 return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
             }
             catch (Exception ex)
             {
@@ -83,6 +91,45 @@ namespace VietTien.API.Controllers
                 var result = await _goodsIssueService.UploadProofAsync(id, file);
                 return Ok(result);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Phiếu xuất kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}/handover")]
+        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        public async Task<IActionResult> UpdateHandoverInfo(Guid id, [FromBody] UpdateGoodsIssueHandoverDto dto)
+        {
+            try
+            {
+                var result = await _goodsIssueService.UpdateHandoverInfoAsync(id, dto);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Phiếu xuất kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -90,7 +137,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/post")]
-        [Authorize(Roles = "WarehouseStaff")]
+        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
         public async Task<IActionResult> PostGoodsIssue(Guid id)
         {
             try
@@ -100,6 +147,48 @@ namespace VietTien.API.Controllers
 
                 var result = await _goodsIssueService.PostGoodsIssueAsync(id, Guid.Parse(staffIdStr));
                 return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Tồn kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/reversal")]
+        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        public async Task<IActionResult> CreateReversal(Guid id, [FromBody] CreateReversalRequestDto dto)
+        {
+            try
+            {
+                var staffIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(staffIdStr)) return Unauthorized();
+
+                var result = await _goodsIssueService.CreateReversalAsync(id, dto, Guid.Parse(staffIdStr));
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Tồn kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
             }
             catch (Exception ex)
             {

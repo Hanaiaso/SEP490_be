@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
@@ -12,11 +13,13 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly IHubContext<WarehouseHub> _warehouseHub;
+        private readonly ILogger<InventoryService> _logger;
 
-        public InventoryService(ApplicationDbContext context, IHubContext<WarehouseHub> warehouseHub)
+        public InventoryService(ApplicationDbContext context, IHubContext<WarehouseHub> warehouseHub, ILogger<InventoryService> logger)
         {
             _context = context;
             _warehouseHub = warehouseHub;
+            _logger = logger;
         }
 
         public async Task<PaginatedList<InventoryItemDto>> GetInventoryByWarehouseAsync(Guid warehouseId, string? search, int? minQty, int? maxQty, DateTime? fromDate, DateTime? toDate, int pageNumber, int pageSize)
@@ -92,6 +95,9 @@ namespace VietTien.API.Services.Implementations
 
         public async Task AdjustInventoryAsync(Guid inventoryId, int newQuantity, string? note, Guid staffId)
         {
+            if (newQuantity < 0)
+                throw new Exception("Số lượng tồn kho điều chỉnh không được âm.");
+
             var inventory = await _context.Inventories
                 .Include(i => i.Product)
                 .Include(i => i.Material)
@@ -101,28 +107,43 @@ namespace VietTien.API.Services.Implementations
 
             if (inventory == null)
             {
-                throw new Exception("Inventory record not found.");
+                throw new KeyNotFoundException("Inventory record not found.");
+            }
+
+            var staff = await _context.Users.FindAsync(staffId);
+            if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
+                staff.AssignedWarehouseId != inventory.WarehouseLocation.WarehouseId)
+            {
+                throw new UnauthorizedAccessException("Bạn không có quyền điều chỉnh tồn kho của kho này.");
             }
 
             var oldQuantity = inventory.OnHandQuantity;
             inventory.OnHandQuantity = newQuantity;
             inventory.LastUpdatedByUserId = staffId;
             inventory.LastUpdatedAt = DateTime.UtcNow;
-            
+
             // In a real system, you might want to log the `note` to an Audit table
             // For now, we update the inventory directly per requirements
 
             await _context.SaveChangesAsync();
 
-            // Send Notification to CEO
-            var staff = await _context.Users.FindAsync(staffId);
-            var staffName = staff?.FullName ?? "Nhân viên";
-            var warehouseName = inventory.WarehouseLocation.Warehouse?.Name ?? "Kho không xác định";
-            var itemName = inventory.Product?.Name ?? inventory.Material?.Name ?? "N/A";
+            try
+            {
+                // Send Notification to CEO
+                var staffName = staff?.FullName ?? "Nhân viên";
+                var warehouseName = inventory.WarehouseLocation.Warehouse?.Name ?? "Kho không xác định";
+                var itemName = inventory.Product?.Name ?? inventory.Material?.Name ?? "N/A";
 
-            var message = $"[Cập nhật Tồn Kho] {staffName} vừa cập nhật số lượng của '{itemName}' trong {warehouseName} từ {oldQuantity} thành {newQuantity}.";
-            
-            await _warehouseHub.Clients.All.SendAsync("ReceiveNotification", message);
+                var message = $"[Cập nhật Tồn Kho] {staffName} vừa cập nhật số lượng của '{itemName}' trong {warehouseName} từ {oldQuantity} thành {newQuantity}.";
+
+                await _warehouseHub.Clients.All.SendAsync("ReceiveNotification", message);
+            }
+            catch (Exception ex)
+            {
+                // Tồn kho đã cập nhật và commit thành công ở trên -> lỗi gửi SignalR không được làm
+                // request báo lỗi cho client, chỉ log để theo dõi.
+                _logger.LogError(ex, "Lỗi gửi thông báo SignalR sau khi điều chỉnh Inventory {InventoryId}", inventoryId);
+            }
         }
 
         public async Task<InventoryItemDto> AddProductToWarehouseAsync(AddInventoryRequest request, Guid staffId)
@@ -140,7 +161,7 @@ namespace VietTien.API.Services.Implementations
             if (request.ProductId != null)
             {
                 var product = await _context.Products.FindAsync(request.ProductId);
-                if (product == null) throw new Exception("Không tìm thấy sản phẩm.");
+                if (product == null) throw new KeyNotFoundException("Không tìm thấy sản phẩm.");
                 itemName = product.Name;
                 itemSku = product.Sku;
                 itemType = "Product";
@@ -148,13 +169,13 @@ namespace VietTien.API.Services.Implementations
             else
             {
                 var material = await _context.Materials.FindAsync(request.MaterialId);
-                if (material == null) throw new Exception("Không tìm thấy nguyên liệu.");
+                if (material == null) throw new KeyNotFoundException("Không tìm thấy nguyên liệu.");
                 itemName = material.Name;
                 itemType = "Material";
             }
 
             var location = await _context.WarehouseLocations.Include(l => l.Warehouse).FirstOrDefaultAsync(l => l.Id == request.WarehouseLocationId);
-            if (location == null) throw new Exception("Không tìm thấy vị trí lưu trữ.");
+            if (location == null) throw new KeyNotFoundException("Không tìm thấy vị trí lưu trữ.");
 
             // Check if inventory already exists
             Inventory? existingInventory;
@@ -171,7 +192,7 @@ namespace VietTien.API.Services.Implementations
 
             if (existingInventory != null)
             {
-                throw new Exception("Mục này đã tồn tại ở vị trí lưu trữ này. Vui lòng cập nhật số lượng thay vì thêm mới.");
+                throw new InvalidOperationException("Mục này đã tồn tại ở vị trí lưu trữ này. Vui lòng cập nhật số lượng thay vì thêm mới.");
             }
 
             if (request.InitialQuantity < 0) throw new Exception("Số lượng ban đầu không hợp lệ.");
@@ -193,12 +214,33 @@ namespace VietTien.API.Services.Implementations
             };
 
             _context.Inventories.Add(newInventory);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Lưới an toàn cuối cho race check-then-insert: 2 request đồng thời cùng thêm 1 sản phẩm/
+                // nguyên liệu vào cùng 1 vị trí kho -> request thứ 2 vi phạm unique index (Inventories) thay
+                // vì tạo dòng trùng. Message giữ giống hệt case check ở trên để client xử lý nhất quán.
+                throw new InvalidOperationException("Mục này đã tồn tại ở vị trí lưu trữ này. Vui lòng cập nhật số lượng thay vì thêm mới.");
+            }
 
             var staff = await _context.Users.FindAsync(staffId);
             var staffName = staff?.FullName ?? "Nhân viên";
             var message = $"[Nhập Kho Mới] {staffName} vừa thêm {request.InitialQuantity} '{itemName}' vào vị trí '{location.Name}' (Kho {location.Warehouse?.Name}).";
-            await _warehouseHub.Clients.All.SendAsync("ReceiveNotification", message);
+
+            try
+            {
+                await _warehouseHub.Clients.All.SendAsync("ReceiveNotification", message);
+            }
+            catch (Exception ex)
+            {
+                // Tồn kho đã tạo và commit thành công ở trên -> lỗi gửi SignalR không được làm request
+                // báo lỗi cho client, chỉ log để theo dõi.
+                _logger.LogError(ex, "Lỗi gửi thông báo SignalR sau khi thêm Inventory {InventoryId}", newInventory.Id);
+            }
 
             return new InventoryItemDto
             {
@@ -216,5 +258,10 @@ namespace VietTien.API.Services.Implementations
                 LastUpdatedAt = newInventory.LastUpdatedAt
             };
         }
+
+        // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
+        // unique index (Inventories) khỏi các lỗi DbUpdateException khác không nên bị nuốt thành 409.
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+            => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
     }
 }

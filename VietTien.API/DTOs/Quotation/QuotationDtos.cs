@@ -11,10 +11,14 @@ namespace VietTien.API.DTOs.Quotation
 
     public class CreateQuotationVersionRequest
     {
-        [Required]
+        [Range(0.01, double.MaxValue, ErrorMessage = "Tổng giá đề xuất phải lớn hơn 0")]
         public decimal ProposedTotal { get; set; }
+
+        [MaxLength(2000)]
         public string? SalesNote { get; set; }
+
         [Required]
+        [MinLength(1, ErrorMessage = "Báo giá phải có ít nhất 1 sản phẩm.")]
         public List<QuotationVersionItemRequest> Items { get; set; } = new List<QuotationVersionItemRequest>();
     }
 
@@ -22,27 +26,29 @@ namespace VietTien.API.DTOs.Quotation
     {
         [Required]
         public Guid ProductId { get; set; }
-        [Required]
+
+        [Range(0.01, double.MaxValue, ErrorMessage = "Đơn giá đề xuất phải lớn hơn 0")]
         public decimal ProposedUnitPrice { get; set; }
     }
 
     public class ManagerReviewRequest
     {
-        [Required]
         public bool IsApproved { get; set; }
+
+        [MaxLength(1000)]
         public string? ManagerNote { get; set; }
     }
 
     public class CeoReviewRequest
     {
-        [Required]
         public bool IsApproved { get; set; }
+
+        [MaxLength(1000)]
         public string? CeoNote { get; set; }
     }
 
     public class CustomerDecisionRequest
     {
-        [Required]
         public bool IsAccepted { get; set; }
     }
 
@@ -120,9 +126,21 @@ namespace VietTien.API.DTOs.Quotation
         public bool IsRead { get; set; }
     }
 
-    public class SendChatMessageRequest
+    public class SendChatMessageRequest : IValidatableObject
     {
+        [MaxLength(4000, ErrorMessage = "Tin nhắn không được vượt quá 4000 ký tự.")]
         public string MessageText { get; set; } = string.Empty;
+
         public string? FileUrl { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (string.IsNullOrWhiteSpace(MessageText) && string.IsNullOrWhiteSpace(FileUrl))
+            {
+                yield return new ValidationResult(
+                    "Tin nhắn phải có nội dung hoặc tệp đính kèm.",
+                    new[] { nameof(MessageText) });
+            }
+        }
     }
 }

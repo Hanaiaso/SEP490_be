@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace VietTien.API.Models
 {
     public class Quotation
@@ -9,6 +11,11 @@ namespace VietTien.API.Models
         public Guid? AcceptedVersionId { get; set; }
 
         public QuotationStatus Status { get; set; } = QuotationStatus.Draft;
+
+        // Concurrency token: chống 2 Sale cùng "chốt" 1 báo giá (PickUpQuotationAsync) ghi đè
+        // SalesStaffId của nhau -> throw DbUpdateConcurrencyException, middleware map sẵn thành 409.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
         public decimal OriginalTotal { get; set; }
 

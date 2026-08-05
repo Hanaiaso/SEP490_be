@@ -10,6 +10,9 @@ namespace VietTien.API.Services.Interfaces
         /// <summary>Xác minh OTP, kích hoạt tài khoản</summary>
         Task<(bool Success, string Message)> VerifyOtpAsync(VerifyOtpDto dto);
 
+        /// <summary>Gửi lại mã OTP qua email</summary>
+        Task<(bool Success, string Message)> ResendEmailOtpAsync(string email);
+
         /// <summary>Đăng nhập bằng email/mật khẩu</summary>
         Task<(bool Success, string Message, AuthResponseDto? Data)> LoginAsync(LoginDto dto);
 

@@ -18,12 +18,17 @@ namespace VietTien.API.Controllers
             _context = context;
         }
 
+        private const int MaxPageLimit = 100;
+
         [HttpGet]
         public async Task<IActionResult> GetNotifications([FromQuery] int page = 1, [FromQuery] int limit = 20)
         {
             var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
                 return Unauthorized();
+
+            page = page < 1 ? 1 : page;
+            limit = limit < 1 ? 20 : Math.Min(limit, MaxPageLimit);
 
             var query = _context.Notifications
                 .Where(n => n.RecipientUserId == userId)
@@ -93,6 +98,42 @@ namespace VietTien.API.Controllers
             }
 
             return Ok();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteNotification(Guid id)
+        {
+            var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+                return Unauthorized();
+
+            var notif = await _context.Notifications.FirstOrDefaultAsync(n => n.Id == id && n.RecipientUserId == userId);
+            if (notif == null) return NotFound();
+
+            _context.Notifications.Remove(notif);
+            await _context.SaveChangesAsync();
+
+            return Ok();
+        }
+
+        [HttpDelete("read-all")]
+        public async Task<IActionResult> DeleteAllRead()
+        {
+            var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+                return Unauthorized();
+
+            var readNotifs = await _context.Notifications
+                .Where(n => n.RecipientUserId == userId && n.IsRead)
+                .ToListAsync();
+
+            if (readNotifs.Any())
+            {
+                _context.Notifications.RemoveRange(readNotifs);
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new { Deleted = readNotifs.Count });
         }
     }
 }

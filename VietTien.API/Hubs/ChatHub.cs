@@ -18,6 +18,13 @@ namespace VietTien.API.Hubs
 
         public async Task JoinQuotationChat(string quotationId)
         {
+            var userId = Guid.Parse(Context.User!.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var role = Context.User!.FindFirstValue(ClaimTypes.Role) ?? string.Empty;
+
+            // Ném UnauthorizedAccessException nếu người gọi không phải khách hàng/nhân viên phụ trách
+            // của báo giá này — chặn việc nghe lén nhóm chat của báo giá người khác.
+            await _quotationService.GetMessagesAsync(Guid.Parse(quotationId), userId, role);
+
             await Groups.AddToGroupAsync(Context.ConnectionId, quotationId);
         }
 

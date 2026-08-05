@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -6,12 +7,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using VietTien.API.Data;
+using VietTien.API.Infrastructure.Middleware;
 using VietTien.API.Infrastructure.Security;
 using VietTien.API.Repositories.Implementations;
 using VietTien.API.Repositories.Interfaces;
 using VietTien.API.Services.Implementations;
 using VietTien.API.Services.Interfaces;
 using VietTien.API.Services.BackgroundServices;
+using VietTien.API.Services.ScheduledJobs;
 using VietTien.API.Hubs;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -33,10 +36,12 @@ builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 
 builder.Services.AddScoped<IJwtService, JwtService>();
+builder.Services.AddScoped<IGoogleTokenValidator, GoogleTokenValidator>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ICartService, CartService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IInventoryReservationService, InventoryReservationService>();
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IQuotationRepository, QuotationRepository>();
 builder.Services.AddScoped<IQuotationService, QuotationService>();
@@ -61,6 +66,37 @@ builder.Services.AddScoped<ISalesChangeRequestService, SalesChangeRequestService
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IGoodsIssueService, GoodsIssueService>();
 builder.Services.AddScoped<IMaterialService, MaterialService>();
+
+// AI Marketing Studio & Make.com Webhook
+builder.Services.AddHttpClient<IMakeWebhookService, MakeWebhookService>();
+builder.Services.AddScoped<IAiGeneratorService, AiGeneratorService>();
+builder.Services.AddScoped<IMarketingPostService, MarketingPostService>();
+
+// Admin module (Phase 1): Audit Log, Cấu hình hệ thống versioned, RBAC quản lý User
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
+builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
+builder.Services.AddScoped<IAdminUserService, AdminUserService>();
+
+// Admin module (Phase 2): Scheduled Jobs + System Health
+builder.Services.AddScoped<IJobRunService, JobRunService>();
+builder.Services.AddScoped<IWebhookLogService, WebhookLogService>();
+builder.Services.AddScoped<IScheduledJob, OrderSlaJob>();
+builder.Services.AddScoped<IScheduledJob, SePayReservationExpiryJob>();
+builder.Services.AddScoped<IScheduledJob, LowStockAlertJob>();
+builder.Services.AddScoped<IScheduledJob, SePayWebhookRetryJob>();
+builder.Services.AddScoped<IScheduledJob, MarketingPostMakeScheduleJob>();
+builder.Services.AddScoped<IScheduledJob, QuotationExpiryJob>();
+builder.Services.AddScoped<IScheduledJob, UpcomingDeliveryReminderJob>();
+
+// Admin module (Phase 3): KPI engine + dashboard theo role
+builder.Services.AddScoped<IKpiService, KpiService>();
+builder.Services.AddScoped<ISalesStaffDashboardService, SalesStaffDashboardService>();
+builder.Services.AddScoped<ISalesManagerDashboardService, SalesManagerDashboardService>();
+builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
+
+// Admin module: Master Data (Vehicle, DiscountTier)
+builder.Services.AddScoped<IVehicleService, VehicleService>();
+builder.Services.AddScoped<IDiscountTierService, DiscountTierService>();
 
 var jwtSettings = builder.Configuration.GetSection("JwtSettings").Get<JwtSettings>()!;
 var key = Encoding.UTF8.GetBytes(jwtSettings.SecretKey);
@@ -105,11 +141,41 @@ builder.Services.AddAuthentication(options =>
             context.Response.ContentType = "application/json";
             return context.Response.WriteAsync("{\"message\":\"Bạn chưa đăng nhập hoặc token đã hết hạn.\"}");
         },
-        OnForbidden = context =>
+        OnForbidden = async context =>
         {
+            // Ghi security log cho mọi truy cập bị từ chối 403 (Admin có thể tìm kiếm phát hiện bất thường).
+            // Bọc try/catch để lỗi ghi log không bao giờ làm hỏng phản hồi 403 gốc.
+            try
+            {
+                var auditLogService = context.HttpContext.RequestServices.GetService<IAuditLogService>();
+                if (auditLogService != null)
+                {
+                    var userIdString = context.HttpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                    Guid? actorUserId = Guid.TryParse(userIdString, out var parsedId) ? parsedId : null;
+                    var actorEmail = context.HttpContext.User.FindFirst(ClaimTypes.Email)?.Value;
+                    var actorRole = context.HttpContext.User.FindFirst(ClaimTypes.Role)?.Value;
+
+                    await auditLogService.LogAsync(
+                        entityName: "Endpoint",
+                        entityId: context.HttpContext.Request.Path.ToString(),
+                        action: "PERMISSION_DENIED",
+                        actorUserId: actorUserId,
+                        actorEmail: actorEmail,
+                        actorRole: actorRole,
+                        before: null,
+                        after: null,
+                        reason: $"{context.HttpContext.Request.Method} {context.HttpContext.Request.Path}",
+                        ipAddress: context.HttpContext.Connection.RemoteIpAddress?.ToString());
+                }
+            }
+            catch
+            {
+                // Không throw: ghi security log là best-effort, không được chặn response 403.
+            }
+
             context.Response.StatusCode = 403;
             context.Response.ContentType = "application/json";
-            return context.Response.WriteAsync("{\"message\":\"Bạn không có quyền truy cập tài nguyên này.\"}");
+            await context.Response.WriteAsync("{\"message\":\"Bạn không có quyền truy cập tài nguyên này.\"}");
         }
     };
 });
@@ -122,26 +188,19 @@ builder.Services.AddAuthorization(options =>
 });
 
 
-var allowedOrigins = builder.Configuration["AllowedOrigins"]?.Split(',') ?? Array.Empty<string>();
-
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        if (allowedOrigins.Contains("*"))
-        {
-            policy.SetIsOriginAllowed(_ => true)
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
-        else
-        {
-            policy.WithOrigins(allowedOrigins)
-                  .AllowAnyHeader()
-                  .AllowAnyMethod()
-                  .AllowCredentials();
-        }
+        policy
+            .WithOrigins(
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "https://localhost:5173"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -191,9 +250,13 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 
-builder.Services.AddHostedService<OrderSlaBackgroundService>();
+builder.Services.AddHostedService<ScheduledJobRunnerBackgroundService>();
 
 var app = builder.Build();
+
+// Lưới an toàn cuối cùng cho exception chưa được controller tự bắt -> phải đứng trước mọi
+// middleware khác trong pipeline để bọc được toàn bộ downstream (static files, CORS, auth, controllers).
+app.UseMiddleware<ExceptionHandlingMiddleware>();
 
 if (app.Environment.IsDevelopment())
 {
@@ -207,7 +270,6 @@ if (app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseHsts();
     app.UseHttpsRedirection();
 }
 
@@ -225,6 +287,10 @@ app.MapHub<SalesHub>("/hubs/sales");
 app.MapHub<NotificationHub>("/hubs/notifications");
 
 app.Run();
+
+// Cho phép WebApplicationFactory<Program> (VietTien.IntegrationTests) truy cập được lớp Program —
+// top-level statements mặc định sinh ra class Program internal, khai báo partial ở đây để public hoá.
+public partial class Program { }
 
 public class UtcDateTimeJsonConverter : JsonConverter<DateTime>
 {

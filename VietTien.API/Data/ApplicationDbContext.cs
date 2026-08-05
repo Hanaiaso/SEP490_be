@@ -28,6 +28,7 @@ namespace VietTien.API.Data
         public DbSet<MonthlyPayroll> MonthlyPayrolls => Set<MonthlyPayroll>();
         public DbSet<PayrollDetail> PayrollDetails => Set<PayrollDetail>();
         public DbSet<AiMarketingCampaign> AiMarketingCampaigns => Set<AiMarketingCampaign>();
+        public DbSet<MarketingPost> MarketingPosts => Set<MarketingPost>();
 
         // Quotation / Negotiation
         public DbSet<Quotation> Quotations => Set<Quotation>();
@@ -71,6 +72,37 @@ namespace VietTien.API.Data
         public DbSet<SalesChangeRequest> SalesChangeRequests => Set<SalesChangeRequest>();
         public DbSet<SalesChangeRequestOrderDecision> SalesChangeRequestOrderDecisions => Set<SalesChangeRequestOrderDecision>();
 
+        // YÊU CẦU ĐỔI TRẢ HÀNG SAU GIAO
+        public DbSet<ReturnExchangeRequest> ReturnExchangeRequests => Set<ReturnExchangeRequest>();
+        public DbSet<ReturnExchangeRequestItem> ReturnExchangeRequestItems => Set<ReturnExchangeRequestItem>();
+        public DbSet<ReturnExchangeRequestNewItem> ReturnExchangeRequestNewItems => Set<ReturnExchangeRequestNewItem>();
+
+        // PHÂN HỆ ADMIN: Audit Log & Cấu hình hệ thống (Phase 1)
+        public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+        public DbSet<SystemConfig> SystemConfigs => Set<SystemConfig>();
+        public DbSet<SystemConfigVersion> SystemConfigVersions => Set<SystemConfigVersion>();
+
+        // PHÂN HỆ ADMIN: Scheduled Jobs & System Health (Phase 2)
+        public DbSet<JobRun> JobRuns => Set<JobRun>();
+        public DbSet<WebhookLog> WebhookLogs => Set<WebhookLog>();
+
+        // PHÂN HỆ ADMIN: Master Data (Vehicle, DiscountTier)
+        public DbSet<Vehicle> Vehicles => Set<Vehicle>();
+        public DbSet<DiscountTier> DiscountTiers => Set<DiscountTier>();
+
+        public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+        {
+            // AuditLog là bảng chỉ-ghi (insert-only): chặn mọi hành vi Update/Delete ở tầng DbContext
+            // để đảm bảo tuyệt đối không ai có thể sửa/xóa nhật ký kiểm toán, kể cả do lỗi code sau này.
+            var illegalAuditChange = ChangeTracker.Entries<AuditLog>()
+                .Any(e => e.State == EntityState.Modified || e.State == EntityState.Deleted);
+
+            if (illegalAuditChange)
+                throw new InvalidOperationException("AuditLog là bất biến: không được phép Update hoặc Delete bản ghi kiểm toán.");
+
+            return base.SaveChangesAsync(cancellationToken);
+        }
+
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
@@ -101,6 +133,12 @@ namespace VietTien.API.Data
                 .OnDelete(DeleteBehavior.Restrict);
 
             // --- PHÂN HỆ NGƯỜI DÙNG & HỒ SƠ Khách hàng ---
+            // Bắt buộc default=true ở tầng DB: các user hiện có trong DB (trước migration này)
+            // phải được mở khóa mặc định, tuyệt đối không được tự động khóa toàn bộ tài khoản cũ.
+            modelBuilder.Entity<User>()
+                .Property(u => u.IsActive)
+                .HasDefaultValue(true);
+
             // Quan hệ 1 - 1 giữa User và CustomerProfile
             modelBuilder.Entity<CustomerProfile>()
                 .HasOne(cp => cp.User)
@@ -314,6 +352,20 @@ namespace VietTien.API.Data
                 .HasForeignKey(i => i.WarehouseLocationId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Chống race check-then-insert ở InventoryService.AddProductToWarehouseAsync: 2 request đồng
+            // thời thêm cùng 1 sản phẩm/nguyên liệu vào cùng 1 vị trí kho có thể tạo 2 dòng Inventory trùng
+            // nhau (mỗi dòng tự cộng/trừ tồn riêng, gây lệch số liệu). SQL Server coi NULL là "không phân
+            // biệt" trong unique index (khác Postgres) -> phải lọc IS NOT NULL, tách riêng theo Product/Material.
+            modelBuilder.Entity<Inventory>()
+                .HasIndex(i => new { i.ProductId, i.WarehouseLocationId })
+                .IsUnique()
+                .HasFilter("[ProductId] IS NOT NULL");
+
+            modelBuilder.Entity<Inventory>()
+                .HasIndex(i => new { i.MaterialId, i.WarehouseLocationId })
+                .IsUnique()
+                .HasFilter("[MaterialId] IS NOT NULL");
+
             modelBuilder.Entity<Inventory>()
                 .HasOne(i => i.LastUpdatedByUser)
                 .WithMany()
@@ -459,6 +511,26 @@ namespace VietTien.API.Data
                 .HasForeignKey(am => am.AdminId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Quan hệ cho MarketingPost
+            modelBuilder.Entity<MarketingPost>()
+                .HasOne(mp => mp.Product)
+                .WithMany()
+                .HasForeignKey(mp => mp.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<MarketingPost>()
+                .HasOne(mp => mp.CreatedByUser)
+                .WithMany()
+                .HasForeignKey(mp => mp.CreatedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<MarketingPost>()
+                .HasOne(mp => mp.ApprovedByUser)
+                .WithMany()
+                .HasForeignKey(mp => mp.ApprovedByUserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
 
             // --- CẤU HÌNH CHO PHÂN HỆ VẬT LIỆU (MATERIALS) ---
             // Thiết lập quan hệ Nhiều - Nhiều giữa Product và Material thông qua bảng ProductMaterial (BOM)
@@ -541,6 +613,19 @@ namespace VietTien.API.Data
                 .WithMany()
                 .HasForeignKey(pr => pr.ReplacementOrderId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            // ReturnExchangeRequest -> Order & ReplacementOrder
+            modelBuilder.Entity<ReturnExchangeRequest>()
+                .HasOne(r => r.Order)
+                .WithMany(o => o.ReturnExchangeRequests)
+                .HasForeignKey(r => r.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ReturnExchangeRequest>()
+                .HasOne(r => r.ReplacementOrder)
+                .WithMany()
+                .HasForeignKey(r => r.ReplacementOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // Purchase Order
             modelBuilder.Entity<PurchaseOrder>()
@@ -656,6 +741,11 @@ namespace VietTien.API.Data
                 .WithMany()
                 .HasForeignKey(gi => gi.IssuedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<GoodsIssue>()
+                .HasIndex(gi => gi.PaperDocumentNumber)
+                .IsUnique()
+                .HasFilter("[PaperDocumentNumber] IS NOT NULL");
 
             modelBuilder.Entity<GoodsIssueItem>()
                 .HasOne(gii => gii.GoodsIssue)
@@ -901,6 +991,139 @@ namespace VietTien.API.Data
                 new Inventory { Id = Guid.Parse("d934b287-a9e9-4d7c-86cf-4e82d97957f6"), ProductId = pCartonId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 5000, QuarantineQuantity = 5000, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
                 new Inventory { Id = Guid.Parse("c9e0fca9-3d26-402b-b6a4-58357e527d10"), ProductId = pCutToolId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 200, QuarantineQuantity = 200, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
                 new Inventory { Id = Guid.Parse("9925c3cf-e4af-4a88-8840-961d4281f417"), ProductId = pTapeDucId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 9999, ReservedQuantity = 799, QuarantineQuantity = 749, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 }
+            );
+
+            // =========================================================================
+            // 5. PHÂN HỆ ADMIN: AUDIT LOG & CẤU HÌNH HỆ THỐNG (PHASE 1)
+            // =========================================================================
+
+            modelBuilder.Entity<AuditLog>(entity =>
+            {
+                entity.HasIndex(a => a.EntityName);
+                entity.HasIndex(a => a.ActorUserId);
+                entity.HasIndex(a => a.CreatedAt);
+                entity.HasIndex(a => a.Action);
+                entity.Property(a => a.EntityName).HasMaxLength(100);
+                entity.Property(a => a.EntityId).HasMaxLength(200);
+                entity.Property(a => a.Action).HasMaxLength(50);
+                entity.Property(a => a.ActorEmail).HasMaxLength(256);
+                entity.Property(a => a.ActorRole).HasMaxLength(50);
+                entity.Property(a => a.IpAddress).HasMaxLength(64);
+            });
+
+            modelBuilder.Entity<SystemConfig>(entity =>
+            {
+                entity.HasKey(c => c.Key);
+                entity.Property(c => c.Key).HasMaxLength(100);
+                entity.Property(c => c.ValueType).HasConversion<string>().HasMaxLength(20);
+                entity.Property(c => c.OwnerLevel).HasMaxLength(50);
+            });
+
+            modelBuilder.Entity<SystemConfigVersion>(entity =>
+            {
+                entity.HasOne(v => v.Config)
+                    .WithMany(c => c.Versions)
+                    .HasForeignKey(v => v.ConfigKey)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasIndex(v => new { v.ConfigKey, v.EffectiveDate });
+                entity.Property(v => v.ActorEmail).HasMaxLength(256);
+            });
+
+            // Seed các tham số cấu hình hệ thống theo business.md §7 (mỗi key có 1 version khởi tạo)
+            var configBaseDate = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            var systemConfigSeeds = new (string Key, string Value, SystemConfigValueType Type, string Unit, string Owner, string Description, Guid VersionId)[]
+            {
+                ("PRICE_LOCK_HOURS", "24", SystemConfigValueType.Int, "Giờ", "Admin", "Thời gian khóa giá báo giá", Guid.Parse("a0000001-0001-4001-a001-000000000001")),
+                ("SEPAY_RESERVATION_MINUTES", "15", SystemConfigValueType.Int, "Phút", "Admin", "Thời gian giữ tồn cho đơn SePay chờ thanh toán", Guid.Parse("a0000001-0001-4001-a001-000000000002")),
+                ("COD_RESERVATION_MINUTES", "35", SystemConfigValueType.Int, "Phút", "Admin", "Thời gian giữ tồn cho đơn COD chờ xác nhận", Guid.Parse("a0000001-0001-4001-a001-000000000003")),
+                ("COD_WARNING_MINUTES", "25", SystemConfigValueType.Int, "Phút", "Admin", "Mốc cảnh báo Sale trước khi hết hạn giữ tồn COD", Guid.Parse("a0000001-0001-4001-a001-000000000004")),
+                ("COD_ESCALATION_MINUTES", "30", SystemConfigValueType.Int, "Phút", "Admin", "Mốc leo thang cảnh báo Manager cho đơn COD", Guid.Parse("a0000001-0001-4001-a001-000000000005")),
+                ("OTP_EXPIRE_MINUTES", "5", SystemConfigValueType.Int, "Phút", "Admin", "Thời gian hết hạn mã OTP", Guid.Parse("a0000001-0001-4001-a001-000000000006")),
+                ("OTP_RESEND_SECONDS", "60", SystemConfigValueType.Int, "Giây", "Admin", "Thời gian tối thiểu giữa 2 lần gửi lại OTP", Guid.Parse("a0000001-0001-4001-a001-000000000007")),
+                ("OTP_MAX_ATTEMPTS", "5", SystemConfigValueType.Int, "Lần", "Admin", "Số lần gửi OTP tối đa trong 30 phút", Guid.Parse("a0000001-0001-4001-a001-000000000008")),
+                ("QUOTATION_MIN_VALUE", "100000000", SystemConfigValueType.Decimal, "VND", "Admin/CEO", "Ngưỡng giá trị đơn bắt buộc chuyển sang luồng báo giá", Guid.Parse("a0000001-0001-4001-a001-000000000009")),
+                ("LIST_PRICE_MAX_EXCLUSIVE", "10000000", SystemConfigValueType.Decimal, "VND", "Admin/CEO", "Ngưỡng áp dụng giá niêm yết (dưới ngưỡng này)", Guid.Parse("a0000001-0001-4001-a001-000000000010")),
+                ("MAX_SCHEDULED_MARKETING_POSTS", "30", SystemConfigValueType.Int, "Bài viết", "Admin", "Số bài viết marketing được lên lịch tối đa", Guid.Parse("a0000001-0001-4001-a001-000000000011")),
+                ("DELIVERY_FAILURE_MANAGER_THRESHOLD", "3", SystemConfigValueType.Int, "Lần thử giao", "Admin/Manager", "Số lần giao thất bại trước khi báo Manager", Guid.Parse("a0000001-0001-4001-a001-000000000012")),
+            };
+
+            modelBuilder.Entity<SystemConfig>().HasData(
+                systemConfigSeeds.Select(s => new SystemConfig
+                {
+                    Key = s.Key,
+                    ValueType = s.Type,
+                    Unit = s.Unit,
+                    OwnerLevel = s.Owner,
+                    Description = s.Description,
+                    IsActive = true
+                }).ToArray()
+            );
+
+            modelBuilder.Entity<JobRun>(entity =>
+            {
+                entity.HasIndex(r => r.JobName);
+                entity.HasIndex(r => r.StartedAt);
+                entity.HasIndex(r => new { r.JobName, r.StartedAt });
+                entity.Property(r => r.JobName).HasMaxLength(100);
+                entity.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+                entity.Property(r => r.TriggerType).HasConversion<string>().HasMaxLength(20);
+            });
+
+            modelBuilder.Entity<WebhookLog>(entity =>
+            {
+                entity.HasIndex(w => w.Status);
+                entity.HasIndex(w => w.ReceivedAt);
+                entity.Property(w => w.Source).HasMaxLength(50);
+                entity.Property(w => w.Status).HasConversion<string>().HasMaxLength(20);
+            });
+
+            modelBuilder.Entity<Vehicle>(entity =>
+            {
+                entity.HasIndex(v => v.VehicleNumber).IsUnique();
+                entity.Property(v => v.LicensePlate).HasMaxLength(20);
+                // decimal? không bị vòng lặp SetPrecision(18,2) phía dưới bắt được (ClrType của property nullable
+                // khác typeof(decimal)) -> khai báo rõ ràng ở đây để tránh SQL Server âm thầm cắt phần thập phân.
+                entity.Property(v => v.Capacity).HasPrecision(18, 2);
+            });
+
+            modelBuilder.Entity<DiscountTier>(entity =>
+            {
+                entity.HasIndex(t => t.MinAmount);
+                entity.Property(t => t.MaxAmount).HasPrecision(18, 2);
+            });
+
+            // Seed 5 xe khớp đúng "xe 1..5" đang dùng cứng trong OrderService/DeliveryController hôm nay
+            // -> hành vi không đổi ngay sau migration, Admin chỉnh sửa dữ liệu thật từ đây về sau.
+            modelBuilder.Entity<Vehicle>().HasData(
+                new Vehicle { Id = Guid.Parse("f0000001-0001-4001-a001-000000000001"), VehicleNumber = 1, LicensePlate = "51C-000.01", IsActive = true },
+                new Vehicle { Id = Guid.Parse("f0000001-0001-4001-a001-000000000002"), VehicleNumber = 2, LicensePlate = "51C-000.02", IsActive = true },
+                new Vehicle { Id = Guid.Parse("f0000001-0001-4001-a001-000000000003"), VehicleNumber = 3, LicensePlate = "51C-000.03", IsActive = true },
+                new Vehicle { Id = Guid.Parse("f0000001-0001-4001-a001-000000000004"), VehicleNumber = 4, LicensePlate = "51C-000.04", IsActive = true },
+                new Vehicle { Id = Guid.Parse("f0000001-0001-4001-a001-000000000005"), VehicleNumber = 5, LicensePlate = "51C-000.05", IsActive = true }
+            );
+
+            // Seed khung chiết khấu khớp đúng if-chain cũ trong OrderService.CalculateDiscount (5/6/7/8%)
+            // -> hành vi checkout không đổi ngay sau migration.
+            modelBuilder.Entity<DiscountTier>().HasData(
+                new DiscountTier { Id = Guid.Parse("f0000002-0002-4002-a002-000000000001"), MinAmount = 10_000_000m, MaxAmount = 31_000_000m, DiscountPercent = 0.05m, IsActive = true, Description = "10tr - <31tr: 5%" },
+                new DiscountTier { Id = Guid.Parse("f0000002-0002-4002-a002-000000000002"), MinAmount = 31_000_000m, MaxAmount = 51_000_000m, DiscountPercent = 0.06m, IsActive = true, Description = "31tr - <51tr: 6%" },
+                new DiscountTier { Id = Guid.Parse("f0000002-0002-4002-a002-000000000003"), MinAmount = 51_000_000m, MaxAmount = 71_000_000m, DiscountPercent = 0.07m, IsActive = true, Description = "51tr - <71tr: 7%" },
+                new DiscountTier { Id = Guid.Parse("f0000002-0002-4002-a002-000000000004"), MinAmount = 71_000_000m, MaxAmount = 100_000_000m, DiscountPercent = 0.08m, IsActive = true, Description = "71tr - <100tr: 8%" }
+            );
+
+            modelBuilder.Entity<SystemConfigVersion>().HasData(
+                systemConfigSeeds.Select(s => new SystemConfigVersion
+                {
+                    Id = s.VersionId,
+                    ConfigKey = s.Key,
+                    Value = s.Value,
+                    EffectiveDate = configBaseDate,
+                    CreatedAt = configBaseDate,
+                    ActorEmail = "system-seed",
+                    ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7"
+                }).ToArray()
             );
         }
     }

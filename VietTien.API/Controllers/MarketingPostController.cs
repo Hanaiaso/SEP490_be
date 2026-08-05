@@ -1,0 +1,205 @@
+using System;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using VietTien.API.DTOs.Marketing;
+using VietTien.API.Services.Interfaces;
+
+namespace VietTien.API.Controllers
+{
+    [Route("api/marketing-posts")]
+    [ApiController]
+    public class MarketingPostController : ControllerBase
+    {
+        private readonly IMarketingPostService _marketingPostService;
+        private readonly IAiGeneratorService _aiGeneratorService;
+        private readonly IConfiguration _configuration;
+
+        public MarketingPostController(
+            IMarketingPostService marketingPostService,
+            IAiGeneratorService aiGeneratorService,
+            IConfiguration configuration)
+        {
+            _marketingPostService = marketingPostService;
+            _aiGeneratorService = aiGeneratorService;
+            _configuration = configuration;
+        }
+
+        [HttpPost("generate-options")]
+        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        public async Task<IActionResult> GenerateOptions([FromBody] GenerateAiContentRequestDto request)
+        {
+            try
+            {
+                var result = await _aiGeneratorService.GenerateMarketingOptionsAsync(request);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet]
+        [Authorize]
+        public async Task<IActionResult> GetPosts([FromQuery] string? status, [FromQuery] Guid? productId)
+        {
+            try
+            {
+                var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
+                var userId = string.IsNullOrEmpty(userIdStr) ? Guid.Empty : Guid.Parse(userIdStr);
+
+                var result = await _marketingPostService.GetPostsAsync(status, productId, role, userId);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet("{id}")]
+        [Authorize]
+        public async Task<IActionResult> GetPostById(Guid id)
+        {
+            try
+            {
+                var result = await _marketingPostService.GetPostByIdAsync(id);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost]
+        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        public async Task<IActionResult> CreatePost([FromBody] CreateMarketingPostDto dto)
+        {
+            try
+            {
+                var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
+
+                var result = await _marketingPostService.CreatePostAsync(dto, Guid.Parse(userIdStr));
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}")]
+        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        public async Task<IActionResult> UpdatePost(Guid id, [FromBody] UpdateMarketingPostDto dto)
+        {
+            try
+            {
+                var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
+                var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
+
+                var result = await _marketingPostService.UpdatePostAsync(id, dto, Guid.Parse(userIdStr), role);
+                return Ok(result);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/submit")]
+        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        public async Task<IActionResult> SubmitPost(Guid id)
+        {
+            try
+            {
+                var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
+                var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
+
+                var result = await _marketingPostService.SubmitPostAsync(id, Guid.Parse(userIdStr), role);
+                return Ok(result);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/decision")]
+        [Authorize(Roles = "SalesManager,SaleManager,Admin,CEO")]
+        public async Task<IActionResult> MakeDecision(Guid id, [FromBody] MarketingPostDecisionDto dto)
+        {
+            try
+            {
+                var managerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(managerIdStr)) return Unauthorized();
+
+                var result = await _marketingPostService.MakeDecisionAsync(id, dto, Guid.Parse(managerIdStr));
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/publish-now")]
+        [Authorize(Roles = "SalesManager,SaleManager,Admin,CEO")]
+        public async Task<IActionResult> PublishNow(Guid id)
+        {
+            try
+            {
+                var managerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(managerIdStr)) return Unauthorized();
+
+                var result = await _marketingPostService.PublishNowAsync(id, Guid.Parse(managerIdStr));
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/webhook-callback")]
+        [AllowAnonymous]
+        public async Task<IActionResult> MakeWebhookCallback(Guid id, [FromBody] MakeWebhookCallbackDto dto)
+        {
+            // Chỉ Make.com (server-to-server) mới được gọi callback này — không có secret thì bất kỳ
+            // user đăng nhập nào cũng giả mạo được kết quả đăng bài (Success/Failed) cho post bất kỳ.
+            var expectedSecret = _configuration["MakeCom:CallbackSecret"];
+            var isDevelopment = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(expectedSecret) || !isDevelopment)
+            {
+                var providedSecret = Request.Headers["x-make-secret"].FirstOrDefault();
+                if (string.IsNullOrEmpty(providedSecret) || providedSecret != expectedSecret)
+                    return Unauthorized(new { success = false, message = "Missing or invalid callback secret." });
+            }
+
+            try
+            {
+                var result = await _marketingPostService.HandleMakeWebhookCallbackAsync(id, dto);
+                return Ok(new { success = true, post = result });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+    }
+}

@@ -23,6 +23,9 @@ namespace VietTien.API.Models
 
         public int AvailableQuantity => Math.Max(0, OnHandQuantity - ReservedQuantity - AllocatedQuantity - DamagedQuantity - QuarantineQuantity);
 
+        // Ngưỡng cảnh báo tồn thấp cho hàng thành phẩm (null = chưa cấu hình, không cảnh báo dòng này)
+        public int? ReorderThreshold { get; set; }
+
         public Guid? LastUpdatedByUserId { get; set; }
         public DateTime? LastUpdatedAt { get; set; }
 

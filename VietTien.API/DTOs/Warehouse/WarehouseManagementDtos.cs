@@ -38,4 +38,5 @@ namespace VietTien.API.DTOs.Warehouse
 
         public List<string> LocationNames { get; set; } = new List<string>();
     }
+
 }

@@ -371,7 +371,7 @@ namespace VietTien.API.Services.Implementations
         {
             var normalized = code.Trim();
             var matches = await _context.Users
-                .Where(u => u.Role == SystemRole.SalesStaff &&
+                .Where(u => u.Role == SystemRole.SalesStaff && u.IsActive &&
                             (u.ReferralCode == normalized || u.Email == normalized.ToLower()))
                 .Select(u => u.Id)
                 .ToListAsync();

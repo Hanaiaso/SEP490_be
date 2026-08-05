@@ -41,6 +41,9 @@ namespace VietTien.API.Controllers
         {
             try
             {
+                pageNumber = pageNumber < 1 ? 1 : pageNumber;
+                pageSize = pageSize < 1 ? 10 : (pageSize > 100 ? 100 : pageSize);
+
                 var result = await _inventoryService.GetInventoryByWarehouseAsync(warehouseId, search, minQty, maxQty, fromDate, toDate, pageNumber, pageSize);
                 return Ok(result);
             }
@@ -60,6 +63,18 @@ namespace VietTien.API.Controllers
                 await _inventoryService.AdjustInventoryAsync(inventoryId, request.NewQuantity, request.Note, staffId);
                 return Ok(new { message = "Cập nhật số lượng tồn kho thành công." });
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Dữ liệu tồn kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -74,6 +89,14 @@ namespace VietTien.API.Controllers
                 var staffId = GetUserId();
                 var result = await _inventoryService.AddProductToWarehouseAsync(request, staffId);
                 return Ok(new { message = "Thêm sản phẩm vào kho thành công.", data = result });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
             }
             catch (Exception ex)
             {

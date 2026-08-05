@@ -145,5 +145,98 @@ namespace VietTien.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        // ─── ĐƠN THAY THẾ (ĐỔI HÀNG WF-15) ──────────────────────────────────────
+        /// <summary>Sales Staff tạo đơn thay thế sau khi duyệt đổi hàng. Hệ thống tự động tính cấn trừ/Credit.</summary>
+        [HttpPost("exchange/{requestId:guid}/replacement")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> CreateExchangeReplacement(Guid requestId)
+        {
+            try
+            {
+                var userId = GetUserId();
+                var result = await _orderService.CreateExchangeReplacementOrderAsync(requestId, userId);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // ─── BƯỚC 5: THU HỒI HÀNG LỖI TỪ KHÁCH HÀNG (PICKUP LOGISTICS) ──────────
+
+        [HttpGet("pickups")]
+        [Authorize(Roles = "SalesStaff,SalesManager,WarehouseStaff,Admin")]
+        public async Task<ActionResult<List<PendingPickupDto>>> GetPendingPickups()
+        {
+            try
+            {
+                var userId = GetUserId();
+                var result = await _orderService.GetPendingPickupsAsync(userId);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("pickups/{requestId:guid}/schedule")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> SchedulePickup(Guid requestId, [FromBody] SchedulePickupRequestDto dto)
+        {
+            try
+            {
+                var userId = GetUserId();
+                await _orderService.SchedulePickupAsync(requestId, userId, dto);
+                return Ok(new { message = "Đã lên lịch điều xe thu hồi thành công." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("pickups/{requestId:guid}/confirm")]
+        [Authorize(Roles = "SalesStaff,SalesManager,WarehouseStaff,Admin")]
+        public async Task<IActionResult> ConfirmPickup(Guid requestId)
+        {
+            try
+            {
+                var userId = GetUserId();
+                await _orderService.ConfirmPickupAsync(requestId, userId);
+                return Ok(new { message = "Đã xác nhận lấy hàng thành công." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }
+

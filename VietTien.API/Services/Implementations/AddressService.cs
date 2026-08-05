@@ -94,6 +94,13 @@ namespace VietTien.API.Services.Implementations
             {
                 await _unitOfWork.Addresses.ResetDefaultAsync(profile.Id);
             }
+            // Không cho bỏ mặc định của địa chỉ mặc định hiện tại mà không có địa chỉ thay thế
+            // (tránh còn 0 địa chỉ default), giống guard của DeleteAddressAsync.
+            else if (!dto.IsDefault && address.IsDefault)
+            {
+                throw new InvalidOperationException(
+                    "Không thể bỏ mặc định địa chỉ này. Vui lòng đặt địa chỉ khác làm mặc định trước.");
+            }
 
             address.ReceiverName = dto.Name.Trim();
             address.ReceiverPhone = dto.Phone.Trim();

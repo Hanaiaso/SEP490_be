@@ -61,10 +61,21 @@ namespace VietTien.API.Services.Implementations
             {
                 _context.Notifications.AddRange(notifications);
                 await _context.SaveChangesAsync();
-                
-                // Đẩy realtime theo Role group, lưu ý gửi chung 1 object notification (không có ID cụ thể của ai, Frontend dùng chung)
-                // Hoặc có thể gửi object đầu tiên để map dữ liệu hiển thị cơ bản
-                await _hubContext.Clients.Group($"Role_{targetRole.ToString()}").SendAsync("ReceiveNotification", notifications.First());
+
+                // Đẩy realtime theo Role group — payload KHÔNG kèm Id/RecipientUserId của một người cụ thể
+                // (mỗi user trong role có 1 bản ghi Notification riêng, Id khác nhau). Gửi thẳng
+                // notifications.First() sẽ khiến mọi client trong group nhận nhầm Id của người khác,
+                // dẫn đến đánh dấu "đã đọc" sai bản ghi. Client chỉ dùng payload này làm tín hiệu
+                // "có thông báo mới" rồi tự gọi API lấy danh sách/Id thông báo của chính mình.
+                await _hubContext.Clients.Group($"Role_{targetRole.ToString()}").SendAsync("ReceiveNotification", new
+                {
+                    type = type.ToString(),
+                    title,
+                    body,
+                    referenceId,
+                    referenceType,
+                    createdAt = notifications[0].CreatedAt
+                });
             }
         }
     }

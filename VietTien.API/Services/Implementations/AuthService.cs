@@ -1,5 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using BCrypt.Net;
 using Google.Apis.Auth;
 using Microsoft.Extensions.Options;
@@ -21,6 +23,8 @@ namespace VietTien.API.Services.Implementations
         private readonly string _googleClientId;
         private readonly IConfiguration _configuration;
         private readonly ISalesAllocationService _salesAllocationService;
+        private readonly ILogger<AuthService> _logger;
+        private readonly IGoogleTokenValidator _googleTokenValidator;
 
         public AuthService(
             IUnitOfWork unitOfWork,
@@ -29,7 +33,9 @@ namespace VietTien.API.Services.Implementations
             ISmsService smsService,
             IOptions<JwtSettings> jwtSettings,
             IConfiguration configuration,
-            ISalesAllocationService salesAllocationService)
+            ISalesAllocationService salesAllocationService,
+            ILogger<AuthService> logger,
+            IGoogleTokenValidator googleTokenValidator)
         {
             _unitOfWork = unitOfWork;
             _jwtService = jwtService;
@@ -39,6 +45,8 @@ namespace VietTien.API.Services.Implementations
             _configuration = configuration;
             _googleClientId = configuration["GoogleSettings:ClientId"] ?? string.Empty;
             _salesAllocationService = salesAllocationService;
+            _logger = logger;
+            _googleTokenValidator = googleTokenValidator;
         }
 
         // ─── ĐĂNG KÝ ───────────────────────────────────────────────────────────────
@@ -87,8 +95,17 @@ namespace VietTien.API.Services.Implementations
             // Tạo sẵn CustomerProfile kèm MST (phục vụ nhận diện khách cũ khi xác minh)
             await _salesAllocationService.EnsureCustomerProfileAsync(user.Id, dto.TaxCode);
 
-            // Gửi OTP qua email
-            await _emailService.SendOtpEmailAsync(user.Email, user.FullName, otpCode);
+            // User đã tạo và commit thành công ở trên -> lỗi gửi email OTP không được làm cả
+            // request Register thất bại (client sẽ nhận "email đã được sử dụng" nếu thử lại,
+            // trong khi chưa từng nhận OTP) -> chỉ log, vẫn báo thành công để khách bấm "gửi lại OTP".
+            try
+            {
+                await _emailService.SendOtpEmailAsync(user.Email, user.FullName, otpCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi gửi email OTP đăng ký cho {Email}", user.Email);
+            }
 
             return (true, "Đăng ký thành công. Vui lòng kiểm tra email để lấy mã OTP xác minh tài khoản.");
         }
@@ -105,7 +122,7 @@ namespace VietTien.API.Services.Implementations
             if (user.IsEmailVerified)
                 return (false, "Tài khoản này đã được xác minh trước đó.");
 
-            if (user.OtpCode != dto.OtpCode)
+            if (!IsEmailOtpMatch(user.OtpCode, dto.OtpCode))
                 return (false, "Mã OTP không chính xác.");
 
             if (user.OtpExpiry is null || user.OtpExpiry < DateTime.UtcNow)
@@ -119,10 +136,115 @@ namespace VietTien.API.Services.Implementations
             _unitOfWork.Users.Update(user);
             await _unitOfWork.SaveChangesAsync();
 
-            // WF-01: sau khi email verified, gán Sale phụ trách theo Round-robin
-            await _salesAllocationService.AutoAssignCustomerAsync(user.Id);
+            // OTP đã được xác minh và commit thành công ở trên (OtpCode đã null hoá) -> nếu gán Sale
+            // round-robin lỗi, không được làm cả request VerifyOtp thất bại (client sẽ không thể verify
+            // lại bằng OTP cũ, "kẹt" không có cách xử lý) -> chỉ log, tài khoản vẫn được kích hoạt.
+            try
+            {
+                // WF-01: sau khi email verified, gán Sale phụ trách theo Round-robin
+                await _salesAllocationService.AutoAssignCustomerAsync(user.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi tự động gán Sale phụ trách cho user {UserId}", user.Id);
+            }
 
             return (true, "Xác minh email thành công. Bạn có thể đăng nhập ngay bây giờ.");
+        }
+
+        // ─── GỬI LẠI OTP ──────────────────────────────────────────────────────────
+
+        private const int EmailOtpValidityMinutes = 5;
+        private const int EmailOtpResendCooldownSeconds = 60;
+        private const int EmailOtpMaxSendsPerWindow = 5;
+        private static readonly TimeSpan EmailOtpSendWindow = TimeSpan.FromMinutes(30);
+        private const int EmailOtpMaxSendsPerDay = 10;
+        private static readonly TimeSpan EmailOtpDayWindow = TimeSpan.FromHours(24);
+        private const string EmailOtpSentMessage = "Mã OTP mới đã được gửi. Vui lòng kiểm tra email.";
+
+        public async Task<(bool Success, string Message)> ResendEmailOtpAsync(string email)
+        {
+            var user = await _unitOfWork.Users.GetByEmailAsync(email);
+
+            // Không tiết lộ email có tồn tại trong hệ thống hay không (NFR-SEC03): nhánh email lạ
+            // trả CÙNG thông điệp "đã gửi" như nhánh thành công thật, chỉ khác là không gửi mail.
+            if (user is null)
+                return (true, EmailOtpSentMessage);
+
+            if (user.IsEmailVerified)
+                return (false, "Tài khoản này đã được xác minh trước đó.");
+
+            // Chặn gửi lại OTP trước 60 giây kể từ lần gửi trước (suy ra từ OtpExpiry - thời hạn hiệu lực).
+            if (user.OtpExpiry.HasValue)
+            {
+                var lastSentAt = user.OtpExpiry.Value.AddMinutes(-EmailOtpValidityMinutes);
+                var secondsSinceLastSend = (DateTime.UtcNow - lastSentAt).TotalSeconds;
+                if (secondsSinceLastSend < EmailOtpResendCooldownSeconds)
+                    return (false, "Vui lòng đợi ít nhất 60 giây trước khi yêu cầu gửi lại mã OTP.");
+            }
+
+            // Rate limit: tối đa 5 lần gửi trong 30 phút.
+            if (user.EmailOtpWindowStart == null || DateTime.UtcNow - user.EmailOtpWindowStart.Value > EmailOtpSendWindow)
+            {
+                user.EmailOtpWindowStart = DateTime.UtcNow;
+                user.EmailOtpSendCount = 0;
+            }
+            if (user.EmailOtpSendCount >= EmailOtpMaxSendsPerWindow)
+                return (false, "Bạn đã vượt quá số lần gửi mã OTP cho phép. Vui lòng thử lại sau.");
+
+            // Rate limit: tối đa 10 lần gửi trong 1 ngày.
+            if (user.EmailOtpDayWindowStart == null || DateTime.UtcNow - user.EmailOtpDayWindowStart.Value > EmailOtpDayWindow)
+            {
+                user.EmailOtpDayWindowStart = DateTime.UtcNow;
+                user.EmailOtpSendCountDaily = 0;
+            }
+            if (user.EmailOtpSendCountDaily >= EmailOtpMaxSendsPerDay)
+                return (false, "Bạn đã vượt quá số lần gửi mã OTP cho phép trong ngày. Vui lòng thử lại vào ngày mai.");
+
+            // Tạo OTP mới - lưu HASH, không lưu giá trị thô (NFR-SEC04).
+            var otpCode = GenerateOtp();
+            user.OtpCode = BCrypt.Net.BCrypt.HashPassword(otpCode);
+            user.OtpExpiry = DateTime.UtcNow.AddMinutes(EmailOtpValidityMinutes);
+            user.EmailOtpSendCount += 1;
+            user.EmailOtpSendCountDaily += 1;
+
+            _unitOfWork.Users.Update(user);
+            await _unitOfWork.SaveChangesAsync();
+
+            try
+            {
+                await _emailService.SendOtpEmailAsync(user.Email, user.FullName, otpCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi gửi email OTP đăng ký lại cho {Email}", user.Email);
+            }
+
+            return (true, EmailOtpSentMessage);
+        }
+
+        /// <summary>
+        /// So khớp OTP email với giá trị lưu trong DB. Hỗ trợ cả giá trị HASH (do ResendEmailOtpAsync
+        /// cấp) lẫn giá trị THÔ cũ (do RegisterAsync cấp lúc đăng ký ban đầu) để không phá vỡ luồng
+        /// verify hiện có.
+        /// </summary>
+        private static bool IsEmailOtpMatch(string? storedOtpCode, string otpCode)
+        {
+            if (string.IsNullOrEmpty(storedOtpCode)) return false;
+
+            if (storedOtpCode.StartsWith("$2"))
+            {
+                try
+                {
+                    return BCrypt.Net.BCrypt.Verify(otpCode, storedOtpCode);
+                }
+                catch (BCrypt.Net.SaltParseException)
+                {
+                    return false;
+                }
+            }
+
+            return storedOtpCode == otpCode;
         }
 
         // ─── ĐĂNG NHẬP ─────────────────────────────────────────────────────────────
@@ -136,6 +258,9 @@ namespace VietTien.API.Services.Implementations
 
             if (!BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
                 return (false, "Email hoặc mật khẩu không chính xác.", null);
+
+            if (!user.IsActive)
+                return (false, "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.", null);
 
             if (!user.IsEmailVerified)
                 return (false, "Tài khoản chưa được xác minh. Vui lòng kiểm tra email để nhập mã OTP.", null);
@@ -152,11 +277,7 @@ namespace VietTien.API.Services.Implementations
 
             try
             {
-                var settings = new GoogleJsonWebSignature.ValidationSettings
-                {
-                    Audience = new[] { _googleClientId }
-                };
-                payload = await GoogleJsonWebSignature.ValidateAsync(dto.IdToken, settings);
+                payload = await _googleTokenValidator.ValidateAsync(dto.IdToken, _googleClientId);
             }
             catch (InvalidJwtException)
             {
@@ -201,6 +322,9 @@ namespace VietTien.API.Services.Implementations
                 await _salesAllocationService.AutoAssignCustomerAsync(user.Id);
             }
 
+            if (!user.IsActive)
+                return (false, "Tài khoản của bạn đã bị khóa. Vui lòng liên hệ quản trị viên.", null);
+
             var response = await IssueTokensAsync(user);
             return (true, "Đăng nhập bằng Google thành công.", response);
         }
@@ -219,7 +343,7 @@ namespace VietTien.API.Services.Implementations
             var resetToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
                 .Replace("+", "-").Replace("/", "_").Replace("=", "");
 
-            user.PasswordResetToken = resetToken;
+            user.PasswordResetToken = HashToken(resetToken);
             user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
 
             _unitOfWork.Users.Update(user);
@@ -229,7 +353,16 @@ namespace VietTien.API.Services.Implementations
             var frontendUrl = _configuration["AppSettings:FrontendUrl"] ?? "http://localhost:3000";
             var resetLink = $"{frontendUrl}/reset-password?token={resetToken}&email={Uri.EscapeDataString(user.Email)}";
 
-            await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, resetLink);
+            // Token đã tạo và commit thành công ở trên -> lỗi gửi email không được làm cả request
+            // thất bại (message trả về vốn đã cố tình chung chung để tránh lộ user tồn tại), chỉ log.
+            try
+            {
+                await _emailService.SendPasswordResetEmailAsync(user.Email, user.FullName, resetLink);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi gửi email đặt lại mật khẩu cho {Email}", user.Email);
+            }
 
             return (true, "Nếu email tồn tại trong hệ thống, bạn sẽ nhận được hướng dẫn đặt lại mật khẩu.");
         }
@@ -240,7 +373,7 @@ namespace VietTien.API.Services.Implementations
         {
             var user = await _unitOfWork.Users.GetByEmailAsync(dto.Email);
 
-            if (user is null || user.PasswordResetToken != dto.Token)
+            if (user is null || user.PasswordResetToken != HashToken(dto.Token))
                 return (false, "Token đặt lại mật khẩu không hợp lệ.");
 
             if (user.PasswordResetTokenExpiry is null || user.PasswordResetTokenExpiry < DateTime.UtcNow)
@@ -264,7 +397,7 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<(bool Success, string Message, AuthResponseDto? Data)> RefreshTokenAsync(RefreshTokenDto dto)
         {
-            var user = await _unitOfWork.Users.GetByRefreshTokenAsync(dto.RefreshToken);
+            var user = await _unitOfWork.Users.GetByRefreshTokenAsync(HashToken(dto.RefreshToken));
 
             if (user is null)
                 return (false, "Refresh token không hợp lệ.", null);
@@ -335,6 +468,12 @@ namespace VietTien.API.Services.Implementations
 
         // ─── XÁC MINH SỐ ĐIỆN THOẠI QUA SMS ────────────────────────────────────────
 
+        private const int PhoneOtpValidityMinutes = 5;
+        private const int PhoneOtpResendCooldownSeconds = 60;
+        private const int PhoneOtpMaxSendsPerWindow = 5;
+        private static readonly TimeSpan PhoneOtpSendWindow = TimeSpan.FromMinutes(30);
+        private const int PhoneOtpMaxFailedAttempts = 5;
+
         public async Task<(bool Success, string Message)> RequestPhoneVerificationAsync(Guid userId, string phoneNumber)
         {
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
@@ -346,9 +485,29 @@ namespace VietTien.API.Services.Implementations
             if (await _unitOfWork.Users.PhoneExistsAsync(phoneNumber) && user.PhoneNumber != phoneNumber)
                 return (false, "Số điện thoại này đã được sử dụng bởi một tài khoản khác.");
 
+            // Chặn gửi lại OTP trước 60 giây kể từ lần gửi trước (suy ra từ PhoneOtpExpiry - thời hạn hiệu lực).
+            if (user.PhoneOtpExpiry.HasValue)
+            {
+                var lastSentAt = user.PhoneOtpExpiry.Value.AddMinutes(-PhoneOtpValidityMinutes);
+                var secondsSinceLastSend = (DateTime.UtcNow - lastSentAt).TotalSeconds;
+                if (secondsSinceLastSend < PhoneOtpResendCooldownSeconds)
+                    return (false, "Vui lòng đợi ít nhất 60 giây trước khi yêu cầu gửi lại mã OTP.");
+            }
+
+            // Rate limit: tối đa 5 lần gửi trong 30 phút.
+            if (user.PhoneOtpWindowStart == null || DateTime.UtcNow - user.PhoneOtpWindowStart.Value > PhoneOtpSendWindow)
+            {
+                user.PhoneOtpWindowStart = DateTime.UtcNow;
+                user.PhoneOtpSendCount = 0;
+            }
+            if (user.PhoneOtpSendCount >= PhoneOtpMaxSendsPerWindow)
+                return (false, "Bạn đã vượt quá số lần gửi mã OTP cho phép. Vui lòng thử lại sau.");
+
             var otpCode = new Random().Next(100000, 999999).ToString();
-            user.PhoneOtpCode = $"{otpCode}:{phoneNumber}";
-            user.PhoneOtpExpiry = DateTime.UtcNow.AddMinutes(5);
+            user.PhoneOtpCode = $"{BCrypt.Net.BCrypt.HashPassword(otpCode)}:{phoneNumber}";
+            user.PhoneOtpExpiry = DateTime.UtcNow.AddMinutes(PhoneOtpValidityMinutes);
+            user.PhoneOtpSendCount += 1;
+            user.PhoneOtpFailedAttempts = 0;
             // user.PhoneNumber is NOT updated here anymore
             user.IsPhoneVerified = false;
 
@@ -370,8 +529,16 @@ namespace VietTien.API.Services.Implementations
             var user = await _unitOfWork.Users.GetByIdAsync(userId);
             if (user == null) return (false, "Không tìm thấy người dùng.");
 
-            if (user.PhoneOtpCode != $"{otpCode}:{phoneNumber}")
+            if (user.PhoneOtpFailedAttempts >= PhoneOtpMaxFailedAttempts)
+                return (false, "Bạn đã nhập sai mã OTP quá số lần cho phép. Vui lòng yêu cầu gửi lại mã mới.");
+
+            if (!IsPhoneOtpMatch(user.PhoneOtpCode, otpCode, phoneNumber))
+            {
+                user.PhoneOtpFailedAttempts += 1;
+                _unitOfWork.Users.Update(user);
+                await _unitOfWork.SaveChangesAsync();
                 return (false, "Mã OTP không hợp lệ hoặc số điện thoại không khớp.");
+            }
 
             if (user.PhoneOtpExpiry == null || user.PhoneOtpExpiry < DateTime.UtcNow)
                 return (false, "Mã OTP đã hết hạn.");
@@ -380,13 +547,46 @@ namespace VietTien.API.Services.Implementations
             user.IsPhoneVerified = true;
             user.PhoneOtpCode = null;
             user.PhoneOtpExpiry = null;
+            user.PhoneOtpFailedAttempts = 0;
 
             _unitOfWork.Users.Update(user);
             await _unitOfWork.SaveChangesAsync();
 
             return (true, "Xác minh số điện thoại thành công.");
         }
+
+        /// <summary>
+        /// So khớp OTP đã băm lưu ở "hash:phoneNumber" với mã người dùng nhập.
+        /// </summary>
+        private static bool IsPhoneOtpMatch(string? storedOtpCode, string otpCode, string phoneNumber)
+        {
+            if (string.IsNullOrEmpty(storedOtpCode)) return false;
+
+            var separatorIndex = storedOtpCode.LastIndexOf(':');
+            if (separatorIndex < 0) return false;
+
+            var storedHash = storedOtpCode[..separatorIndex];
+            var storedPhone = storedOtpCode[(separatorIndex + 1)..];
+            if (storedPhone != phoneNumber) return false;
+
+            try
+            {
+                return BCrypt.Net.BCrypt.Verify(otpCode, storedHash);
+            }
+            catch (BCrypt.Net.SaltParseException)
+            {
+                return false;
+            }
+        }
         // ─── PRIVATE HELPERS ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Băm token trước khi lưu DB. Refresh token / reset token đã có entropy cao (CSPRNG/Guid)
+        /// nên không cần salt riêng — mục đích chỉ là tránh lộ token dùng được ngay nếu DB bị lộ
+        /// (backup leak, insider...), giống cách password không bao giờ lưu plaintext.
+        /// </summary>
+        private static string HashToken(string token)
+            => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
 
         private async Task<AuthResponseDto> IssueTokensAsync(User user)
         {
@@ -394,15 +594,25 @@ namespace VietTien.API.Services.Implementations
             var refreshToken = _jwtService.GenerateRefreshToken();
             var expiresAt = _jwtService.GetAccessTokenExpiry();
 
-            // Lưu refresh token vào DB
-            user.RefreshToken = refreshToken;
+            // Lưu hash của refresh token vào DB, trả token gốc cho client
+            user.RefreshToken = HashToken(refreshToken);
             user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
 
             _unitOfWork.Users.Update(user);
             await _unitOfWork.SaveChangesAsync();
 
             var userInfo = UserInfoDto.FromUser(user);
-            userInfo.IsProfileCompleted = await IsProfileCompletedAsync(user.Id);
+
+            // Chỉ kiểm tra profile completion cho Customer — các role khác không cần,
+            // tránh 2 DB query thừa khi login cho SalesStaff, Admin, CEO...
+            if (user.Role == SystemRole.Customer)
+            {
+                userInfo.IsProfileCompleted = await IsProfileCompletedAsync(user.Id);
+            }
+            else
+            {
+                userInfo.IsProfileCompleted = true;
+            }
 
             return new AuthResponseDto
             {

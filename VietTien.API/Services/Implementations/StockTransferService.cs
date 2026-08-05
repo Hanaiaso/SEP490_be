@@ -11,12 +11,14 @@ namespace VietTien.API.Services.Implementations
         private readonly ApplicationDbContext _context;
         private readonly IEmailService _emailService;
         private readonly ICloudinaryService _cloudinaryService;
+        private readonly INotificationService _notificationService;
 
-        public StockTransferService(ApplicationDbContext context, IEmailService emailService, ICloudinaryService cloudinaryService)
+        public StockTransferService(ApplicationDbContext context, IEmailService emailService, ICloudinaryService cloudinaryService, INotificationService notificationService)
         {
             _context = context;
             _emailService = emailService;
             _cloudinaryService = cloudinaryService;
+            _notificationService = notificationService;
         }
 
         public async Task<IEnumerable<StockTransferDto>> GetAllAsync()
@@ -48,7 +50,7 @@ namespace VietTien.API.Services.Implementations
                 .FirstOrDefaultAsync(st => st.Id == id);
 
             if (transfer == null)
-                throw new Exception("Không tìm thấy phiếu điều chuyển.");
+                throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
 
             var dto = MapToDto(transfer);
             return dto;
@@ -59,11 +61,14 @@ namespace VietTien.API.Services.Implementations
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                if (dto.SourceWarehouseId == dto.DestinationWarehouseId)
+                    throw new Exception("Kho xuất và kho nhập không được trùng nhau.");
+
                 var sourceWarehouse = await _context.Warehouses.FindAsync(dto.SourceWarehouseId)
-                    ?? throw new Exception("Không tìm thấy kho xuất.");
-                
+                    ?? throw new KeyNotFoundException("Không tìm thấy kho xuất.");
+
                 var destinationWarehouse = await _context.Warehouses.FindAsync(dto.DestinationWarehouseId)
-                    ?? throw new Exception("Không tìm thấy kho nhập.");
+                    ?? throw new KeyNotFoundException("Không tìm thấy kho nhập.");
 
                 if (dto.ExpectedDispatchDate.HasValue && dto.ExpectedDispatchDate.Value < DateTime.UtcNow.AddMinutes(-5))
                     throw new Exception("Thời gian xuất kho dự kiến không được nhỏ hơn thời gian hiện tại.");
@@ -77,6 +82,8 @@ namespace VietTien.API.Services.Implementations
                         throw new Exception("Mỗi mặt hàng điều chuyển phải chọn Thành phẩm hoặc Nguyên liệu.");
                     if (i.ProductId != null && i.MaterialId != null)
                         throw new Exception("Chỉ được chọn 1 trong 2: Thành phẩm hoặc Nguyên liệu.");
+                    if (i.Quantity <= 0)
+                        throw new Exception("Số lượng điều chuyển phải lớn hơn 0.");
                 }
 
                 var transfer = new StockTransfer
@@ -148,7 +155,7 @@ namespace VietTien.API.Services.Implementations
                 .FirstOrDefaultAsync(st => st.Id == id);
 
             if (transfer == null)
-                throw new Exception("Không tìm thấy phiếu điều chuyển.");
+                throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
 
             if (transfer.Status != StockTransferStatus.Draft)
                 throw new Exception("Chỉ có thể cập nhật phiếu ở trạng thái Nháp.");
@@ -199,7 +206,7 @@ namespace VietTien.API.Services.Implementations
                     .FirstOrDefaultAsync(st => st.Id == id);
 
                 if (transfer == null)
-                    throw new Exception("Không tìm thấy phiếu điều chuyển.");
+                    throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
 
                 if (transfer.Status != StockTransferStatus.Draft)
                     throw new Exception("Chỉ có thể xuất kho cho phiếu ở trạng thái Nháp.");
@@ -242,6 +249,32 @@ namespace VietTien.API.Services.Implementations
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
+                // Phiếu đã chuyển trạng thái Dispatched và commit thành công ở trên -> lỗi gửi
+                // notification không được làm fail request, chỉ log để theo dõi.
+                try
+                {
+                    var destinationStaffIds = await _context.Users
+                        .Where(u => u.Role == SystemRole.WarehouseStaff && u.AssignedWarehouseId == transfer.DestinationWarehouseId)
+                        .Select(u => u.Id)
+                        .ToListAsync();
+
+                    foreach (var staffId in destinationStaffIds)
+                    {
+                        await _notificationService.CreateNotificationAsync(
+                            NotificationType.SYS_10_StockTransferDispatched,
+                            staffId,
+                            "Phiếu điều chuyển kho đang đến",
+                            $"Phiếu điều chuyển {transfer.Code} từ kho {transfer.SourceWarehouse.Name} đã xuất kho, đang chuyển tới kho {transfer.DestinationWarehouse.Name}.",
+                            transfer.Id,
+                            "StockTransfer"
+                        );
+                    }
+                }
+                catch (Exception notifyEx)
+                {
+                    Console.WriteLine($"[StockTransferService] Error sending stock transfer dispatched notification: {notifyEx.Message}");
+                }
+
                 return MapToDto(transfer);
             }
             catch
@@ -251,7 +284,7 @@ namespace VietTien.API.Services.Implementations
             }
         }
 
-        public async Task<StockTransferDto> ReceiveAsync(Guid id, ReceiveStockTransferDto dto)
+        public async Task<StockTransferDto> ReceiveAsync(Guid id, ReceiveStockTransferDto dto, Guid staffId)
         {
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -264,7 +297,16 @@ namespace VietTien.API.Services.Implementations
                     .FirstOrDefaultAsync(st => st.Id == id);
 
                 if (transfer == null)
-                    throw new Exception("Không tìm thấy phiếu điều chuyển.");
+                    throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
+
+                // IDOR: WarehouseStaff chỉ được nhận hàng ở đúng kho được gán, không phải kho đích
+                // của phiếu bất kỳ (cùng cơ chế với InventoryService.AdjustInventoryAsync).
+                var staff = await _context.Users.FindAsync(staffId);
+                if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
+                    staff.AssignedWarehouseId != transfer.DestinationWarehouseId)
+                {
+                    throw new UnauthorizedAccessException("Bạn không có quyền nhận hàng cho kho này.");
+                }
 
                 if (transfer.Status != StockTransferStatus.Dispatched)
                     throw new Exception("Chỉ có thể nhận hàng cho phiếu đang ở trạng thái Đang giao (Dispatched).");
@@ -293,6 +335,18 @@ namespace VietTien.API.Services.Implementations
                     {
                         var itemName = rcvItem.ProductId != null ? $"sản phẩm ID {rcvItem.ProductId}" : $"nguyên liệu ID {rcvItem.MaterialId}";
                         throw new Exception($"{itemName} không có trong phiếu điều chuyển.");
+                    }
+
+                    if (rcvItem.ReceivedQuantity < 0)
+                    {
+                        var itemName = rcvItem.ProductId != null ? $"sản phẩm ID {rcvItem.ProductId}" : $"nguyên liệu ID {rcvItem.MaterialId}";
+                        throw new Exception($"Số lượng nhận cho {itemName} không được âm.");
+                    }
+
+                    if (rcvItem.ReceivedQuantity > transferItem.Quantity)
+                    {
+                        var itemName = rcvItem.ProductId != null ? $"sản phẩm ID {rcvItem.ProductId}" : $"nguyên liệu ID {rcvItem.MaterialId}";
+                        throw new Exception($"Số lượng nhận cho {itemName} ({rcvItem.ReceivedQuantity}) không được vượt quá số lượng đã xuất ({transferItem.Quantity}).");
                     }
 
                     transferItem.ReceivedQuantity = rcvItem.ReceivedQuantity;
@@ -387,7 +441,7 @@ namespace VietTien.API.Services.Implementations
                     .FirstOrDefaultAsync(st => st.Id == id);
 
                 if (transfer == null)
-                    throw new Exception("Không tìm thấy phiếu điều chuyển.");
+                    throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
 
                 if (transfer.Status == StockTransferStatus.Received || transfer.Status == StockTransferStatus.Cancelled)
                     throw new Exception("Không thể hủy phiếu đã hoàn thành hoặc đã hủy.");

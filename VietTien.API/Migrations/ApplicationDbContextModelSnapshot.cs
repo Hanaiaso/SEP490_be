@@ -141,6 +141,68 @@ namespace VietTien.API.Migrations
                     b.ToTable("AiMarketingCampaigns");
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.AuditLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ActorEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("ActorRole")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("EntityName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Action");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("EntityName");
+
+                    b.ToTable("AuditLogs");
+                });
+
             modelBuilder.Entity("VietTien.API.Models.Cart", b =>
                 {
                     b.Property<Guid>("Id")
@@ -455,6 +517,76 @@ namespace VietTien.API.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.DiscountTier", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("DiscountPercent")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<decimal?>("MaxAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("MinAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MinAmount");
+
+                    b.ToTable("DiscountTiers");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("f0000002-0002-4002-a002-000000000001"),
+                            Description = "10tr - <31tr: 5%",
+                            DiscountPercent = 0.05m,
+                            IsActive = true,
+                            MaxAmount = 31000000m,
+                            MinAmount = 10000000m
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000002-0002-4002-a002-000000000002"),
+                            Description = "31tr - <51tr: 6%",
+                            DiscountPercent = 0.06m,
+                            IsActive = true,
+                            MaxAmount = 51000000m,
+                            MinAmount = 31000000m
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000002-0002-4002-a002-000000000003"),
+                            Description = "51tr - <71tr: 7%",
+                            DiscountPercent = 0.07m,
+                            IsActive = true,
+                            MaxAmount = 71000000m,
+                            MinAmount = 51000000m
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000002-0002-4002-a002-000000000004"),
+                            Description = "71tr - <100tr: 8%",
+                            DiscountPercent = 0.08m,
+                            IsActive = true,
+                            MaxAmount = 100000000m,
+                            MinAmount = 71000000m
+                        });
+                });
+
             modelBuilder.Entity("VietTien.API.Models.EmployeeSalary", b =>
                 {
                     b.Property<Guid>("Id")
@@ -497,9 +629,20 @@ namespace VietTien.API.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<string>("Department")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ExternalRecipientName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("ImageProofUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsReversal")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime?>("IssueDate")
                         .HasColumnType("datetime2");
@@ -510,8 +653,28 @@ namespace VietTien.API.Migrations
                     b.Property<string>("Note")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("PaperDocumentNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime?>("ReceivedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid?>("ReferenceId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalForIssueId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReversalReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -519,12 +682,20 @@ namespace VietTien.API.Migrations
                     b.Property<int>("Type")
                         .HasColumnType("int");
 
+                    b.Property<string>("UsagePurpose")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid>("WarehouseId")
                         .HasColumnType("uniqueidentifier");
 
                     b.HasKey("Id");
 
                     b.HasIndex("IssuedByUserId");
+
+                    b.HasIndex("PaperDocumentNumber")
+                        .IsUnique()
+                        .HasFilter("[PaperDocumentNumber] IS NOT NULL");
 
                     b.HasIndex("WarehouseId");
 
@@ -572,6 +743,9 @@ namespace VietTien.API.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("ImageProofUrl")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Note")
                         .HasColumnType("nvarchar(max)");
 
@@ -583,6 +757,12 @@ namespace VietTien.API.Migrations
 
                     b.Property<DateTime>("ReceivedDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -719,6 +899,9 @@ namespace VietTien.API.Migrations
                     b.Property<int>("QuarantineQuantity")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ReorderThreshold")
+                        .HasColumnType("int");
+
                     b.Property<int>("ReservedQuantity")
                         .HasColumnType("int");
 
@@ -729,11 +912,15 @@ namespace VietTien.API.Migrations
 
                     b.HasIndex("LastUpdatedByUserId");
 
-                    b.HasIndex("MaterialId");
-
-                    b.HasIndex("ProductId");
-
                     b.HasIndex("WarehouseLocationId");
+
+                    b.HasIndex("MaterialId", "WarehouseLocationId")
+                        .IsUnique()
+                        .HasFilter("[MaterialId] IS NOT NULL");
+
+                    b.HasIndex("ProductId", "WarehouseLocationId")
+                        .IsUnique()
+                        .HasFilter("[ProductId] IS NOT NULL");
 
                     b.ToTable("Inventories");
 
@@ -810,6 +997,156 @@ namespace VietTien.API.Migrations
                             ReservedQuantity = 799,
                             WarehouseLocationId = new Guid("2006d0a6-37a9-46ca-b8a0-bb061ec9f1e9")
                         });
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.JobRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<string>("ErrorMessage")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("FinishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ItemsProcessed")
+                        .HasColumnType("int");
+
+                    b.Property<string>("JobName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("StartedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("TriggerType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("TriggeredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobName");
+
+                    b.HasIndex("StartedAt");
+
+                    b.HasIndex("JobName", "StartedAt");
+
+                    b.ToTable("JobRuns");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.MarketingPost", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("CommentCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CtaText")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EditedCaption")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ExternalPostId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("GeneratedCaption")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("GeneratedImageUrl")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Goal")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Hashtags")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("LikeCount")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PromptUsed")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PublishErrorMessage")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ReachCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ScheduledTime")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("SelectedImageUrl")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ShareCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TemplateName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Tone")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByUserId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("ProductId");
+
+                    b.ToTable("MarketingPosts");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.Material", b =>
@@ -925,6 +1262,9 @@ namespace VietTien.API.Migrations
                     b.Property<DateTime?>("CancelRequestedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -942,6 +1282,9 @@ namespace VietTien.API.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<string>("DeliveryPhotoUrl")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("DeliveryRejectionReasonCode")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("DeliveryShift")
@@ -1290,6 +1633,12 @@ namespace VietTien.API.Migrations
                     b.Property<Guid>("OrderId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -1514,6 +1863,12 @@ namespace VietTien.API.Migrations
                     b.Property<string>("Note")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -1600,7 +1955,7 @@ namespace VietTien.API.Migrations
                     b.Property<Guid?>("GoodsReceiptItemId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("InventoryId")
+                    b.Property<Guid?>("InventoryId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("MaterialId")
@@ -1675,6 +2030,12 @@ namespace VietTien.API.Migrations
 
                     b.Property<DateTime>("RequestDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<Guid?>("SalesStaffId")
                         .HasColumnType("uniqueidentifier");
@@ -1813,6 +2174,132 @@ namespace VietTien.API.Migrations
                     b.HasIndex("QuotationVersionId");
 
                     b.ToTable("QuotationVersionItems");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CustomerProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EvidenceUrls")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ManagerNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PickupShift")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("PickupStatus")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("PickupVehicleId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ProcessedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("ReplacementOrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ScheduledPickupDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerProfileId");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("ProcessedByUserId");
+
+                    b.HasIndex("ReplacementOrderId");
+
+                    b.HasIndex("RequestedByUserId");
+
+                    b.ToTable("ReturnExchangeRequests");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequestItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<decimal>("PriceSnapshot")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ReturnExchangeRequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("ReturnExchangeRequestId");
+
+                    b.ToTable("ReturnExchangeRequestItems");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequestNewItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<decimal>("PriceSnapshot")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ReturnExchangeRequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("ReturnExchangeRequestId");
+
+                    b.ToTable("ReturnExchangeRequestNewItems");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.ReturnedGoodsLog", b =>
@@ -2114,6 +2601,12 @@ namespace VietTien.API.Migrations
                     b.Property<DateTime?>("ReceivedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<Guid>("SourceWarehouseId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2205,12 +2698,315 @@ namespace VietTien.API.Migrations
                     b.ToTable("Suppliers");
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.SystemConfig", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("OwnerLevel")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Unit")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ValueType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Key");
+
+                    b.ToTable("SystemConfigs");
+
+                    b.HasData(
+                        new
+                        {
+                            Key = "PRICE_LOCK_HOURS",
+                            Description = "Thời gian khóa giá báo giá",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Giờ",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "SEPAY_RESERVATION_MINUTES",
+                            Description = "Thời gian giữ tồn cho đơn SePay chờ thanh toán",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Phút",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "COD_RESERVATION_MINUTES",
+                            Description = "Thời gian giữ tồn cho đơn COD chờ xác nhận",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Phút",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "COD_WARNING_MINUTES",
+                            Description = "Mốc cảnh báo Sale trước khi hết hạn giữ tồn COD",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Phút",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "COD_ESCALATION_MINUTES",
+                            Description = "Mốc leo thang cảnh báo Manager cho đơn COD",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Phút",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "OTP_EXPIRE_MINUTES",
+                            Description = "Thời gian hết hạn mã OTP",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Phút",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "OTP_RESEND_SECONDS",
+                            Description = "Thời gian tối thiểu giữa 2 lần gửi lại OTP",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Giây",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "OTP_MAX_ATTEMPTS",
+                            Description = "Số lần gửi OTP tối đa trong 30 phút",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Lần",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "QUOTATION_MIN_VALUE",
+                            Description = "Ngưỡng giá trị đơn bắt buộc chuyển sang luồng báo giá",
+                            IsActive = true,
+                            OwnerLevel = "Admin/CEO",
+                            Unit = "VND",
+                            ValueType = "Decimal"
+                        },
+                        new
+                        {
+                            Key = "LIST_PRICE_MAX_EXCLUSIVE",
+                            Description = "Ngưỡng áp dụng giá niêm yết (dưới ngưỡng này)",
+                            IsActive = true,
+                            OwnerLevel = "Admin/CEO",
+                            Unit = "VND",
+                            ValueType = "Decimal"
+                        },
+                        new
+                        {
+                            Key = "MAX_SCHEDULED_MARKETING_POSTS",
+                            Description = "Số bài viết marketing được lên lịch tối đa",
+                            IsActive = true,
+                            OwnerLevel = "Admin",
+                            Unit = "Bài viết",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "DELIVERY_FAILURE_MANAGER_THRESHOLD",
+                            Description = "Số lần giao thất bại trước khi báo Manager",
+                            IsActive = true,
+                            OwnerLevel = "Admin/Manager",
+                            Unit = "Lần thử giao",
+                            ValueType = "Int"
+                        });
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.SystemConfigVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<string>("ActorEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ChangeReason")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ConfigKey")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConfigKey", "EffectiveDate");
+
+                    b.ToTable("SystemConfigVersions");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000001"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "PRICE_LOCK_HOURS",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "24"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000002"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "SEPAY_RESERVATION_MINUTES",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "15"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000003"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "COD_RESERVATION_MINUTES",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "35"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000004"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "COD_WARNING_MINUTES",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "25"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000005"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "COD_ESCALATION_MINUTES",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "30"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000006"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "OTP_EXPIRE_MINUTES",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "5"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000007"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "OTP_RESEND_SECONDS",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "60"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000008"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "OTP_MAX_ATTEMPTS",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "5"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000009"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "QUOTATION_MIN_VALUE",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "100000000"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000010"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "LIST_PRICE_MAX_EXCLUSIVE",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "10000000"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000011"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "MAX_SCHEDULED_MARKETING_POSTS",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "30"
+                        },
+                        new
+                        {
+                            Id = new Guid("a0000001-0001-4001-a001-000000000012"),
+                            ActorEmail = "system-seed",
+                            ChangeReason = "Khởi tạo giá trị mặc định theo business.md §7",
+                            ConfigKey = "DELIVERY_FAILURE_MANAGER_THRESHOLD",
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            EffectiveDate = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Value = "3"
+                        });
+                });
+
             modelBuilder.Entity("VietTien.API.Models.User", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier")
                         .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<Guid?>("AssignedWarehouseId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("AvatarUrl")
                         .HasColumnType("nvarchar(max)");
@@ -2222,12 +3018,29 @@ namespace VietTien.API.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<DateTime?>("EmailOtpDayWindowStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("EmailOtpSendCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("EmailOtpSendCountDaily")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("EmailOtpWindowStart")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("FullName")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("GoogleId")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<bool>("IsEmailVerified")
                         .HasColumnType("bit");
@@ -2259,6 +3072,15 @@ namespace VietTien.API.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("PhoneOtpExpiry")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("PhoneOtpFailedAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PhoneOtpSendCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("PhoneOtpWindowStart")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("ReferralCode")
@@ -2295,11 +3117,16 @@ namespace VietTien.API.Migrations
                             Id = new Guid("11111111-1111-1111-1111-111111111111"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "admin.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "Admin Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000001",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 7
                         },
                         new
@@ -2307,11 +3134,16 @@ namespace VietTien.API.Migrations
                             Id = new Guid("22222222-2222-2222-2222-222222222222"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "ceo.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "CEO Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000002",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 6
                         },
                         new
@@ -2319,11 +3151,16 @@ namespace VietTien.API.Migrations
                             Id = new Guid("33333333-3333-3333-3333-333333333333"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "salesmanager.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "Sales Manager Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000003",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 3
                         },
                         new
@@ -2331,11 +3168,16 @@ namespace VietTien.API.Migrations
                             Id = new Guid("44444444-4444-4444-4444-444444444444"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "salesstaff.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "Sales Staff Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000004",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 2
                         },
                         new
@@ -2343,11 +3185,16 @@ namespace VietTien.API.Migrations
                             Id = new Guid("55555555-5555-5555-5555-555555555555"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "warehousestaff.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "Warehouse Staff Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000005",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 4
                         },
                         new
@@ -2355,11 +3202,16 @@ namespace VietTien.API.Migrations
                             Id = new Guid("66666666-6666-6666-6666-666666666666"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "accountingstaff.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "Accounting Staff Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000006",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 5
                         },
                         new
@@ -2367,12 +3219,87 @@ namespace VietTien.API.Migrations
                             Id = new Guid("77777777-7777-7777-7777-777777777777"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "customer.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
                             FullName = "Customer Test",
+                            IsActive = true,
                             IsEmailVerified = true,
                             IsPhoneVerified = true,
                             PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
                             PhoneNumber = "0999000007",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
                             Role = 1
+                        });
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.Vehicle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<decimal?>("Capacity")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("LicensePlate")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Note")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("VehicleNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("VehicleNumber")
+                        .IsUnique();
+
+                    b.ToTable("Vehicles");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("f0000001-0001-4001-a001-000000000001"),
+                            IsActive = true,
+                            LicensePlate = "51C-000.01",
+                            VehicleNumber = 1
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000001-0001-4001-a001-000000000002"),
+                            IsActive = true,
+                            LicensePlate = "51C-000.02",
+                            VehicleNumber = 2
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000001-0001-4001-a001-000000000003"),
+                            IsActive = true,
+                            LicensePlate = "51C-000.03",
+                            VehicleNumber = 3
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000001-0001-4001-a001-000000000004"),
+                            IsActive = true,
+                            LicensePlate = "51C-000.04",
+                            VehicleNumber = 4
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000001-0001-4001-a001-000000000005"),
+                            IsActive = true,
+                            LicensePlate = "51C-000.05",
+                            VehicleNumber = 5
                         });
                 });
 
@@ -2487,6 +3414,51 @@ namespace VietTien.API.Migrations
                             Name = "Ca Chiều",
                             StartTime = new TimeSpan(0, 22, 0, 0, 0)
                         });
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.WebhookLog", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("LastAttemptAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ProcessedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RawPayload")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("ReceivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ReceivedAt");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("WebhookLogs");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.Address", b =>
@@ -2806,6 +3778,32 @@ namespace VietTien.API.Migrations
                     b.Navigation("WarehouseLocation");
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.MarketingPost", b =>
+                {
+                    b.HasOne("VietTien.API.Models.User", "ApprovedByUser")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("VietTien.API.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedByUser");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("Product");
+                });
+
             modelBuilder.Entity("VietTien.API.Models.Notification", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "RecipientUser")
@@ -3090,8 +4088,7 @@ namespace VietTien.API.Migrations
                     b.HasOne("VietTien.API.Models.Inventory", "Inventory")
                         .WithMany()
                         .HasForeignKey("InventoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("VietTien.API.Models.Material", "Material")
                         .WithMany()
@@ -3202,6 +4199,84 @@ namespace VietTien.API.Migrations
                     b.Navigation("Product");
 
                     b.Navigation("QuotationVersion");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequest", b =>
+                {
+                    b.HasOne("VietTien.API.Models.CustomerProfile", "CustomerProfile")
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.Order", "Order")
+                        .WithMany("ReturnExchangeRequests")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.User", "ProcessedBy")
+                        .WithMany()
+                        .HasForeignKey("ProcessedByUserId");
+
+                    b.HasOne("VietTien.API.Models.Order", "ReplacementOrder")
+                        .WithMany()
+                        .HasForeignKey("ReplacementOrderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("VietTien.API.Models.User", "RequestedBy")
+                        .WithMany()
+                        .HasForeignKey("RequestedByUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("CustomerProfile");
+
+                    b.Navigation("Order");
+
+                    b.Navigation("ProcessedBy");
+
+                    b.Navigation("ReplacementOrder");
+
+                    b.Navigation("RequestedBy");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequestItem", b =>
+                {
+                    b.HasOne("VietTien.API.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.ReturnExchangeRequest", "ReturnExchangeRequest")
+                        .WithMany("ReturnItems")
+                        .HasForeignKey("ReturnExchangeRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+
+                    b.Navigation("ReturnExchangeRequest");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequestNewItem", b =>
+                {
+                    b.HasOne("VietTien.API.Models.Product", "Product")
+                        .WithMany()
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.ReturnExchangeRequest", "ReturnExchangeRequest")
+                        .WithMany("ExchangeItems")
+                        .HasForeignKey("ReturnExchangeRequestId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Product");
+
+                    b.Navigation("ReturnExchangeRequest");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.ReturnedGoodsLog", b =>
@@ -3402,6 +4477,17 @@ namespace VietTien.API.Migrations
                     b.Navigation("StockTransfer");
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.SystemConfigVersion", b =>
+                {
+                    b.HasOne("VietTien.API.Models.SystemConfig", "Config")
+                        .WithMany("Versions")
+                        .HasForeignKey("ConfigKey")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Config");
+                });
+
             modelBuilder.Entity("VietTien.API.Models.User", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "ReferredBySalesStaff")
@@ -3470,6 +4556,8 @@ namespace VietTien.API.Migrations
 
                     b.Navigation("PaymentExceptions");
 
+                    b.Navigation("ReturnExchangeRequests");
+
                     b.Navigation("ReturnedGoodsLogs");
 
                     b.Navigation("Transactions");
@@ -3512,6 +4600,13 @@ namespace VietTien.API.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.ReturnExchangeRequest", b =>
+                {
+                    b.Navigation("ExchangeItems");
+
+                    b.Navigation("ReturnItems");
+                });
+
             modelBuilder.Entity("VietTien.API.Models.SalesChangeRequest", b =>
                 {
                     b.Navigation("OrderDecisions");
@@ -3525,6 +4620,11 @@ namespace VietTien.API.Migrations
             modelBuilder.Entity("VietTien.API.Models.Supplier", b =>
                 {
                     b.Navigation("PurchaseOrders");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.SystemConfig", b =>
+                {
+                    b.Navigation("Versions");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.User", b =>

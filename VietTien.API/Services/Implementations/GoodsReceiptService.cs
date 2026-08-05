@@ -10,21 +10,71 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly INotificationService _notificationService;
+        private readonly ICloudinaryService _cloudinaryService;
+        private readonly ILogger<GoodsReceiptService> _logger;
 
-        public GoodsReceiptService(ApplicationDbContext context, INotificationService notificationService)
+        public GoodsReceiptService(ApplicationDbContext context, INotificationService notificationService, ICloudinaryService cloudinaryService, ILogger<GoodsReceiptService> logger)
         {
             _context = context;
             _notificationService = notificationService;
+            _cloudinaryService = cloudinaryService;
+            _logger = logger;
         }
 
         public async Task<GoodsReceiptDto> CreateFromPOAsync(Guid poId, Guid warehouseStaffId, CreateGoodsReceiptRequest request)
         {
             var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == poId);
-            if (po == null) throw new Exception("Purchase Order not found");
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status != PurchaseOrderStatus.SentToWarehouse && po.Status != PurchaseOrderStatus.PartiallyReceived)
             {
-                throw new Exception("Purchase Order is not ready to receive goods");
+                throw new InvalidOperationException("Purchase Order is not ready to receive goods");
+            }
+
+            // ── Validate từng item trước khi tạo phiếu ──
+            var errors = new List<string>();
+            foreach (var item in request.Items)
+            {
+                var poItem = po.Items.FirstOrDefault(pi => pi.Id == item.PurchaseOrderItemId);
+                if (poItem == null)
+                {
+                    errors.Add($"Không tìm thấy PO item {item.PurchaseOrderItemId}");
+                    continue;
+                }
+
+                // Số lượng phải >= 0
+                if (item.AcceptedQuantity < 0) errors.Add($"Đạt không được âm (item {poItem.Id})");
+                if (item.DamagedQuantity < 0) errors.Add($"Hỏng không được âm (item {poItem.Id})");
+                if (item.WrongItemQuantity < 0) errors.Add($"Sai loại không được âm (item {poItem.Id})");
+
+                // Thừa và Thiếu không thể cùng > 0
+                if (item.ExcessQuantity > 0 && item.ShortQuantity > 0)
+                {
+                    errors.Add($"Thừa và Thiếu không thể cùng lớn hơn 0 (item {poItem.Id})");
+                }
+
+                // Kiểm tra bất biến: Thực nhận = Đạt + Hỏng + Sai loại
+                int actualReceived = item.AcceptedQuantity + item.DamagedQuantity + item.WrongItemQuantity;
+                int remaining = Math.Max(0, poItem.ExpectedQuantity - poItem.ReceivedQuantity);
+
+                // Excess phải = max(0, actualReceived - remaining)
+                int expectedExcess = Math.Max(0, actualReceived - remaining);
+                // Short phải = max(0, remaining - actualReceived)
+                int expectedShort = Math.Max(0, remaining - actualReceived);
+
+                if (item.ExcessQuantity != expectedExcess)
+                {
+                    errors.Add($"Thừa phải = {expectedExcess}, nhận được {item.ExcessQuantity} (item {poItem.Id})");
+                }
+                if (item.ShortQuantity != expectedShort)
+                {
+                    errors.Add($"Thiếu phải = {expectedShort}, nhận được {item.ShortQuantity} (item {poItem.Id})");
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                throw new Exception("Dữ liệu kiểm đếm không hợp lệ:\n" + string.Join("\n", errors));
             }
 
             var receiptCode = $"GR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4).ToUpper()}";
@@ -62,13 +112,27 @@ namespace VietTien.API.Services.Implementations
                 .ThenInclude(i => i.PurchaseOrderItem)
                 .FirstOrDefaultAsync(r => r.Id == id);
 
-            if (receipt == null) throw new Exception("Goods Receipt not found");
-            if (receipt.Status != GoodsReceiptStatus.Draft) throw new Exception("Goods Receipt is already posted or cancelled");
+            if (receipt == null) throw new KeyNotFoundException("Goods Receipt not found");
+            if (receipt.Status != GoodsReceiptStatus.Draft) throw new InvalidOperationException("Goods Receipt is already posted or cancelled");
+
+            bool hasSevereDiscrepancy = receipt.Items.Any(i => i.DamagedQuantity > 0 || i.WrongItemQuantity > 0);
+            if (hasSevereDiscrepancy && string.IsNullOrEmpty(receipt.ImageProofUrl))
+            {
+                throw new Exception("Bắt buộc phải đính kèm tệp minh chứng (ảnh/biên bản) khi có hàng Hỏng hoặc Sai loại.");
+            }
 
             receipt.Status = GoodsReceiptStatus.Posted;
 
             var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId);
-            
+            if (po == null) throw new KeyNotFoundException("Purchase Order not found");
+
+            // Lấy trước vị trí lưu kho mặc định và chặn cứng nếu không có, tránh trường hợp
+            // Posted nhưng tồn kho không được cộng do defaultLocation == null bị bỏ qua âm thầm.
+            var defaultLocation = await _context.WarehouseLocations
+                .FirstOrDefaultAsync(l => l.WarehouseId == po.WarehouseId && l.Type == "Normal");
+            if (defaultLocation == null)
+                throw new Exception("Kho hàng của PO này chưa có vị trí lưu kho loại 'Normal'. Vui lòng tạo vị trí lưu kho trước khi nhận hàng.");
+
             bool hasDiscrepancy = false;
 
             // Update PO Items received quantity
@@ -76,45 +140,48 @@ namespace VietTien.API.Services.Implementations
             {
                 // Chỉ tính AcceptedQuantity vào ReceivedQuantity
                 item.PurchaseOrderItem.ReceivedQuantity += item.AcceptedQuantity;
-                
+
                 if (item.DamagedQuantity > 0 || item.ExcessQuantity > 0 || item.ShortQuantity > 0 || item.WrongItemQuantity > 0)
                 {
                     hasDiscrepancy = true;
                 }
 
                 // Update Inventory logic (chỉ cộng AcceptedQuantity)
-                if (item.AcceptedQuantity > 0)
+                int totalDefective = item.DamagedQuantity + item.WrongItemQuantity + item.ExcessQuantity;
+
+                if (item.AcceptedQuantity > 0 || totalDefective > 0)
                 {
-                    var defaultLocation = await _context.WarehouseLocations.FirstOrDefaultAsync(l => l.WarehouseId == po.WarehouseId && l.Type == "Normal");
-                    if (defaultLocation != null)
+                    // Lookup inventory by ProductId or MaterialId
+                    Inventory? inventory;
+                    if (item.PurchaseOrderItem.ProductId != null)
                     {
-                        // Lookup inventory by ProductId or MaterialId
-                        Inventory? inventory;
-                        if (item.PurchaseOrderItem.ProductId != null)
-                        {
-                            inventory = await _context.Inventories.FirstOrDefaultAsync(inv => inv.ProductId == item.PurchaseOrderItem.ProductId && inv.WarehouseLocationId == defaultLocation.Id);
-                        }
-                        else
-                        {
-                            inventory = await _context.Inventories.FirstOrDefaultAsync(inv => inv.MaterialId == item.PurchaseOrderItem.MaterialId && inv.WarehouseLocationId == defaultLocation.Id);
-                        }
+                        inventory = await _context.Inventories.FirstOrDefaultAsync(inv => inv.ProductId == item.PurchaseOrderItem.ProductId && inv.WarehouseLocationId == defaultLocation.Id);
+                    }
+                    else
+                    {
+                        inventory = await _context.Inventories.FirstOrDefaultAsync(inv => inv.MaterialId == item.PurchaseOrderItem.MaterialId && inv.WarehouseLocationId == defaultLocation.Id);
+                    }
 
-                        if (inventory == null)
+                    if (inventory == null)
+                    {
+                        inventory = new Inventory
                         {
-                            inventory = new Inventory
-                            {
-                                ProductId = item.PurchaseOrderItem.ProductId,
-                                MaterialId = item.PurchaseOrderItem.MaterialId,
-                                WarehouseLocationId = defaultLocation.Id,
-                                OnHandQuantity = item.AcceptedQuantity
-                            };
-                            _context.Inventories.Add(inventory);
-                        }
-                        else
-                        {
-                            inventory.OnHandQuantity += item.AcceptedQuantity;
-                        }
+                            ProductId = item.PurchaseOrderItem.ProductId,
+                            MaterialId = item.PurchaseOrderItem.MaterialId,
+                            WarehouseLocationId = defaultLocation.Id,
+                            OnHandQuantity = item.AcceptedQuantity,
+                            QuarantineQuantity = totalDefective
+                        };
+                        _context.Inventories.Add(inventory);
+                    }
+                    else
+                    {
+                        inventory.OnHandQuantity += item.AcceptedQuantity;
+                        inventory.QuarantineQuantity += totalDefective;
+                    }
 
+                    if (item.AcceptedQuantity > 0)
+                    {
                         // Log StockTransaction
                         var tx = new StockTransaction
                         {
@@ -130,26 +197,25 @@ namespace VietTien.API.Services.Implementations
                         };
                         _context.StockTransactions.Add(tx);
                     }
-                }
 
-                // Log Quarantine cho hàng lỗi/thừa/sai
-                int totalDefective = item.DamagedQuantity + item.WrongItemQuantity + item.ExcessQuantity;
-                if (totalDefective > 0)
-                {
-                    var quarantine = new QuarantineLog
+                    if (totalDefective > 0)
                     {
-                        QuarantineCode = $"QZ-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4).ToUpper()}",
-                        OrderId = null, // Lỗi từ PO, không có OrderId
-                        GoodsReceiptItemId = item.Id,
-                        ProductId = item.PurchaseOrderItem.ProductId,
-                        MaterialId = item.PurchaseOrderItem.MaterialId,
-                        Quantity = totalDefective,
-                        Reason = $"Từ Phiếu Nhập {receipt.Code}. Hỏng: {item.DamagedQuantity}, Sai: {item.WrongItemQuantity}, Thừa: {item.ExcessQuantity}",
-                        Status = QuarantineStatus.Waiting,
-                        ReceivedByUserId = warehouseStaffId,
-                        CreatedAt = DateTime.UtcNow
-                    };
-                    _context.QuarantineLogs.Add(quarantine);
+                        var quarantine = new QuarantineLog
+                        {
+                            QuarantineCode = $"QZ-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4).ToUpper()}",
+                            OrderId = null, // Lỗi từ PO, không có OrderId
+                            GoodsReceiptItemId = item.Id,
+                            Inventory = inventory,
+                            ProductId = item.PurchaseOrderItem.ProductId,
+                            MaterialId = item.PurchaseOrderItem.MaterialId,
+                            Quantity = totalDefective,
+                            Reason = $"Từ Phiếu Nhập {receipt.Code}. Hỏng: {item.DamagedQuantity}, Sai: {item.WrongItemQuantity}, Thừa: {item.ExcessQuantity}",
+                            Status = QuarantineStatus.Waiting,
+                            ReceivedByUserId = warehouseStaffId,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        _context.QuarantineLogs.Add(quarantine);
+                    }
                 }
             }
 
@@ -159,16 +225,6 @@ namespace VietTien.API.Services.Implementations
             if (hasDiscrepancy)
             {
                 po.Status = PurchaseOrderStatus.DiscrepancyReview;
-
-                // SYS-19_GoodsReceiptDiscrepancy
-                await _notificationService.CreateRoleNotificationAsync(
-                    NotificationType.SYS_19_GoodsReceiptDiscrepancy,
-                    SystemRole.CEO,
-                    "Nhập kho có sai lệch",
-                    $"Phiếu nhập kho {receipt.Code} (PO {po.Code}) có sai lệch. Cần CEO hoặc Quản lý xem xét.",
-                    po.Id,
-                    "PurchaseOrder"
-                );
             }
             else if (allFullyReceived)
             {
@@ -180,6 +236,29 @@ namespace VietTien.API.Services.Implementations
             }
 
             await _context.SaveChangesAsync();
+
+            if (hasDiscrepancy)
+            {
+                try
+                {
+                    // SYS-19_GoodsReceiptDiscrepancy — gửi sau khi đã lưu thành công, tránh trường hợp
+                    // CEO nhận được thông báo "có sai lệch cần xem xét" cho một phiếu nhập chưa thực sự Posted.
+                    await _notificationService.CreateRoleNotificationAsync(
+                        NotificationType.SYS_19_GoodsReceiptDiscrepancy,
+                        SystemRole.CEO,
+                        "Nhập kho có sai lệch",
+                        $"Phiếu nhập kho {receipt.Code} (PO {po.Code}) có sai lệch. Cần CEO hoặc Quản lý xem xét.",
+                        po.Id,
+                        "PurchaseOrder"
+                    );
+                }
+                catch (Exception ex)
+                {
+                    // Phiếu nhập đã Posted và commit thành công -> lỗi gửi thông báo không được làm
+                    // request báo lỗi cho warehouse staff, chỉ log để theo dõi.
+                    _logger.LogError(ex, "Lỗi gửi thông báo sai lệch cho GoodsReceipt {ReceiptId}", receipt.Id);
+                }
+            }
 
             return await GetReceiptDtoAsync(receipt.Id);
         }
@@ -198,6 +277,41 @@ namespace VietTien.API.Services.Implementations
             return dtoList;
         }
 
+        public async Task<IEnumerable<GoodsReceiptDto>> GetAllAsync(string? status)
+        {
+            var query = _context.GoodsReceipts.AsQueryable();
+            if (!string.IsNullOrEmpty(status) && Enum.TryParse<GoodsReceiptStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(r => r.Status == parsedStatus);
+            }
+
+            var receipts = await query.ToListAsync();
+            var dtoList = new List<GoodsReceiptDto>();
+            foreach (var r in receipts)
+            {
+                dtoList.Add(await GetReceiptDtoAsync(r.Id));
+            }
+            return dtoList;
+        }
+
+        public async Task<GoodsReceiptDto> UploadProofAsync(Guid receiptId, Microsoft.AspNetCore.Http.IFormFile file)
+        {
+            var receipt = await _context.GoodsReceipts.FirstOrDefaultAsync(gr => gr.Id == receiptId);
+            if (receipt == null) throw new KeyNotFoundException("Goods Receipt not found");
+            
+            if (receipt.Status != GoodsReceiptStatus.Draft)
+            {
+                throw new InvalidOperationException("Chỉ có thể tải minh chứng lên khi phiếu nhận hàng đang ở trạng thái Draft.");
+            }
+
+            var uploadUrl = await _cloudinaryService.UploadEvidenceAsync(file, "GoodsReceipts");
+            receipt.ImageProofUrl = uploadUrl;
+
+            await _context.SaveChangesAsync();
+
+            return await GetReceiptDtoAsync(receipt.Id);
+        }
+
         private async Task<GoodsReceiptDto> GetReceiptDtoAsync(Guid id)
         {
             var r = await _context.GoodsReceipts
@@ -206,7 +320,7 @@ namespace VietTien.API.Services.Implementations
                 .Include(gr => gr.Items).ThenInclude(i => i.PurchaseOrderItem).ThenInclude(poi => poi.Material)
                 .FirstOrDefaultAsync(gr => gr.Id == id);
 
-            if (r == null) throw new Exception("Not found");
+            if (r == null) throw new KeyNotFoundException("Goods Receipt not found");
 
             return new GoodsReceiptDto
             {
@@ -218,6 +332,7 @@ namespace VietTien.API.Services.Implementations
                 Status = r.Status.ToString(),
                 ReceivedDate = r.ReceivedDate,
                 Note = r.Note,
+                ImageProofUrl = r.ImageProofUrl,
                 Items = r.Items.Select(i => new GoodsReceiptItemDto
                 {
                     Id = i.Id,

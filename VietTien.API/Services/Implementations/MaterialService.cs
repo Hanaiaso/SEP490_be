@@ -17,7 +17,7 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<IEnumerable<MaterialDto>> GetAllAsync(string? search = null)
         {
-            var query = _context.Materials.AsQueryable();
+            var query = _context.Materials.Include(m => m.Inventories).AsQueryable();
 
             if (!string.IsNullOrWhiteSpace(search))
             {
@@ -32,10 +32,10 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<MaterialDto> GetByIdAsync(Guid id)
         {
-            var material = await _context.Materials.FindAsync(id);
+            var material = await _context.Materials.Include(m => m.Inventories).FirstOrDefaultAsync(m => m.Id == id);
             if (material == null)
             {
-                throw new Exception("Không tìm thấy nguyên liệu.");
+                throw new KeyNotFoundException("Không tìm thấy nguyên liệu.");
             }
 
             return MapToDto(material);
@@ -46,7 +46,7 @@ namespace VietTien.API.Services.Implementations
             var exists = await _context.Materials.AnyAsync(m => m.Name.ToLower() == dto.Name.ToLower());
             if (exists)
             {
-                throw new Exception("Tên nguyên liệu đã tồn tại.");
+                throw new InvalidOperationException("Tên nguyên liệu đã tồn tại.");
             }
 
             var material = new Material
@@ -66,16 +66,20 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<MaterialDto> UpdateAsync(Guid id, UpdateMaterialDto dto)
         {
-            var material = await _context.Materials.FindAsync(id);
+            // Include Inventories để MapToDto tính đúng CurrentStock hiện tại thay vì rơi về
+            // Material.CurrentStock (luôn = 0, không được cập nhật ở đâu khác trong hệ thống).
+            var material = await _context.Materials
+                .Include(m => m.Inventories)
+                .FirstOrDefaultAsync(m => m.Id == id);
             if (material == null)
             {
-                throw new Exception("Không tìm thấy nguyên liệu.");
+                throw new KeyNotFoundException("Không tìm thấy nguyên liệu.");
             }
 
             var exists = await _context.Materials.AnyAsync(m => m.Id != id && m.Name.ToLower() == dto.Name.ToLower());
             if (exists)
             {
-                throw new Exception("Tên nguyên liệu đã tồn tại.");
+                throw new InvalidOperationException("Tên nguyên liệu đã tồn tại.");
             }
 
             material.Name = dto.Name;
@@ -95,12 +99,12 @@ namespace VietTien.API.Services.Implementations
 
             if (material == null)
             {
-                throw new Exception("Không tìm thấy nguyên liệu.");
+                throw new KeyNotFoundException("Không tìm thấy nguyên liệu.");
             }
 
             if (material.Inventories.Any())
             {
-                throw new Exception("Không thể xóa nguyên liệu đã có dữ liệu tồn kho. Vui lòng kiểm tra lại.");
+                throw new InvalidOperationException("Không thể xóa nguyên liệu đã có dữ liệu tồn kho. Vui lòng kiểm tra lại.");
             }
 
             // Kiểm tra các bản ghi lịch sử liên quan (PO, Receipt, Issue, Transfer, Quarantine) nếu cần
@@ -112,15 +116,19 @@ namespace VietTien.API.Services.Implementations
 
         private static MaterialDto MapToDto(Material m)
         {
+            var calculatedStock = m.Inventories != null && m.Inventories.Any() 
+                ? m.Inventories.Sum(i => i.AvailableQuantity) 
+                : m.CurrentStock;
+
             return new MaterialDto
             {
                 Id = m.Id,
                 Name = m.Name,
                 Unit = m.Unit,
-                CurrentStock = m.CurrentStock,
+                CurrentStock = calculatedStock,
                 SafetyThreshold = m.SafetyThreshold,
                 LastAlertSentDate = m.LastAlertSentDate,
-                IsBelowSafetyThreshold = m.IsBelowSafetyThreshold()
+                IsBelowSafetyThreshold = calculatedStock <= m.SafetyThreshold
             };
         }
     }

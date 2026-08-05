@@ -8,6 +8,7 @@ namespace VietTien.API.Controllers
     [ApiController]
     [Route("api/materials")]
     [Produces("application/json")]
+    [Authorize]
     public class MaterialController : ControllerBase
     {
         private readonly IMaterialService _materialService;
@@ -34,6 +35,10 @@ namespace VietTien.API.Controllers
                 var material = await _materialService.GetByIdAsync(id);
                 return Ok(material);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -41,6 +46,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         [ProducesResponseType(typeof(MaterialDto), StatusCodes.Status201Created)]
         public async Task<IActionResult> Create([FromBody] CreateMaterialDto dto)
         {
@@ -54,6 +60,10 @@ namespace VietTien.API.Controllers
                 var material = await _materialService.CreateAsync(dto);
                 return CreatedAtAction(nameof(GetById), new { id = material.Id }, material);
             }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -61,6 +71,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPut("{id}")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         [ProducesResponseType(typeof(MaterialDto), StatusCodes.Status200OK)]
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateMaterialDto dto)
         {
@@ -74,6 +85,14 @@ namespace VietTien.API.Controllers
                 var material = await _materialService.UpdateAsync(id, dto);
                 return Ok(material);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -81,6 +100,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpDelete("{id}")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         [ProducesResponseType(StatusCodes.Status204NoContent)]
         public async Task<IActionResult> Delete(Guid id)
         {
@@ -88,6 +108,14 @@ namespace VietTien.API.Controllers
             {
                 await _materialService.DeleteAsync(id);
                 return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
             }
             catch (Exception ex)
             {

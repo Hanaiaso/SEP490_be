@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace VietTien.API.Models
 {
     public enum StockTransferStatus { Draft, Dispatched, Received, Cancelled }
@@ -12,6 +14,11 @@ namespace VietTien.API.Models
         public Guid CreatedByUserId { get; set; }
 
         public StockTransferStatus Status { get; set; } = StockTransferStatus.Draft;
+
+        // Concurrency token: chống 2 request đồng thời Dispatch/Update cùng 1 phiếu điều chuyển ghi đè
+        // trạng thái của nhau -> throw DbUpdateConcurrencyException, middleware map sẵn thành 409.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? ExpectedDispatchDate { get; set; }

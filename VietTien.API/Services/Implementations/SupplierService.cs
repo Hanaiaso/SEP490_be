@@ -24,14 +24,14 @@ namespace VietTien.API.Services.Implementations
         public async Task<SupplierDto> GetByIdAsync(Guid id)
         {
             var supplier = await _context.Suppliers.FindAsync(id);
-            if (supplier == null) throw new Exception("Supplier not found");
+            if (supplier == null) throw new KeyNotFoundException("Supplier not found");
             return MapToDto(supplier);
         }
 
         public async Task<SupplierDto> CreateAsync(CreateSupplierRequest request)
         {
             if (await _context.Suppliers.AnyAsync(s => s.Code == request.Code))
-                throw new Exception($"Supplier with Code '{request.Code}' already exists");
+                throw new InvalidOperationException($"Supplier with Code '{request.Code}' already exists");
 
             var supplier = new Supplier
             {
@@ -54,10 +54,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<SupplierDto> UpdateAsync(Guid id, UpdateSupplierRequest request)
         {
             var supplier = await _context.Suppliers.FindAsync(id);
-            if (supplier == null) throw new Exception("Supplier not found");
+            if (supplier == null) throw new KeyNotFoundException("Supplier not found");
 
             if (supplier.Code != request.Code && await _context.Suppliers.AnyAsync(s => s.Code == request.Code))
-                throw new Exception($"Supplier with Code '{request.Code}' already exists");
+                throw new InvalidOperationException($"Supplier with Code '{request.Code}' already exists");
 
             supplier.Name = request.Name;
             supplier.Code = request.Code;

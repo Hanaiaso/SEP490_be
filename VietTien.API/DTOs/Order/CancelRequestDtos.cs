@@ -5,7 +5,6 @@ namespace VietTien.API.DTOs.Order
 {
     public class ProcessCancelRequestDto
     {
-        [Required]
         public bool IsApproved { get; set; }
 
         [Required]

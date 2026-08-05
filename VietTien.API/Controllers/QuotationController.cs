@@ -30,6 +30,10 @@ namespace VietTien.API.Controllers
                 var result = await _quotationService.CreateQuotationFromCartAsync(GetUserId(), request);
                 return Ok(result);
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -83,6 +87,14 @@ namespace VietTien.API.Controllers
             {
                 return Ok(await _quotationService.GetQuotationByIdAsync(id, GetUserId(), GetUserRole()));
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -96,6 +108,18 @@ namespace VietTien.API.Controllers
             try
             {
                 return Ok(await _quotationService.PickUpQuotationAsync(id, GetUserId()));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
             }
             catch (Exception ex)
             {
@@ -111,6 +135,22 @@ namespace VietTien.API.Controllers
             {
                 return Ok(await _quotationService.CreateVersionAsync(id, GetUserId(), request));
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -124,6 +164,18 @@ namespace VietTien.API.Controllers
             try
             {
                 return Ok(await _quotationService.ManagerReviewVersionAsync(id, GetUserId(), request));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
             }
             catch (Exception ex)
             {
@@ -139,6 +191,18 @@ namespace VietTien.API.Controllers
             {
                 return Ok(await _quotationService.CeoReviewVersionAsync(id, GetUserId(), request));
             }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -152,6 +216,18 @@ namespace VietTien.API.Controllers
             try
             {
                 return Ok(await _quotationService.CustomerDecisionAsync(id, GetUserId(), request));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
             }
             catch (Exception ex)
             {
@@ -167,6 +243,18 @@ namespace VietTien.API.Controllers
             {
                 return Ok(await _quotationService.CancelQuotationAsync(id, GetUserId()));
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -181,6 +269,10 @@ namespace VietTien.API.Controllers
             {
                 return Ok(await _quotationService.GetMessagesAsync(id, GetUserId(), GetUserRole()));
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -193,6 +285,10 @@ namespace VietTien.API.Controllers
             try
             {
                 return Ok(await _quotationService.SendMessageAsync(id, GetUserId(), request));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {

@@ -57,6 +57,25 @@ namespace VietTien.API.Controllers
         }
 
 
+        /// Yêu cầu gửi lại mã OTP qua email.
+
+        [HttpPost("resend-otp")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> ResendOtp([FromBody] ResendOtpDto dto)
+        {
+            if (!ModelState.IsValid)
+                return BadRequest(ModelState);
+
+            var (success, message) = await _authService.ResendEmailOtpAsync(dto.Email);
+
+            if (!success)
+                return BadRequest(new { message });
+
+            return Ok(new { message });
+        }
+
+
         /// Đăng nhập bằng email và mật khẩu.
 
         [HttpPost("login")]

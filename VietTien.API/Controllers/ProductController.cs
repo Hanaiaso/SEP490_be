@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Product;
 using VietTien.API.Services.Interfaces;
@@ -60,6 +61,7 @@ namespace VietTien.API.Controllers
 
         /// <summary>Tạo sản phẩm mới</summary>
         [HttpPost]
+        [Authorize(Roles = "CEO,Admin")]
         [ProducesResponseType(typeof(ProductDetailDto), StatusCodes.Status201Created)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         public async Task<IActionResult> CreateProduct([FromForm] CreateProductDto dto)

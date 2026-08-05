@@ -21,7 +21,7 @@ namespace VietTien.API.Models
         public Guid? GoodsReceiptItemId { get; set; } // Liên kết với hàng lỗi từ phiếu nhập kho
         public Guid? ProductId { get; set; }
         public Guid? MaterialId { get; set; }
-        public Guid InventoryId { get; set; }  // Inventory record bị ảnh hưởng
+        public Guid? InventoryId { get; set; }  // Inventory record bị ảnh hưởng
 
         public int Quantity { get; set; }
         public string Reason { get; set; } = string.Empty; // Mô tả lý do trả hàng
@@ -41,7 +41,7 @@ namespace VietTien.API.Models
         public GoodsReceiptItem? GoodsReceiptItem { get; set; }
         public Product? Product { get; set; }
         public Material? Material { get; set; }
-        public Inventory Inventory { get; set; } = null!;
+        public Inventory? Inventory { get; set; }
         public User ReceivedByUser { get; set; } = null!;
         public User? DispatchedByUser { get; set; }
     }
