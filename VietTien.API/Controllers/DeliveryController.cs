@@ -108,14 +108,8 @@ namespace VietTien.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            // GH-14: KHÔNG tự bắt InvalidOperationException ở đây — để ExceptionHandlingMiddleware map
+            // đúng 409 Conflict cho lỗi sai trạng thái (trước đây bắt cục bộ trả nhầm 400).
         }
 
         // ─── BƯỚC 4: DUYỆT HỦY + TẠO ĐƠN THAY THẾ + CREDIT ─────────────────
@@ -139,6 +133,11 @@ namespace VietTien.API.Controllers
             catch (InvalidOperationException ex)
             {
                 return BadRequest(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                // GH-15: 2 request duyệt huỷ song song — bên thua nhận 409, không tạo đơn thay thế thứ 2.
+                return Conflict(new { message = "Đơn hàng đã được xử lý bởi một yêu cầu khác." });
             }
             catch (Exception ex)
             {

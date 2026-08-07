@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel.DataAnnotations;
 
 namespace VietTien.API.Models
 {
@@ -27,6 +28,9 @@ namespace VietTien.API.Models
         public TransactionType TransactionType { get; set; }
 
         public Guid? ReferenceId { get; set; } // E.g., GoodsReceiptId or GoodsIssueId
+
+        [MaxLength(500)]
+        public string? Note { get; set; }
 
         public Guid CreatedByUserId { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

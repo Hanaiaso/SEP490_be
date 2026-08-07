@@ -74,6 +74,20 @@ namespace VietTien.API.Services.Implementations
             };
 
             await _unitOfWork.Addresses.AddAsync(address);
+
+            // Địa chỉ đầu tiên khi hoàn thiện hồ sơ: nếu tài khoản chưa có SĐT riêng,
+            // đồng bộ luôn SĐT người nhận của địa chỉ này vào hồ sơ cá nhân (User.PhoneNumber),
+            // tránh việc khách nhập SĐT ở đây nhưng không thấy ở tab "Thông tin cá nhân".
+            if (count == 0 && !string.IsNullOrWhiteSpace(dto.Phone))
+            {
+                var user = await _unitOfWork.Users.GetByIdAsync(userId);
+                if (user != null && string.IsNullOrWhiteSpace(user.PhoneNumber))
+                {
+                    user.PhoneNumber = dto.Phone.Trim();
+                    _unitOfWork.Users.Update(user);
+                }
+            }
+
             await _unitOfWork.SaveChangesAsync();
 
             return MapToDto(address);

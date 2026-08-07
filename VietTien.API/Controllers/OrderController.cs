@@ -373,14 +373,8 @@ namespace VietTien.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            // GH-09: KHÔNG tự bắt InvalidOperationException ở đây — để ExceptionHandlingMiddleware map
+            // đúng 409 Conflict cho lỗi sai trạng thái (trước đây bắt cục bộ trả nhầm 400).
         }
         [HttpPost("sales/{id:guid}/reject")]
         [Authorize(Roles = "SalesStaff,SalesManager,Admin")]

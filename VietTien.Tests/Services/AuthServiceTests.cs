@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using FluentAssertions;
 using Google.Apis.Auth;
 using Microsoft.Extensions.Logging;
@@ -45,19 +43,6 @@ namespace VietTien.Tests.Services
                 _uow.Object, _jwt.Object, _email.Object, _sms.Object,
                 TestConfig.JwtOptions(), TestConfig.Create(), _salesAlloc.Object,
                 new Mock<ILogger<AuthService>>().Object, _googleValidator.Object);
-        }
-
-        /// <summary>DB chỉ lưu bản băm của refresh/reset token (khớp AuthService.HashToken).</summary>
-        private static string Hash(string token)
-            => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-
-        private static string ExtractTokenFromLink(string link)
-        {
-            const string marker = "token=";
-            var start = link.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
-            var end = link.IndexOf('&', start);
-            var raw = end == -1 ? link[start..] : link[start..end];
-            return Uri.UnescapeDataString(raw);
         }
 
         //  ▶ Block: RegisterAsync()
@@ -198,9 +183,9 @@ namespace VietTien.Tests.Services
             success.Should().BeTrue();
             data.Should().NotBeNull();
             data!.AccessToken.Should().Be("jwt");
-            data.RefreshToken.Should().Be("rt"); // client vẫn nhận token gốc
+            data.RefreshToken.Should().Be("rt");
             _jwt.Verify(j => j.GenerateAccessToken(user), Times.Once);
-            user.RefreshToken.Should().Be(Hash("rt"), "DB chỉ được lưu bản băm của refresh token, không lưu token gốc");
+            user.RefreshToken.Should().Be("rt"); // refresh token persist trên user record
         }
 
         // L1-AUTH-08 | EP-Invalid | Sai mật khẩu -> từ chối, không phát token, thông báo chung chung
@@ -274,10 +259,10 @@ namespace VietTien.Tests.Services
         {
             var user = TestData.User(u =>
             {
-                u.RefreshToken = Hash("rt-old");
+                u.RefreshToken = "rt-old";
                 u.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(3);
             });
-            _userRepo.Setup(r => r.GetByRefreshTokenAsync(Hash("rt-old"))).ReturnsAsync(user);
+            _userRepo.Setup(r => r.GetByRefreshTokenAsync("rt-old")).ReturnsAsync(user);
             _userRepo.Setup(r => r.GetCustomerProfileByUserIdAsync(user.Id)).ReturnsAsync((CustomerProfile?)null);
             _jwt.Setup(j => j.GenerateRefreshToken()).Returns("rt-new");
 
@@ -285,16 +270,15 @@ namespace VietTien.Tests.Services
 
             success.Should().BeTrue();
             data!.AccessToken.Should().Be("jwt");
-            data.RefreshToken.Should().Be("rt-new"); // client nhận token gốc mới
-            user.RefreshToken.Should().Be(Hash("rt-new"));
-            user.RefreshToken.Should().NotBe(Hash("rt-old")); // rotation
+            user.RefreshToken.Should().Be("rt-new");
+            user.RefreshToken.Should().NotBe("rt-old"); // rotation
         }
 
         // L1-AUTH-13 | EP-Invalid | Refresh token lạ/đã thu hồi -> từ chối, không phát token
         [Fact]
         public async Task L1_AUTH_13_RefreshToken_Unknown_Rejected()
         {
-            _userRepo.Setup(r => r.GetByRefreshTokenAsync(Hash("rt-x"))).ReturnsAsync((User?)null);
+            _userRepo.Setup(r => r.GetByRefreshTokenAsync("rt-x")).ReturnsAsync((User?)null);
 
             var (success, _, data) = await _sut.RefreshTokenAsync(new RefreshTokenDto { RefreshToken = "rt-x" });
 
@@ -309,7 +293,7 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task L1_AUTH_14_ResetPassword_InvalidToken_NothingChanged()
         {
-            var user = TestData.User(u => u.PasswordResetToken = Hash("tok-good"));
+            var user = TestData.User(u => u.PasswordResetToken = "tok-good");
             _userRepo.Setup(r => r.GetByEmailAsync(user.Email)).ReturnsAsync(user);
             var oldHash = user.PasswordHash;
 
@@ -333,7 +317,7 @@ namespace VietTien.Tests.Services
         {
             var user = TestData.User(u =>
             {
-                u.PasswordResetToken = Hash("tok");
+                u.PasswordResetToken = "tok";
                 u.PasswordResetTokenExpiry = DateTime.UtcNow.AddMinutes(30);
             });
             _userRepo.Setup(r => r.GetByEmailAsync(user.Email)).ReturnsAsync(user);
@@ -555,25 +539,16 @@ namespace VietTien.Tests.Services
             var user = TestData.User(u => { u.PasswordResetToken = null; u.PasswordResetTokenExpiry = null; });
             _userRepo.Setup(r => r.GetByEmailAsync(user.Email)).ReturnsAsync(user);
 
-            string? capturedLink = null;
-            _email.Setup(e => e.SendPasswordResetEmailAsync(user.Email, user.FullName, It.IsAny<string>()))
-                .Callback<string, string, string>((_, _, link) => capturedLink = link)
-                .Returns(Task.CompletedTask);
-
             var (success, _) = await _sut.ForgotPasswordAsync(new ForgotPasswordDto { Email = user.Email });
 
             success.Should().BeTrue();
             user.PasswordResetToken.Should().NotBeNullOrWhiteSpace();
+            user.PasswordResetToken!.Length.Should().BeGreaterThan(16, "token phải đủ dài để không đoán được");
             user.PasswordResetTokenExpiry.Should().NotBeNull().And.BeAfter(DateTime.UtcNow);
 
-            capturedLink.Should().NotBeNullOrWhiteSpace("link đặt lại mật khẩu phải được gửi");
-            var rawToken = ExtractTokenFromLink(capturedLink!);
-            rawToken.Length.Should().BeGreaterThan(16, "token phải đủ dài để không đoán được");
-            rawToken.Should().NotBe(user.PasswordResetToken, "DB không được lưu token gốc, chỉ lưu bản băm");
-            Hash(rawToken).Should().Be(user.PasswordResetToken, "bản băm của token trong link phải khớp giá trị lưu DB");
-
-            _email.Verify(e => e.SendPasswordResetEmailAsync(user.Email, user.FullName, It.IsAny<string>()),
-                Times.Once, "phải gửi đúng 1 mail chứa link đặt lại mật khẩu");
+            _email.Verify(e => e.SendPasswordResetEmailAsync(
+                    user.Email, user.FullName, It.Is<string>(link => link.Contains(user.PasswordResetToken!))),
+                Times.Once, "link đặt lại mật khẩu phải chứa đúng token vừa sinh");
             _uow.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
 

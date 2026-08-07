@@ -25,6 +25,9 @@ namespace VietTien.API.DTOs.Warehouse
         public string? ReceiveNote { get; set; }
         public string? ProofImageUrl { get; set; }
         public string? NotificationEmail { get; set; }
+        public int? DeliveryVehicleId { get; set; }
+        public string? DeliveryShift { get; set; }
+        public DateTime? ScheduledDeliveryDate { get; set; }
         public List<StockTransferItemDto> Items { get; set; } = new();
     }
 

@@ -38,7 +38,9 @@ namespace VietTien.API.Services.Implementations
                 ImageUrl            = p.ImageUrl,
                 CategoryId          = p.CategoryId,
                 CategoryName        = p.Category.Name,
-                AvailableStock      = p.Inventories?.Sum(i => i.AvailableQuantity) ?? 0
+                AvailableStock      = p.Inventories?.Sum(i => i.AvailableQuantity) ?? 0,
+                AverageRating       = p.AverageRating,
+                ReviewCount         = p.ReviewCount
             });
 
             return new ProductPagedResultDto
@@ -69,7 +71,9 @@ namespace VietTien.API.Services.Implementations
                 CategoryId          = product.CategoryId,
                 CategoryName        = product.Category.Name,
                 PhysicalStock       = product.Inventories?.Sum(i => i.OnHandQuantity) ?? 0,
-                AvailableStock      = product.Inventories?.Sum(i => i.AvailableQuantity) ?? 0
+                AvailableStock      = product.Inventories?.Sum(i => i.AvailableQuantity) ?? 0,
+                AverageRating       = product.AverageRating,
+                ReviewCount         = product.ReviewCount
             };
         }
 

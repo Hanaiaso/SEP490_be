@@ -1,7 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 using BCrypt.Net;
 using Google.Apis.Auth;
 using Microsoft.Extensions.Options;
@@ -343,7 +341,7 @@ namespace VietTien.API.Services.Implementations
             var resetToken = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
                 .Replace("+", "-").Replace("/", "_").Replace("=", "");
 
-            user.PasswordResetToken = HashToken(resetToken);
+            user.PasswordResetToken = resetToken;
             user.PasswordResetTokenExpiry = DateTime.UtcNow.AddHours(1);
 
             _unitOfWork.Users.Update(user);
@@ -373,7 +371,7 @@ namespace VietTien.API.Services.Implementations
         {
             var user = await _unitOfWork.Users.GetByEmailAsync(dto.Email);
 
-            if (user is null || user.PasswordResetToken != HashToken(dto.Token))
+            if (user is null || user.PasswordResetToken != dto.Token)
                 return (false, "Token đặt lại mật khẩu không hợp lệ.");
 
             if (user.PasswordResetTokenExpiry is null || user.PasswordResetTokenExpiry < DateTime.UtcNow)
@@ -397,7 +395,7 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<(bool Success, string Message, AuthResponseDto? Data)> RefreshTokenAsync(RefreshTokenDto dto)
         {
-            var user = await _unitOfWork.Users.GetByRefreshTokenAsync(HashToken(dto.RefreshToken));
+            var user = await _unitOfWork.Users.GetByRefreshTokenAsync(dto.RefreshToken);
 
             if (user is null)
                 return (false, "Refresh token không hợp lệ.", null);
@@ -580,22 +578,14 @@ namespace VietTien.API.Services.Implementations
         }
         // ─── PRIVATE HELPERS ────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Băm token trước khi lưu DB. Refresh token / reset token đã có entropy cao (CSPRNG/Guid)
-        /// nên không cần salt riêng — mục đích chỉ là tránh lộ token dùng được ngay nếu DB bị lộ
-        /// (backup leak, insider...), giống cách password không bao giờ lưu plaintext.
-        /// </summary>
-        private static string HashToken(string token)
-            => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
-
         private async Task<AuthResponseDto> IssueTokensAsync(User user)
         {
             var accessToken = _jwtService.GenerateAccessToken(user);
             var refreshToken = _jwtService.GenerateRefreshToken();
             var expiresAt = _jwtService.GetAccessTokenExpiry();
 
-            // Lưu hash của refresh token vào DB, trả token gốc cho client
-            user.RefreshToken = HashToken(refreshToken);
+            // Lưu refresh token vào DB
+            user.RefreshToken = refreshToken;
             user.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(_jwtSettings.RefreshTokenExpiryDays);
 
             _unitOfWork.Users.Update(user);

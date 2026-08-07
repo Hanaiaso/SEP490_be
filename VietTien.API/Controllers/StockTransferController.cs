@@ -183,5 +183,28 @@ namespace VietTien.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        [HttpPost("{id}/request-transport")]
+        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        public async Task<IActionResult> RequestTransport(Guid id)
+        {
+            try
+            {
+                var transfer = await _stockTransferService.RequestTransportAsync(id);
+                return Ok(transfer);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Phiếu điều chuyển đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }

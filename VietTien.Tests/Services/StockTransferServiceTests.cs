@@ -108,7 +108,7 @@ namespace VietTien.Tests.Services
             var act = () => _sut.DispatchAsync(draft.Id); // lần 2
 
             await act.Should().ThrowAsync<Exception>()
-                .WithMessage("Chỉ có thể xuất kho cho phiếu ở trạng thái Nháp.");
+                .WithMessage("Chỉ có thể xuất kho cho phiếu ở trạng thái Nháp hoặc Đã xếp xe.");
             _db.Inventories.Single(i => i.WarehouseLocationId == _loc1.Id).OnHandQuantity.Should().Be(5); // không trừ đôi
         }
 

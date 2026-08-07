@@ -138,10 +138,79 @@ namespace VietTien.Tests.Services
             summary.DiscountPercentage.Should().Be(8); // bậc cao nhất dưới 100M
         }
 
-        // L1-ORD-04 | SKIP/Blocked — auto-áp giá thỏa thuận (SavedB2BPriceSnapshot) cho đơn >= 100M
-        // chưa được cài đặt: GetCheckoutSummaryAsync luôn throw khi >= 100M bất kể có giá thỏa thuận.
-        [Fact(Skip = "Blocked: auto-áp giá thỏa thuận cho đơn >= 100M chưa cài đặt — mọi đơn >= 100M đều bị chặn yêu cầu báo giá B2B.")]
-        public void L1_ORD_04_Checkout_100M_WithNegotiatedPrice_AutoApplied() { }
+        // L1-ORD-04 | EP-Valid | Checkout >= 100M VỚI báo giá đã được khách chấp nhận còn hiệu lực ->
+        // áp giá đã thoả thuận (Quotation.AcceptedVersionId), không chặn yêu cầu báo giá B2B nữa (GH-13).
+        // LƯU Ý: cơ chế THẬT dùng bảng Quotation/QuotationVersion.ProposedTotal, KHÔNG PHẢI field
+        // CustomerProfile.SavedB2BPriceSnapshot (đó là field cũ chưa từng được CalculateDiscountAsync đọc).
+        [Fact]
+        public async Task L1_ORD_04_Checkout_100M_WithAcceptedQuotation_NegotiatedPriceApplied()
+        {
+            SeedCartWithTotal(120_000_000m);
+
+            var quotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 120_000_000m,
+                ValidUntil = DateTime.UtcNow.AddDays(7),
+            };
+            var version = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = quotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 110_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            quotation.AcceptedVersionId = version.Id;
+            quotation.Versions.Add(version);
+            _db.Quotations.Add(quotation);
+            _db.SaveChanges();
+
+            var summary = await _sut.GetCheckoutSummaryAsync(_customer.Id);
+
+            summary.DiscountAmount.Should().Be(10_000_000m); // 120M - giá đã thoả thuận 110M
+            summary.FinalPayment.Should().Be(110_000_000m); // không VAT (chưa có MST)
+        }
+
+        // L1-ORD-04b | EP-Invalid | Báo giá đã chấp nhận nhưng HẾT HIỆU LỰC (ValidUntil quá hạn) ->
+        // vẫn chặn như chưa có báo giá, không được dùng giá thoả thuận đã hết hạn.
+        [Fact]
+        public async Task L1_ORD_04b_Checkout_100M_WithExpiredAcceptedQuotation_StillBlocked()
+        {
+            SeedCartWithTotal(120_000_000m);
+
+            var quotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 120_000_000m,
+                ValidUntil = DateTime.UtcNow.AddDays(-1), // đã hết hạn
+            };
+            var version = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = quotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 110_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            quotation.AcceptedVersionId = version.Id;
+            quotation.Versions.Add(version);
+            _db.Quotations.Add(quotation);
+            _db.SaveChanges();
+
+            var act = () => _sut.GetCheckoutSummaryAsync(_customer.Id);
+
+            await act.Should().ThrowAsync<Exception>()
+                .WithMessage("Đơn hàng trên*vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+        }
 
         // L1-ORD-05 | Guard-FALSE | Tổng >= 100M -> chặn checkout, yêu cầu báo giá B2B
         [Fact]
@@ -197,10 +266,34 @@ namespace VietTien.Tests.Services
             _db.Orders.Count().Should().Be(0);
         }
 
-        // L1-ORD-09 | SKIP/Blocked — spec yêu cầu CHẶN checkout khi giỏ quá 24h; hành vi thật:
-        // CartService tự làm mới giá về giá niêm yết hiện tại rồi cho checkout tiếp.
-        [Fact(Skip = "Blocked: không có logic chặn checkout khi giá hết hạn — CartService tự refresh giá (xem L1-CART-03). Ghi Notes.")]
-        public void L1_ORD_09_PlaceOrder_PriceExpiredCart_Blocked() { }
+        // L1-ORD-09 | BC-TRUE | Giỏ hết hạn giữ giá (>24h từ Cart.UpdatedAt) -> chặn checkout, không tạo
+        // đơn (GH-08). PlaceOrderAsync nay check hạn giữ giá TRƯỚC khi gọi CartService.GetCartAsync —
+        // hàm đó tự làm mới giá + reset UpdatedAt ngay khi đọc, nên phải đọc Cart entity thô trước.
+        [Fact]
+        public async Task L1_ORD_09_PlaceOrder_PriceExpiredCart_Blocked()
+        {
+            var cart = SeedCartWithTotal(5_000_000m, qty: 2);
+            cart.UpdatedAt = DateTime.UtcNow.AddHours(-24).AddMinutes(-1);
+            _db.SaveChanges();
+
+            var act = () => _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*hết hạn giữ*");
+            _db.Orders.Count().Should().Be(0);
+        }
+
+        // L1-ORD-09b | BC-FALSE | Giỏ CHƯA hết hạn (đúng 23h59) -> vẫn checkout được bình thường
+        [Fact]
+        public async Task L1_ORD_09b_PlaceOrder_PriceNotYetExpiredCart_Allowed()
+        {
+            var cart = SeedCartWithTotal(5_000_000m, qty: 2);
+            cart.UpdatedAt = DateTime.UtcNow.AddHours(-23).AddMinutes(-59);
+            _db.SaveChanges();
+
+            var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            _db.Orders.Single(o => o.Id == response.OrderId).Should().NotBeNull();
+        }
 
         // L1-ORD-10 | Guard-TRUE | Hết tồn kho tại thời điểm checkout -> chặn, không tạo đơn, giỏ giữ nguyên
         // (PlaceOrderAsync có gọi ReserveAsync giữ mềm tồn kho — trước đây bị che khuất do test dùng
@@ -730,6 +823,20 @@ namespace VietTien.Tests.Services
             _db.Orders.Single(o => o.Id == order.Id).OrderStatus.Should().Be(OrderStatus.Completed);
         }
 
+        // L1-ORD-36b | EP-Invalid (IDOR) | Khách B gửi yêu cầu hủy trên đơn thuộc về khách A -> forbidden,
+        // không lộ trạng thái đơn, không tạo yêu cầu hủy.
+        [Fact]
+        public async Task L1_ORD_36b_RequestCancel_OnAnotherCustomersOrder_IsForbidden()
+        {
+            var order = SeedOrder(o => o.OrderStatus = OrderStatus.PendingConfirmation); // thuộc _customer
+            var (otherUser, _) = TestData.SeedCustomer(_db); // khách B, không liên quan tới order
+
+            var act = () => _sut.RequestCancelOrderAsync(order.Id, otherUser.Id, new RequestCancelOrderDto { Reason = "x" });
+
+            await act.Should().ThrowAsync<KeyNotFoundException>();
+            _db.Orders.Single(o => o.Id == order.Id).OrderStatus.Should().Be(OrderStatus.PendingConfirmation); // không đổi
+        }
+
         // L1-ORD-37 | State-Valid | Sales duyệt yêu cầu hủy (đơn đã Paid) -> Cancelled + hoàn tiền vào ví Credit
         [Fact]
         public async Task L1_ORD_37_ProcessCancel_Approved_CancelledAndRefundedToCredit()
@@ -863,6 +970,43 @@ namespace VietTien.Tests.Services
                 .WithMessage("Ca giao hàng không hợp lệ. Chọn: Sáng / Trưa / Chiều.");
         }
 
+        // L1-ORD-41b | BC (giờ cắt ca trong ngày) | Xếp lịch giao HÔM NAY: nếu đã quá giờ cắt của ca đó
+        // (Sáng 10:00 / Trưa 14:00 / Chiều 22:00, theo giờ VN) thì bị chặn; nếu chưa qua thì vẫn xếp được.
+        // OrderService.cs không có clock injectable (dùng thẳng DateTime.UtcNow.AddHours(7)) — test tính
+        // kỳ vọng bằng ĐÚNG công thức giờ VN thật rồi đối chiếu với kết quả gọi API thật, để không phụ
+        // thuộc/giả định một khung giờ cố định (tránh flaky theo thời điểm CI chạy).
+        [Theory]
+        [InlineData("Sáng", 10)]
+        [InlineData("Trưa", 14)]
+        [InlineData("Chiều", 22)]
+        public async Task L1_ORD_41b_ScheduleDelivery_TodayShiftCutoff_MatchesRealClock(string shift, int cutoffHour)
+        {
+            SeedFleet();
+            var order = SeedOrder(o => o.DeliveryStatus = DeliveryStatus.NotScheduled);
+            var localNow = DateTime.UtcNow.AddHours(7);
+            var expectBlocked = localNow.Hour >= cutoffHour;
+
+            var act = () => _sut.ScheduleDeliveryAsync(_salesStaff.Id, new ScheduleDeliveryRequestDto
+            {
+                OrderIds = new List<Guid> { order.Id },
+                VehicleId = 1,
+                Shift = shift,
+                DeliveryDate = localNow.Date // HÔM NAY theo giờ VN
+            });
+
+            if (expectBlocked)
+            {
+                await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("Đã quá*");
+                _db.Orders.Single(o => o.Id == order.Id).DeliveryStatus.Should().Be(DeliveryStatus.NotScheduled);
+            }
+            else
+            {
+                var result = await act();
+                result.OrdersScheduled.Should().Be(1);
+                _db.Orders.Single(o => o.Id == order.Id).DeliveryStatus.Should().Be(DeliveryStatus.Scheduled);
+            }
+        }
+
         //  ▶ Block: RecordDeliveryResultAsync()
 
         // L1-ORD-42 | State-Valid | COD thu đủ tiền -> Paid + Completed + Delivered, không phát sinh công nợ
@@ -941,6 +1085,37 @@ namespace VietTien.Tests.Services
             await act.Should().ThrowAsync<InvalidOperationException>()
                 .WithMessage("Vui lòng chọn lý do khi khách từ chối nhận hàng.");
             _db.Orders.Single(o => o.Id == order.Id).DeliveryStatus.Should().Be(DeliveryStatus.InDelivery);
+        }
+
+        // L1-ORD-44b | State-Valid | Giao MỘT PHẦN (partially_delivered), thu chưa đủ tiền -> ghi đúng số
+        // tiền thực thu, chuyển DeliveryStatus=PartiallyDelivered (KHÔNG phải Delivered), PaymentStatus=
+        // PartiallyPaid, và tạo CustomerDebt đúng phần còn thiếu — không được tự ý coi là giao đủ.
+        [Fact]
+        public async Task L1_ORD_44b_RecordDelivery_PartiallyDelivered_CreatesDebtForShortfall()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.PaymentMethod = PaymentMethod.COD;
+                o.PaymentStatus = PaymentStatus.Pending;
+                o.OrderStatus = OrderStatus.Processing;
+                o.DeliveryStatus = DeliveryStatus.InDelivery;
+                o.FinalPayment = 5_000_000m;
+            });
+
+            await _sut.RecordDeliveryResultAsync(order.Id, _salesStaff.Id, new RecordDeliveryResultDto
+            {
+                DeliveryOutcome = "partially_delivered",
+                AmountCollected = 3_000_000m // thu thiếu 2 triệu so với FinalPayment
+            });
+
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.DeliveryStatus.Should().Be(DeliveryStatus.PartiallyDelivered); // KHÔNG phải Delivered
+            updated.AmountPaid.Should().Be(3_000_000m);
+            updated.PaymentStatus.Should().Be(PaymentStatus.PartiallyPaid);
+
+            var debt = _db.CustomerDebts.Single(d => d.OrderId == order.Id);
+            debt.DebtAmount.Should().Be(2_000_000m);
+            debt.Status.Should().Be(DebtStatus.InDebt);
         }
 
         // L1-ORD-45 | State-Valid | Giao thất bại -> đếm số lần thất bại, xếp lịch lại; lần 3 thì KHÓA đơn

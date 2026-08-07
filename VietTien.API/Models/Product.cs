@@ -15,11 +15,16 @@ namespace VietTien.API.Models
         // Quy tắc Business Rule: Soft Delete để bảo toàn toàn vẹn dữ liệu
         public bool IsDiscontinued { get; set; } = false;
 
+        // Đánh giá sản phẩm — denormalized để trang danh sách không phải tính lại từ N review mỗi lần load
+        public double AverageRating { get; set; } = 0;
+        public int ReviewCount { get; set; } = 0;
+
         // Navigation Properties
         public Category Category { get; set; } = null!;
         public ICollection<Inventory> Inventories { get; set; } = new List<Inventory>();
         public ICollection<CartItem> CartItems { get; set; } = new List<CartItem>();
         public ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();
         public ICollection<AiMarketingCampaign> MarketingCampaigns { get; set; } = new List<AiMarketingCampaign>();
+        public ICollection<ProductReview> Reviews { get; set; } = new List<ProductReview>();
     }
 }

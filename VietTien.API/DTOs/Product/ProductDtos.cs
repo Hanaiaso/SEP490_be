@@ -17,6 +17,9 @@ namespace VietTien.API.DTOs.Product
 
         /// <summary>Tồn kho khả dụng (null nếu chưa có dữ liệu kho)</summary>
         public int? AvailableStock { get; set; }
+
+        public double AverageRating { get; set; }
+        public int ReviewCount { get; set; }
     }
 
     /// <summary>DTO trả về khi lấy chi tiết 1 sản phẩm</summary>
@@ -37,6 +40,9 @@ namespace VietTien.API.DTOs.Product
 
         /// <summary>Tồn kho khả dụng cho kênh online (null nếu chưa có dữ liệu kho)</summary>
         public int? AvailableStock { get; set; }
+
+        public double AverageRating { get; set; }
+        public int ReviewCount { get; set; }
     }
 
     /// <summary>DTO trả về danh sách sản phẩm có phân trang</summary>

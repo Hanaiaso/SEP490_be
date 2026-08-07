@@ -15,5 +15,6 @@ namespace VietTien.API.Services.Interfaces
         Task<StockTransferDto> DispatchAsync(Guid id);
         Task<StockTransferDto> ReceiveAsync(Guid id, ReceiveStockTransferDto dto, Guid staffId);
         Task<StockTransferDto> CancelAsync(Guid id);
+        Task<StockTransferDto> RequestTransportAsync(Guid id);
     }
 }

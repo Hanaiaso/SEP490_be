@@ -996,6 +996,102 @@ namespace VietTien.API.Migrations
                             QuarantineQuantity = 749,
                             ReservedQuantity = 799,
                             WarehouseLocationId = new Guid("2006d0a6-37a9-46ca-b8a0-bb061ec9f1e9")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000008-0008-4008-a008-000000000001"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            OnHandQuantity = 8000,
+                            ProductId = new Guid("e24b1960-21d2-4385-8155-17557c0ce8b9"),
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000004-0004-4004-a004-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000008-0008-4008-a008-000000000002"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            OnHandQuantity = 8000,
+                            ProductId = new Guid("a3c3e6e5-860a-464c-a073-1b847a9db570"),
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000004-0004-4004-a004-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000008-0008-4008-a008-000000000003"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            MaterialId = new Guid("f0000005-0005-4005-a005-000000000001"),
+                            OnHandQuantity = 500,
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000004-0004-4004-a004-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000008-0008-4008-a008-000000000004"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            MaterialId = new Guid("f0000005-0005-4005-a005-000000000002"),
+                            OnHandQuantity = 300,
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000004-0004-4004-a004-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000009-0009-4009-a009-000000000001"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            OnHandQuantity = 5000,
+                            ProductId = new Guid("659870d7-5b15-4496-a4bb-03ab28900170"),
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000003-0003-4003-a003-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000009-0009-4009-a009-000000000002"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            OnHandQuantity = 6000,
+                            ProductId = new Guid("cc25fd5c-3ad6-4f95-b19f-e86635d1d16d"),
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000003-0003-4003-a003-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000009-0009-4009-a009-000000000003"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            OnHandQuantity = 3000,
+                            ProductId = new Guid("aa275908-173a-47fb-a2cb-8eb173c934ef"),
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000003-0003-4003-a003-000000000002")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000009-0009-4009-a009-000000000004"),
+                            AllocatedQuantity = 0,
+                            DamagedQuantity = 0,
+                            InTransitQuantity = 0,
+                            OnHandQuantity = 2000,
+                            ProductId = new Guid("f0000007-0007-4007-a007-000000000001"),
+                            QuarantineQuantity = 0,
+                            ReservedQuantity = 0,
+                            WarehouseLocationId = new Guid("f0000003-0003-4003-a003-000000000002")
                         });
                 });
 
@@ -1176,6 +1272,24 @@ namespace VietTien.API.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Materials");
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("f0000005-0005-4005-a005-000000000001"),
+                            CurrentStock = 0.0,
+                            Name = "Hạt Nhựa PE Nguyên Sinh",
+                            SafetyThreshold = 100.0,
+                            Unit = "Kg"
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000005-0005-4005-a005-000000000002"),
+                            CurrentStock = 0.0,
+                            Name = "Cuộn Màng PE Thô (Chưa Cắt)",
+                            SafetyThreshold = 50.0,
+                            Unit = "Cuộn"
+                        });
                 });
 
             modelBuilder.Entity("VietTien.API.Models.MonthlyPayroll", b =>
@@ -1356,11 +1470,20 @@ namespace VietTien.API.Migrations
                     b.Property<bool>("RequiresRedInvoice")
                         .HasColumnType("bit");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<Guid?>("SalesStaffId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ScheduledDeliveryDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("ShippingAddress")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("TotalAmount")
                         .HasPrecision(18, 2)
@@ -1691,6 +1814,9 @@ namespace VietTien.API.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasDefaultValueSql("NEWSEQUENTIALID()");
 
+                    b.Property<double>("AverageRating")
+                        .HasColumnType("float");
+
                     b.Property<Guid>("CategoryId")
                         .HasColumnType("uniqueidentifier");
 
@@ -1706,6 +1832,9 @@ namespace VietTien.API.Migrations
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ReviewCount")
+                        .HasColumnType("int");
 
                     b.Property<string>("Sku")
                         .IsRequired()
@@ -1732,11 +1861,13 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("659870d7-5b15-4496-a4bb-03ab28900170"),
+                            AverageRating = 0.0,
                             CategoryId = new Guid("d373bbfa-184c-4eac-9633-38bee5ef6478"),
                             Description = "Băng keo trong suốt dán thùng OPP siêu dính. Độ dày màng 50 mic, không đứt ngang khi kéo dán. Thích hợp đóng gói bưu phẩm, thùng hàng.",
                             ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689328/82ad4b54-13f5-4ff2-b624-87b0cf08d545.png",
                             IsDiscontinued = false,
                             Name = "Băng Keo Trong OPP 5F 100 Yard (Cây 6 Cuộn)",
+                            ReviewCount = 0,
                             Sku = "TAPE-TR5F-100",
                             Specifications = "Quy Cách: Cây 6 cuộn\nChiều Rộng: 5cm (5F)\nChiều Dài: 100 Yard\nĐộ Dính: 50 Mic",
                             StandardListedPrice = 65000m,
@@ -1745,11 +1876,13 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("e24b1960-21d2-4385-8155-17557c0ce8b9"),
+                            AverageRating = 0.0,
                             CategoryId = new Guid("bc7b7b78-9319-4574-8f99-01a6cbfb7d5e"),
                             Description = "Màng co PE quấn hàng hóa, cố định kiện hàng trên pallet, chống bụi bẩn và chống thấm nước.",
                             ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689368/fb41db67-49fd-4213-afa2-3153ac46028f.png",
                             IsDiscontinued = false,
                             Name = "Cuộn Màng Chít PE Quấn Pallet Lõi Cứng",
+                            ReviewCount = 0,
                             Sku = "WRAP-PE-3KG",
                             Specifications = "Trọng Lượng: 3.0 kg\nĐộ Dày: 17 mic\nMàu Sắc: Trong suốt",
                             StandardListedPrice = 120000m,
@@ -1758,11 +1891,13 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("a3c3e6e5-860a-464c-a073-1b847a9db570"),
+                            AverageRating = 0.0,
                             CategoryId = new Guid("bc7b7b78-9319-4574-8f99-01a6cbfb7d5e"),
                             Description = "Màng xốp hơi (bubble wrap) bong bóng khí chống sốc, bảo vệ hàng dễ vỡ trong quá trình vận chuyển.",
                             ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689413/8d00a868-e6f0-4c21-8cd5-8228301b06cc.png",
                             IsDiscontinued = false,
                             Name = "Cuộn Màng Xốp Hơi (Bong Bóng) 1.2m x 100m",
+                            ReviewCount = 0,
                             Sku = "WRAP-BB-1M2",
                             Specifications = "Kích Thước: Cao 1.2m x Dài 100m\nĐường Kính Hạt: 10mm\nMàu Sắc: Trắng",
                             StandardListedPrice = 250000m,
@@ -1771,11 +1906,13 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("3a369d6a-500b-4e11-b127-494e6c74a72e"),
+                            AverageRating = 0.0,
                             CategoryId = new Guid("d373bbfa-184c-4eac-9633-38bee5ef6478"),
                             Description = "Băng keo màu đục, bám dính tốt trên bề mặt giấy carton. Phù hợp đóng gói hàng hóa, bưu phẩm.",
                             ImageUrl = "https://res.cloudinary.com/dx9acdd0y/image/upload/v1781689446/8a39bfa0-7bbb-4727-baea-86fbfb315512.png",
                             IsDiscontinued = false,
                             Name = "Băng Keo Đục Dán Thùng 5F 100 Yard (Cây 6 Cuộn)",
+                            ReviewCount = 0,
                             Sku = "TAPE-BR5F-100",
                             Specifications = "Quy Cách: Cây 6 cuộn\nChiều Rộng: 5cm (5F)\nChiều Dài: 100 Yard\nMàu Sắc: Đục / Nâu",
                             StandardListedPrice = 65000m,
@@ -1784,11 +1921,13 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("aa275908-173a-47fb-a2cb-8eb173c934ef"),
+                            AverageRating = 0.0,
                             CategoryId = new Guid("f69da084-f0e9-4fdf-acc5-7917818991c3"),
                             Description = "Dụng cụ cắt băng keo cầm tay chắc chắn, lưỡi dao sắc bén, chuyên dùng cho băng keo 5cm.",
                             ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Cat+Bang+Keo",
                             IsDiscontinued = false,
                             Name = "Dụng Cụ Cắt Băng Keo Cầm Tay 5F Dân Cường",
+                            ReviewCount = 0,
                             Sku = "TOOL-CUT-5F",
                             Specifications = "Thương Hiệu: Dân Cường\nChất Liệu: Sắt sơn tĩnh điện\nDùng Cho: Băng keo 5cm (5F)",
                             StandardListedPrice = 25000m,
@@ -1797,14 +1936,31 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("cc25fd5c-3ad6-4f95-b19f-e86635d1d16d"),
+                            AverageRating = 0.0,
                             CategoryId = new Guid("cec401fa-bd4a-4d94-bc7a-0d26007445c9"),
                             Description = "Thùng carton đóng hàng 3 lớp sóng B cứng cáp, chịu lực tốt. Kích thước phù hợp gửi hàng qua đơn vị vận chuyển.",
                             ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Thung+Carton",
                             IsDiscontinued = false,
                             Name = "Thùng Carton 3 Lớp Gửi GHTK 30x20x15cm",
+                            ReviewCount = 0,
                             Sku = "BOX-3L-302015",
                             Specifications = "Kích Thước: 30x20x15 cm\nCấu Tạo: 3 lớp sóng B\nĐịnh Lượng: 120g",
                             StandardListedPrice = 3500m,
+                            Unit = "Cái"
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000007-0007-4007-a007-000000000001"),
+                            AverageRating = 0.0,
+                            CategoryId = new Guid("d373bbfa-184c-4eac-9633-38bee5ef6478"),
+                            Description = "Băng keo in logo theo yêu cầu, nhập khẩu từ nhà cung cấp đối tác, chất lượng cao cấp cho khách hàng doanh nghiệp.",
+                            ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Tape+Import",
+                            IsDiscontinued = false,
+                            Name = "Băng Keo In Logo Nhập Khẩu 5F 100 Yard (Cây 6 Cuộn)",
+                            ReviewCount = 0,
+                            Sku = "TAPE-IMP-LOGO5F",
+                            Specifications = "Quy Cách: Cây 6 cuộn\nChiều Rộng: 5cm (5F)\nChiều Dài: 100 Yard\nNguồn Gốc: Nhập khẩu",
+                            StandardListedPrice = 95000m,
                             Unit = "Cái"
                         });
                 });
@@ -1832,6 +1988,58 @@ namespace VietTien.API.Migrations
                     b.HasIndex("ProductId");
 
                     b.ToTable("ProductMaterials");
+                });
+
+            modelBuilder.Entity("VietTien.API.Models.ProductReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<string>("Comment")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CustomerProfileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Rating")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RepliedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RepliedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReplyText")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrderId");
+
+                    b.HasIndex("ProductId");
+
+                    b.HasIndex("RepliedByUserId");
+
+                    b.HasIndex("CustomerProfileId", "ProductId")
+                        .IsUnique();
+
+                    b.ToTable("ProductReviews");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.PurchaseOrder", b =>
@@ -2198,6 +2406,9 @@ namespace VietTien.API.Migrations
                     b.Property<Guid>("OrderId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("PickupAddress")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("PickupShift")
                         .HasColumnType("nvarchar(max)");
 
@@ -2527,6 +2738,10 @@ namespace VietTien.API.Migrations
                     b.Property<Guid?>("MaterialId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<Guid?>("ProductId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2574,6 +2789,12 @@ namespace VietTien.API.Migrations
                     b.Property<Guid>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("DeliveryShift")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("DeliveryVehicleId")
+                        .HasColumnType("int");
+
                     b.Property<Guid>("DestinationWarehouseId")
                         .HasColumnType("uniqueidentifier");
 
@@ -2606,6 +2827,9 @@ namespace VietTien.API.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("ScheduledDeliveryDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("SourceWarehouseId")
                         .HasColumnType("uniqueidentifier");
@@ -3183,6 +3407,7 @@ namespace VietTien.API.Migrations
                         new
                         {
                             Id = new Guid("55555555-5555-5555-5555-555555555555"),
+                            AssignedWarehouseId = new Guid("ee73f2cc-05fd-4b0e-8a48-61f89a2d345a"),
                             CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
                             Email = "warehousestaff.test@viettien.com",
                             EmailOtpSendCount = 0,
@@ -3230,6 +3455,76 @@ namespace VietTien.API.Migrations
                             PhoneOtpFailedAttempts = 0,
                             PhoneOtpSendCount = 0,
                             Role = 1
+                        },
+                        new
+                        {
+                            Id = new Guid("44444444-4444-4444-4444-444444444402"),
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "salesstaff2.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
+                            FullName = "Sales Staff Test 2",
+                            IsActive = true,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = true,
+                            PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
+                            PhoneNumber = "0999000104",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
+                            Role = 2
+                        },
+                        new
+                        {
+                            Id = new Guid("44444444-4444-4444-4444-444444444403"),
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "salesstaff3.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
+                            FullName = "Sales Staff Test 3",
+                            IsActive = true,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = true,
+                            PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
+                            PhoneNumber = "0999000204",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
+                            Role = 2
+                        },
+                        new
+                        {
+                            Id = new Guid("55555555-5555-5555-5555-555555555502"),
+                            AssignedWarehouseId = new Guid("f0000003-0003-4003-a003-000000000001"),
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "warehousestaff2.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
+                            FullName = "Warehouse Staff Test 2",
+                            IsActive = true,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = true,
+                            PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
+                            PhoneNumber = "0999000105",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
+                            Role = 4
+                        },
+                        new
+                        {
+                            Id = new Guid("55555555-5555-5555-5555-555555555503"),
+                            AssignedWarehouseId = new Guid("f0000004-0004-4004-a004-000000000001"),
+                            CreatedAt = new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Email = "warehousestaff3.test@viettien.com",
+                            EmailOtpSendCount = 0,
+                            EmailOtpSendCountDaily = 0,
+                            FullName = "Warehouse Staff Test 3",
+                            IsActive = true,
+                            IsEmailVerified = true,
+                            IsPhoneVerified = true,
+                            PasswordHash = "$2a$11$yxVoqFJ39C6xv9yAy6v8culp85Msmy.BhBGfAreZWDxCY5RSs0wY.",
+                            PhoneNumber = "0999000205",
+                            PhoneOtpFailedAttempts = 0,
+                            PhoneOtpSendCount = 0,
+                            Role = 4
                         });
                 });
 
@@ -3328,6 +3623,18 @@ namespace VietTien.API.Migrations
                             Id = new Guid("ee73f2cc-05fd-4b0e-8a48-61f89a2d345a"),
                             Code = "WH-DEFAULT",
                             Name = "Kho mặc định"
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000003-0003-4003-a003-000000000001"),
+                            Code = "WH-TRADE",
+                            Name = "Kho Thương Mại"
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000004-0004-4004-a004-000000000001"),
+                            Code = "WH-PE",
+                            Name = "Kho Màng PE & Xốp"
                         });
                 });
 
@@ -3362,6 +3669,20 @@ namespace VietTien.API.Migrations
                             Name = "Vị trí mặc định",
                             Type = "Normal",
                             WarehouseId = new Guid("ee73f2cc-05fd-4b0e-8a48-61f89a2d345a")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000003-0003-4003-a003-000000000002"),
+                            Name = "Vị trí mặc định",
+                            Type = "Normal",
+                            WarehouseId = new Guid("f0000003-0003-4003-a003-000000000001")
+                        },
+                        new
+                        {
+                            Id = new Guid("f0000004-0004-4004-a004-000000000002"),
+                            Name = "Vị trí mặc định",
+                            Type = "Normal",
+                            WarehouseId = new Guid("f0000004-0004-4004-a004-000000000001")
                         });
                 });
 
@@ -4021,6 +4342,40 @@ namespace VietTien.API.Migrations
                     b.Navigation("Product");
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.ProductReview", b =>
+                {
+                    b.HasOne("VietTien.API.Models.CustomerProfile", "CustomerProfile")
+                        .WithMany()
+                        .HasForeignKey("CustomerProfileId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.Order", "Order")
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.Product", "Product")
+                        .WithMany("Reviews")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("VietTien.API.Models.User", "RepliedByUser")
+                        .WithMany()
+                        .HasForeignKey("RepliedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CustomerProfile");
+
+                    b.Navigation("Order");
+
+                    b.Navigation("Product");
+
+                    b.Navigation("RepliedByUser");
+                });
+
             modelBuilder.Entity("VietTien.API.Models.PurchaseOrder", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "CreatedBy")
@@ -4577,6 +4932,8 @@ namespace VietTien.API.Migrations
                     b.Navigation("MarketingCampaigns");
 
                     b.Navigation("OrderItems");
+
+                    b.Navigation("Reviews");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.PurchaseOrder", b =>

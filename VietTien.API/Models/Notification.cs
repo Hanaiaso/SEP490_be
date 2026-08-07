@@ -53,6 +53,7 @@ namespace VietTien.API.Models
         SYS_29_UpcomingDeliveryReminder,
         SYS_30_AccountStatusChanged,
         SYS_31_RoleChanged,
-        SYS_32_PaymentAnomaly
+        SYS_32_PaymentAnomaly,
+        SYS_33_ReviewReplyPosted
     }
 }

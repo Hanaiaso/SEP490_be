@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Mẫu số đo line coverage của VietTien.API — đã chốt với team.
+
+  ĐẾM (20.598 dòng): Services/Implementations · Controllers · Repositories/Implementations
+                     · Services/ScheduledJobs · Infrastructure · Data · Hubs
+
+  KHÔNG ĐẾM, kèm lý do:
+    - Migrations            : code sinh tự động, không phải code viết tay.
+    - DTOs, Models          : ~5.050 dòng auto-property, không có logic để test;
+                              giữ lại chỉ làm loãng mẫu số chứ không phản ánh công sức test.
+    - Program               : hoàn toàn là đăng ký DI, chạy trọn vẹn ở mọi test host nên
+                              nếu tính vào sẽ ĐẨY % LÊN GIẢ TẠO.
+    - 6 adapter IO ngoài    : EmailService (new SmtpClient inline), CloudinaryService
+                              (new Cloudinary trong ctor), eSmsService, AiGeneratorService,
+                              MakeWebhookService, GoogleTokenValidator (static
+                              GoogleJsonWebSignature). 969 dòng, KHÔNG có seam để mock —
+                              muốn test phải refactor VietTien.API. Đây là một phát hiện
+                              về thiết kế, cần ghi trong báo cáo chứ không lặng lẽ bỏ qua.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          <!-- ⚠ TUYỆT ĐỐI KHÔNG thêm CompilerGeneratedAttribute vào đây.
+               Trình biên dịch C# dịch thân của MỌI hàm async thành một state-machine class
+               mang [CompilerGenerated]. Loại attribute này = loại toàn bộ code async, mà gần
+               như cả VietTien.API là async -> OrderService chỉ còn 64/2900 dòng được đo và
+               báo 100% một cách vô nghĩa. Đã mắc đúng lỗi này ở lần đo đầu. -->
+          <ExcludeByAttribute>GeneratedCodeAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+          <ExcludeByFile>**/Migrations/**/*.cs</ExcludeByFile>
+          <Exclude>[VietTien.API]VietTien.API.Migrations.*,[VietTien.API]VietTien.API.DTOs.*,[VietTien.API]VietTien.API.Models.*,[VietTien.API]Program,[VietTien.API]VietTien.API.Services.Implementations.EmailService,[VietTien.API]VietTien.API.Services.Implementations.CloudinaryService,[VietTien.API]VietTien.API.Services.Implementations.eSmsService,[VietTien.API]VietTien.API.Services.Implementations.AiGeneratorService,[VietTien.API]VietTien.API.Services.Implementations.MakeWebhookService,[VietTien.API]VietTien.API.Services.Implementations.GoogleTokenValidator</Exclude>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

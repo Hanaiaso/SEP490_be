@@ -74,7 +74,7 @@ namespace VietTien.API.Services.Implementations
                 throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
         }
 
-        private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(decimal totalAmount)
+        private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(decimal totalAmount, Guid customerProfileId)
         {
             // Ngưỡng chuyển sang luồng báo giá B2B (CR-01) — đọc từ Admin System Config (Phase 1),
             // cùng key QUOTATION_MIN_VALUE đã seed sẵn 100 triệu, fallback nếu chưa cấu hình.
@@ -82,7 +82,26 @@ namespace VietTien.API.Services.Implementations
             var quotationMinValue = decimal.TryParse(quotationMinValueRaw, out var parsedMinValue) ? parsedMinValue : 100_000_000m;
 
             if (totalAmount >= quotationMinValue)
-                throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+            {
+                // GH-13/BR-026: nếu khách đã có báo giá B2B được duyệt VÀ chấp nhận, còn hiệu lực, thì áp
+                // giá đã thoả thuận thay vì chặn cứng — không phải mọi đơn >=ngưỡng đều cần báo giá mới.
+                var acceptedQuotation = await _context.Quotations
+                    .Include(q => q.Versions)
+                    .Where(q => q.CustomerProfileId == customerProfileId
+                        && q.Status == QuotationStatus.CustomerAccepted
+                        && q.AcceptedVersionId != null
+                        && (q.ValidUntil == null || q.ValidUntil >= DateTime.UtcNow))
+                    .OrderByDescending(q => q.RequestDate)
+                    .FirstOrDefaultAsync();
+
+                var acceptedVersion = acceptedQuotation?.Versions.FirstOrDefault(v => v.Id == acceptedQuotation.AcceptedVersionId);
+                if (acceptedVersion == null)
+                    throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+
+                var negotiatedDiscount = Math.Max(0, totalAmount - acceptedVersion.ProposedTotal);
+                var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
+                return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
+            }
 
             var discountPercentage = await _discountTierService.GetApplicableDiscountPercentAsync(totalAmount);
 
@@ -101,7 +120,7 @@ namespace VietTien.API.Services.Implementations
                 throw new Exception("Giỏ hàng trống.");
 
             var baseTotal = cart.Items.Sum(i => i.TotalPrice);
-            var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal);
+            var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal, profile.Id);
 
             var totalAfterDiscount = baseTotal - discountAmount;
             
@@ -126,8 +145,15 @@ namespace VietTien.API.Services.Implementations
         public async Task<OrderResponseDto> PlaceOrderAsync(Guid userId, PlaceOrderRequestDto request)
         {
             var profile = await GetCustomerProfileAsync(userId);
-            var cart = await _cartService.GetCartAsync(userId);
             var cartEntity = await _unitOfWork.Carts.GetCartByCustomerIdAsync(profile.Id);
+
+            // GH-08/BR-025: phải kiểm tra hạn giữ giá 24h TRƯỚC khi gọi CartService.GetCartAsync — hàm
+            // đó tự làm mới giá + reset UpdatedAt ngay khi đọc giỏ (hành vi cố ý cho màn xem giỏ), nên
+            // nếu check SAU sẽ không bao giờ thấy hết hạn nữa (đã bị chính lệnh đọc này xoá dấu vết).
+            if (cartEntity != null && (DateTime.UtcNow - cartEntity.UpdatedAt).TotalHours > 24)
+                throw new Exception("Giá trong giỏ hàng đã hết hạn giữ (quá 24h). Vui lòng xem lại giỏ hàng để cập nhật giá mới trước khi đặt hàng.");
+
+            var cart = await _cartService.GetCartAsync(userId);
 
             if (cart == null || !cart.Items.Any() || cartEntity == null)
                 throw new Exception("Giỏ hàng trống.");
@@ -147,7 +173,7 @@ namespace VietTien.API.Services.Implementations
                     cart.Items.Select(i => (i.ProductId, i.Quantity)));
 
                 var baseTotal = cart.Items.Sum(i => i.TotalPrice);
-                var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal);
+                var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal, profile.Id);
                 var totalAfterDiscount = baseTotal - discountAmount;
                 // Cùng nguồn sự thật với GetCheckoutSummaryAsync (preview): VAT áp dụng theo hồ sơ có MST,
                 // KHÔNG theo cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác với việc tính VAT).
@@ -168,6 +194,19 @@ namespace VietTien.API.Services.Implementations
                 }
 
                 var orderCode = $"VT{DateTime.UtcNow:yyyyMMddHHmmss}{new Random().Next(100, 999)}";
+
+                // Chốt (snapshot) địa chỉ giao hàng khách chọn ngay tại thời điểm đặt đơn: đơn hàng
+                // là hồ sơ bất biến, không được phép đổi theo mỗi khi khách cập nhật sổ địa chỉ sau này.
+                var shippingAddress = request.AddressId.HasValue
+                    ? await _context.Addresses.FirstOrDefaultAsync(a => a.Id == request.AddressId.Value && a.CustomerProfileId == profile.Id)
+                    : null;
+                shippingAddress ??= await _context.Addresses
+                    .Where(a => a.CustomerProfileId == profile.Id)
+                    .OrderByDescending(a => a.IsDefault)
+                    .FirstOrDefaultAsync();
+                var shippingAddressText = shippingAddress != null
+                    ? $"{shippingAddress.SpecificAddress}, {shippingAddress.Ward}, {shippingAddress.District}, {shippingAddress.City}"
+                    : profile.CompanyAddress;
 
                 var orderStatus = request.PaymentMethod == PaymentMethod.COD ? OrderStatus.PendingConfirmation : OrderStatus.Draft;
                 var paymentStatus = PaymentStatus.Pending;
@@ -199,7 +238,8 @@ namespace VietTien.API.Services.Implementations
                     FulfillmentStatus = fulfillmentStatus,
                     CreatedAt = DateTime.UtcNow,
                     RequiresRedInvoice = request.RequiresRedInvoice,
-                    SalesStaffId = profile.AssignedSalesStaffId // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
+                    SalesStaffId = profile.AssignedSalesStaffId, // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
+                    ShippingAddress = shippingAddressText
                 };
 
                 foreach (var item in cart.Items)
@@ -296,19 +336,10 @@ namespace VietTien.API.Services.Implementations
 
         public async Task ProcessSePayWebhookAsync(SePayWebhookDto payload, string providedToken)
         {
+            // GH-01/SEC-03: không bypass theo môi trường — token sai/thiếu luôn bị từ chối.
             var apiToken = _configuration["SePaySettings:ApiToken"];
-            var isDevelopment = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
             if (providedToken != apiToken)
-            {
-                if (isDevelopment && string.IsNullOrEmpty(providedToken))
-                {
-                    Console.WriteLine("[SePay Webhook] WARNING: Token is missing but bypassed because ASPNETCORE_ENVIRONMENT is Development.");
-                }
-                else
-                {
-                    throw new UnauthorizedAccessException("Token không hợp lệ.");
-                }
-            }
+                throw new UnauthorizedAccessException("Token không hợp lệ.");
 
             var transferContentText = !string.IsNullOrEmpty(payload.content) ? payload.content : payload.transferContent;
             var orderCode = ExtractOrderCode(transferContentText);
@@ -680,7 +711,8 @@ namespace VietTien.API.Services.Implementations
                 CreatedAt = DateTime.UtcNow,
                 RequiresRedInvoice = false,
                 InvoicePdfUrl = pdfUrl,
-                SalesStaffId = customerProfile.AssignedSalesStaffId // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
+                SalesStaffId = customerProfile.AssignedSalesStaffId, // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
+                ShippingAddress = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim()
             };
 
             // Đối chiếu số học cơ bản để chặn sai lệch/gõ nhầm giữa các trường tiền client gửi lên
@@ -1138,20 +1170,24 @@ namespace VietTien.API.Services.Implementations
                 LineTotal    = oi.PriceSnapshot * oi.Quantity,
             }).ToList();
 
-            var defaultAddress = order.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault) 
-                                 ?? order.CustomerProfile?.Addresses?.FirstOrDefault();
-
-            string? addressString = null;
-            if (defaultAddress != null)
+            // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
+            // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+            string? addressString = order.ShippingAddress;
+            if (string.IsNullOrEmpty(addressString))
             {
-                addressString = $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}";
-            }
-            else if (!string.IsNullOrEmpty(order.CustomerProfile?.CompanyAddress))
-            {
-                addressString = order.CustomerProfile.CompanyAddress;
+                var defaultAddress = order.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
+                                     ?? order.CustomerProfile?.Addresses?.FirstOrDefault();
+                if (defaultAddress != null)
+                {
+                    addressString = $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}";
+                }
+                else if (!string.IsNullOrEmpty(order.CustomerProfile?.CompanyAddress))
+                {
+                    addressString = order.CustomerProfile.CompanyAddress;
+                }
             }
 
-            var customerName = order.CustomerProfile?.User?.FullName 
+            var customerName = order.CustomerProfile?.User?.FullName
                                ?? order.CustomerProfile?.CompanyName 
                                ?? "Khách hàng";
                                
@@ -1232,6 +1268,8 @@ namespace VietTien.API.Services.Implementations
             var term = search.Trim().ToLower();
 
             var order = await _context.Orders
+                .AsNoTracking()
+                .AsSplitQuery() // Tách query cho từng Include collection (Addresses, OrderItems, ReturnExchangeRequests...) để tránh nhân bản dòng kiểu tích Descartes khi JOIN nhiều bảng 1-nhiều cùng lúc
                 .Include(o => o.CustomerProfile).ThenInclude(cp => cp.User)
                 .Include(o => o.CustomerProfile.Addresses)
                 .Include(o => o.OrderItems).ThenInclude(oi => oi.Product)
@@ -1262,6 +1300,19 @@ namespace VietTien.API.Services.Implementations
                 PriceSnapshot = oi.PriceSnapshot,
                 LineTotal = oi.PriceSnapshot * oi.Quantity,
             }).ToList();
+
+            // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
+            // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+            string addressString = order.ShippingAddress ?? "---";
+            if (string.IsNullOrEmpty(order.ShippingAddress))
+            {
+                var defaultAddress = order.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
+                                     ?? order.CustomerProfile?.Addresses?.FirstOrDefault();
+                if (defaultAddress != null)
+                    addressString = $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}";
+                else if (!string.IsNullOrEmpty(order.CustomerProfile?.CompanyAddress))
+                    addressString = order.CustomerProfile.CompanyAddress;
+            }
 
             var customerName = order.CustomerProfile?.User?.FullName ?? order.CustomerProfile?.CompanyName ?? "Khách hàng";
 
@@ -1415,13 +1466,22 @@ namespace VietTien.API.Services.Implementations
                     PaymentStatus = o.PaymentStatus.ToString(),
                     OrderStatus = o.OrderStatus.ToString(),
                     FulfillmentStatus = o.FulfillmentStatus.ToString(),
-                    ShippingAddress = o.CustomerProfile.Addresses.Where(a => a.IsDefault)
-                        .Select(a => a.SpecificAddress + ", " + a.Ward + ", " + a.District + ", " + a.City)
-                        .FirstOrDefault() ?? o.CustomerProfile.CompanyAddress ?? "---",
+                    // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
+                    // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+                    ShippingAddress = !string.IsNullOrEmpty(o.ShippingAddress)
+                        ? o.ShippingAddress
+                        : (o.CustomerProfile.Addresses.Where(a => a.IsDefault)
+                            .Select(a => a.SpecificAddress + ", " + a.Ward + ", " + a.District + ", " + a.City)
+                            .FirstOrDefault() ?? o.CustomerProfile.CompanyAddress ?? "---"),
                     TotalQuantity = o.OrderItems.Sum(i => i.Quantity),
                     PickingStartedAt = o.PickingStartedAt,
                     PickingCompletedAt = o.PickingCompletedAt,
-                    InvoicePdfUrl = o.InvoicePdfUrl
+                    InvoicePdfUrl = o.InvoicePdfUrl,
+                    HasReturnRequest = o.ReturnExchangeRequests.Any(r => r.Status != ReturnExchangeStatus.Cancelled),
+                    ReturnRequestStatus = o.ReturnExchangeRequests.Where(r => r.Status != ReturnExchangeStatus.Cancelled)
+                        .OrderByDescending(r => r.CreatedAt)
+                        .Select(r => r.Status.ToString())
+                        .FirstOrDefault()
                 })
                 .ToListAsync();
 
@@ -1457,19 +1517,23 @@ namespace VietTien.API.Services.Implementations
 
             if (salesStaffId.HasValue && order.SalesStaffId != salesStaffId.Value)
             {
-                // Chặn IDOR: cùng cơ chế scope theo snapshot Sale phụ trách (o.SalesStaffId) đã dùng ở
+                // Chặn IDOR: cùng cơ chế scope theo snapshot (o.SalesStaffId) đã dùng ở
                 // GetSalesOrdersAsync — Sale khác không được xem chi tiết đơn không phải của mình.
                 throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
             }
 
-            var defaultAddress = order.CustomerProfile.Addresses?.FirstOrDefault(a => a.IsDefault) 
-                                 ?? order.CustomerProfile.Addresses?.FirstOrDefault();
-
-            string addressString = "---";
-            if (defaultAddress != null)
-                addressString = $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}";
-            else if (!string.IsNullOrEmpty(order.CustomerProfile.CompanyAddress))
-                addressString = order.CustomerProfile.CompanyAddress;
+            // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
+            // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+            string addressString = order.ShippingAddress ?? "---";
+            if (string.IsNullOrEmpty(order.ShippingAddress))
+            {
+                var defaultAddress = order.CustomerProfile.Addresses?.FirstOrDefault(a => a.IsDefault)
+                                     ?? order.CustomerProfile.Addresses?.FirstOrDefault();
+                if (defaultAddress != null)
+                    addressString = $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}";
+                else if (!string.IsNullOrEmpty(order.CustomerProfile.CompanyAddress))
+                    addressString = order.CustomerProfile.CompanyAddress;
+            }
 
             return new SalesOrderDetailDto
             {
@@ -1501,6 +1565,11 @@ namespace VietTien.API.Services.Implementations
                 PickingStartedAt = order.PickingStartedAt,
                 PickingCompletedAt = order.PickingCompletedAt,
                 InvoicePdfUrl = order.InvoicePdfUrl,
+                HasReturnRequest = order.ReturnExchangeRequests.Any(r => r.Status != ReturnExchangeStatus.Cancelled),
+                ReturnRequestStatus = order.ReturnExchangeRequests.Where(r => r.Status != ReturnExchangeStatus.Cancelled)
+                    .OrderByDescending(r => r.CreatedAt)
+                    .Select(r => r.Status.ToString())
+                    .FirstOrDefault(),
                 ReturnExchangeRequests = order.ReturnExchangeRequests.Select(req => new ReturnExchangeRequestSnapshotDto
                 {
                     Id = req.Id,
@@ -1954,6 +2023,27 @@ namespace VietTien.API.Services.Implementations
                 scheduled++;
             }
 
+            // ─── Xử lý StockTransfer (điều chuyển nội bộ) trong cùng payload ──
+            var matchedOrderIds = orders.Select(o => o.Id).ToHashSet();
+            var remainingIds = dto.OrderIds.Where(id => !matchedOrderIds.Contains(id)).ToList();
+
+            if (remainingIds.Any())
+            {
+                var stockTransfers = await _context.StockTransfers
+                    .Where(st => remainingIds.Contains(st.Id)
+                              && st.Status == StockTransferStatus.TransportRequested)
+                    .ToListAsync();
+
+                foreach (var st in stockTransfers)
+                {
+                    st.DeliveryVehicleId = dto.VehicleId;
+                    st.DeliveryShift = dto.Shift;
+                    st.ScheduledDeliveryDate = targetDate;
+                    st.Status = StockTransferStatus.TransportArranged;
+                    scheduled++;
+                }
+            }
+
             await _context.SaveChangesAsync();
 
             return new ScheduleDeliveryResponseDto
@@ -1973,6 +2063,8 @@ namespace VietTien.API.Services.Implementations
         public async Task<List<DeliveryOrderListDto>> GetDeliveryOrdersAsync(Guid salesStaffId)
         {
             var orders = await _context.Orders
+                .AsNoTracking()
+                .AsSplitQuery() // Tách query cho từng Include collection (Addresses, OrderItems) để tránh nhân bản dòng kiểu tích Descartes khi JOIN nhiều bảng 1-nhiều cùng lúc
                 .Include(o => o.CustomerProfile)
                     .ThenInclude(cp => cp.User)
                 .Include(o => o.CustomerProfile.Addresses)
@@ -1993,13 +2085,23 @@ namespace VietTien.API.Services.Implementations
                 .OrderByDescending(o => o.CreatedAt)
                 .ToListAsync();
 
-            return orders.Select(o =>
+            var result = orders.Select(o =>
             {
-                var defaultAddress = o.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
-                                  ?? o.CustomerProfile?.Addresses?.FirstOrDefault();
-                string address = defaultAddress != null
-                    ? $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}"
-                    : o.CustomerProfile?.CompanyAddress ?? "---";
+                // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
+                // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+                string address;
+                if (!string.IsNullOrEmpty(o.ShippingAddress))
+                {
+                    address = o.ShippingAddress;
+                }
+                else
+                {
+                    var defaultAddress = o.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
+                                      ?? o.CustomerProfile?.Addresses?.FirstOrDefault();
+                    address = defaultAddress != null
+                        ? $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}"
+                        : o.CustomerProfile?.CompanyAddress ?? "---";
+                }
 
                 return new DeliveryOrderListDto
                 {
@@ -2021,6 +2123,45 @@ namespace VietTien.API.Services.Implementations
                     ItemCount = o.OrderItems?.Sum(oi => oi.Quantity) ?? 0
                 };
             }).ToList();
+
+            // ─── Gộp thêm StockTransfer đang chờ/đã xếp xe vào danh sách điều phối ──
+            var stockTransfers = await _context.StockTransfers
+                .AsNoTracking()
+                .Include(st => st.SourceWarehouse)
+                .Include(st => st.DestinationWarehouse)
+                .Include(st => st.Items)
+                .Where(st => st.Status == StockTransferStatus.TransportRequested
+                          || st.Status == StockTransferStatus.TransportArranged)
+                .OrderByDescending(st => st.CreatedAt)
+                .ToListAsync();
+
+            foreach (var st in stockTransfers)
+            {
+                var deliveryStatus = st.Status == StockTransferStatus.TransportArranged
+                    ? "Scheduled" : "NotScheduled";
+
+                result.Add(new DeliveryOrderListDto
+                {
+                    Id = st.Id,
+                    OrderCode = st.Code,
+                    CustomerName = $"Nội bộ: {st.SourceWarehouse?.Name} → {st.DestinationWarehouse?.Name}",
+                    CustomerPhone = "---",
+                    ShippingAddress = st.DestinationWarehouse?.Name ?? "---",
+                    FinalPayment = 0,
+                    AmountPaid = 0,
+                    PaymentMethod = "Transfer",
+                    OrderStatus = "Transfer",
+                    DeliveryStatus = deliveryStatus,
+                    VehicleId = st.DeliveryVehicleId,
+                    Shift = st.DeliveryShift,
+                    ScheduledDeliveryDate = st.ScheduledDeliveryDate,
+                    FailedDeliveryCount = 0,
+                    IsBlocked = false,
+                    ItemCount = st.Items?.Sum(i => i.Quantity) ?? 0
+                });
+            }
+
+            return result;
         }
 
         // =====================================================================
@@ -2274,7 +2415,8 @@ namespace VietTien.API.Services.Implementations
                 Reason = dto.Reason,
                 EvidenceUrls = dto.EvidenceUrls,
                 Status = ReturnExchangeStatus.Pending,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                PickupAddress = order.ShippingAddress // Lấy hàng đúng nơi đơn gốc đã giao, không đổi theo địa chỉ mặc định hiện tại của khách
             };
 
             foreach (var item in dto.ReturnItems)
@@ -2406,7 +2548,8 @@ namespace VietTien.API.Services.Implementations
                         OrderStatus = OrderStatus.Confirmed,
                         ConfirmedAt = DateTime.UtcNow,
                         CreatedAt = DateTime.UtcNow,
-                        ReplacementOrderId = request.OrderId
+                        ReplacementOrderId = request.OrderId,
+                        ShippingAddress = request.Order.ShippingAddress // Đơn đổi hàng giao lại đúng nơi đơn gốc đã giao
                     };
 
                     if (request.CustomerProfile.AvailableCredit > 0)
@@ -2475,6 +2618,8 @@ namespace VietTien.API.Services.Implementations
         {
             // Trả về danh sách ReturnExchangeRequest đã duyệt nhưng chưa lấy xong
             var requests = await _context.ReturnExchangeRequests
+                .AsNoTracking()
+                .AsSplitQuery() // Tách query cho Addresses và ReturnItems.Product (2 collection Include cùng cấp) để tránh nhân bản dòng
                 .Include(r => r.Order)
                 .Include(r => r.CustomerProfile)
                     .ThenInclude(c => c.User)
@@ -2486,13 +2631,27 @@ namespace VietTien.API.Services.Implementations
                 .OrderByDescending(r => r.CreatedAt)
                 .ToListAsync();
 
-            return requests.Select(r => 
+            return requests.Select(r =>
             {
-                var defaultAddress = r.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
-                                  ?? r.CustomerProfile?.Addresses?.FirstOrDefault();
-                string address = defaultAddress != null
-                    ? $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}"
-                    : r.CustomerProfile?.CompanyAddress ?? "---";
+                // Ưu tiên: địa chỉ lấy hàng đã chốt trên yêu cầu -> địa chỉ đã chốt của đơn gốc ->
+                // (yêu cầu/đơn tạo trước khi có snapshot) fallback địa chỉ mặc định hiện tại của khách.
+                string address;
+                if (!string.IsNullOrEmpty(r.PickupAddress))
+                {
+                    address = r.PickupAddress;
+                }
+                else if (!string.IsNullOrEmpty(r.Order.ShippingAddress))
+                {
+                    address = r.Order.ShippingAddress;
+                }
+                else
+                {
+                    var defaultAddress = r.CustomerProfile?.Addresses?.FirstOrDefault(a => a.IsDefault)
+                                      ?? r.CustomerProfile?.Addresses?.FirstOrDefault();
+                    address = defaultAddress != null
+                        ? $"{defaultAddress.SpecificAddress}, {defaultAddress.Ward}, {defaultAddress.District}, {defaultAddress.City}"
+                        : r.CustomerProfile?.CompanyAddress ?? "---";
+                }
 
                 return new PendingPickupDto
                 {
@@ -2537,13 +2696,51 @@ namespace VietTien.API.Services.Implementations
 
         public async Task ConfirmPickupAsync(Guid requestId, Guid userId)
         {
-            var req = await _context.ReturnExchangeRequests.FindAsync(requestId);
+            var req = await _context.ReturnExchangeRequests
+                .Include(r => r.ReturnItems)
+                .FirstOrDefaultAsync(r => r.Id == requestId);
             if (req == null) throw new KeyNotFoundException("Không tìm thấy yêu cầu đổi/trả.");
 
             if (req.PickupStatus != PickupStatus.Scheduled)
                 throw new InvalidOperationException("Yêu cầu chưa được lên lịch điều xe hoặc đã lấy rồi.");
 
             req.PickupStatus = PickupStatus.PickedUp;
+
+            // BR-019: hàng thu hồi từ khách phải vào khu cách ly (Quarantine), KHÔNG được cộng thẳng
+            // vào tồn khả dụng — chờ kiểm tra chất lượng trước khi nhập lại kho hoặc huỷ.
+            var defaultLocationId = await _context.Warehouses
+                .Where(w => w.Code == "WH-DEFAULT")
+                .SelectMany(w => w.Locations)
+                .Select(l => l.Id)
+                .FirstOrDefaultAsync();
+
+            foreach (var item in req.ReturnItems)
+            {
+                var inventory = await _context.Inventories.FirstOrDefaultAsync(i =>
+                    i.WarehouseLocationId == defaultLocationId && i.ProductId == item.ProductId);
+                if (inventory == null)
+                {
+                    inventory = new Inventory { ProductId = item.ProductId, WarehouseLocationId = defaultLocationId };
+                    _context.Inventories.Add(inventory);
+                }
+                // Hàng đã vật lý về lại kho (đã pickup) nên cộng OnHand, nhưng giữ trong Quarantine nên
+                // KHÔNG được tính vào khả dụng — RawAvailable = OnHand - ... - Quarantine giữ nguyên.
+                inventory.OnHandQuantity += item.Quantity;
+                inventory.QuarantineQuantity += item.Quantity;
+
+                _context.StockTransactions.Add(new StockTransaction
+                {
+                    InventoryId = inventory.Id,
+                    ProductId = item.ProductId,
+                    WarehouseLocationId = defaultLocationId,
+                    QuantityChange = item.Quantity,
+                    TransactionType = TransactionType.StockAdjustment,
+                    ReferenceId = req.Id,
+                    Note = $"Thu hồi hàng đổi/trả {req.Id} vào khu cách ly",
+                    CreatedByUserId = userId,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
 
             await _context.SaveChangesAsync();
         }
@@ -2563,6 +2760,10 @@ namespace VietTien.API.Services.Implementations
 
             if (order.OrderStatus == OrderStatus.CancelRequested || order.OrderStatus == OrderStatus.CancelledReallocated)
                 throw new InvalidOperationException("Đơn hàng này đã có yêu cầu hủy trước đó.");
+
+            // GH-14 / SRS 4.4.1: đơn đang trên đường giao không được nhận yêu cầu huỷ.
+            if (order.DeliveryStatus == DeliveryStatus.InDelivery)
+                throw new InvalidOperationException("Không thể yêu cầu hủy đơn hàng đang trên đường giao.");
 
             order.OrderStatus = OrderStatus.CancelRequested;
             order.CancelReason = reason;
@@ -2649,7 +2850,8 @@ namespace VietTien.API.Services.Implementations
                     PaymentStatus = reallocatedToNewOrder >= newOrderTotal ? PaymentStatus.Paid : PaymentStatus.PartiallyPaid,
                     OrderStatus = OrderStatus.Confirmed,
                     ConfirmedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    ShippingAddress = originalOrder.ShippingAddress // Đơn thay thế giao lại đúng nơi đơn gốc đã giao
                 };
                 foreach (var item in newOrderItems) { item.Order = replacementOrder; }
                 replacementOrder.OrderItems = newOrderItems;
@@ -2780,7 +2982,8 @@ namespace VietTien.API.Services.Implementations
                     OrderStatus = OrderStatus.Confirmed,
                     ConfirmedAt = DateTime.UtcNow,
                     SalesStaffId = request.Order.SalesStaffId,
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    ShippingAddress = request.Order.ShippingAddress // Đơn đổi hàng giao lại đúng nơi đơn gốc đã giao
                 };
 
                 var newOrderItems = new List<OrderItem>();

@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.PurchaseOrder;
@@ -98,19 +99,70 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<PurchaseOrderDto> ImportFromExcelAsync(Microsoft.AspNetCore.Http.IFormFile file, Guid ceoId)
         {
-            // TODO: Use EPPlus or ClosedXML to parse Excel.
-            // For now, returning a mock draft PO created from "Excel"
-            
+            // GH-10/BR-015: đọc thật nội dung file thay vì tạo PO rỗng. Hỗ trợ định dạng CSV
+            // (header: ProductSku,Quantity,UnitPrice) — đủ cho export/import phổ biến từ Excel.
+            // TODO: parse file .xlsx nhị phân thật (ClosedXML) khi cần nhận trực tiếp file Excel gốc
+            // chưa qua "Save As CSV" — hiện tại nội dung không phải CSV/không đọc được sẽ tạo PO
+            // rỗng kèm ImportRowError cho từng dòng lỗi thay vì báo sai là đã nhập thành công.
+            var rows = new List<(string Sku, int Quantity, decimal UnitPrice)>();
+            var rowErrors = new List<string>();
+            using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8))
+            {
+                var text = await reader.ReadToEndAsync();
+                var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                for (int lineIdx = 1; lineIdx < lines.Length; lineIdx++) // dòng 0 là header
+                {
+                    var cols = lines[lineIdx].Split(',');
+                    if (cols.Length < 3)
+                    {
+                        rowErrors.Add($"Dòng {lineIdx + 1}: thiếu cột (cần ProductSku,Quantity,UnitPrice).");
+                        continue;
+                    }
+                    var sku = cols[0].Trim();
+                    if (!int.TryParse(cols[1].Trim(), out var qty) || qty <= 0)
+                    {
+                        rowErrors.Add($"Dòng {lineIdx + 1}: số lượng không hợp lệ ('{cols[1].Trim()}').");
+                        continue;
+                    }
+                    if (!decimal.TryParse(cols[2].Trim(), out var price) || price < 0)
+                    {
+                        rowErrors.Add($"Dòng {lineIdx + 1}: đơn giá không hợp lệ ('{cols[2].Trim()}').");
+                        continue;
+                    }
+                    rows.Add((sku, qty, price));
+                }
+            }
+
+            if (rows.Count == 0)
+                throw new Exception("Không đọc được dòng hàng hợp lệ nào từ file. " +
+                    (rowErrors.Count > 0 ? string.Join(" ", rowErrors) : "File trống hoặc sai định dạng."));
+
+            var supplierId = await _context.Suppliers.Select(s => s.Id).FirstOrDefaultAsync();
+            var warehouseId = await _context.Warehouses.Select(w => w.Id).FirstOrDefaultAsync();
+
             var po = new PurchaseOrder
             {
                 Code = "PO-EXCEL-" + DateTime.Now.Ticks.ToString().Substring(10),
                 CreatedById = ceoId,
-                SupplierId = _context.Suppliers.Select(s => s.Id).FirstOrDefault(), // Mock
-                WarehouseId = _context.Warehouses.Select(w => w.Id).FirstOrDefault(), // Mock
+                SupplierId = supplierId,
+                WarehouseId = warehouseId,
                 Status = PurchaseOrderStatus.Draft,
                 ExpectedDeliveryDate = DateTime.UtcNow.AddDays(7),
-                Note = "Imported from Excel: " + file.FileName
+                Note = "Imported from Excel: " + file.FileName +
+                    (rowErrors.Count > 0 ? $" | {rowErrors.Count} dòng lỗi bị bỏ qua: {string.Join(" ", rowErrors)}" : "")
             };
+
+            foreach (var row in rows)
+            {
+                var product = await _context.Products.FirstOrDefaultAsync(p => p.Sku == row.Sku);
+                po.Items.Add(new PurchaseOrderItem
+                {
+                    ProductId = product?.Id,
+                    ExpectedQuantity = row.Quantity,
+                    UnitPrice = row.UnitPrice,
+                    Note = product == null ? $"SKU từ file không khớp sản phẩm nào: {row.Sku}" : null
+                });
+            }
 
             _context.PurchaseOrders.Add(po);
             await _context.SaveChangesAsync();

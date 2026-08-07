@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace VietTien.API.Models
 {
     public enum PaymentMethod { COD, SePay, Cash }
@@ -11,6 +13,12 @@ namespace VietTien.API.Models
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid CustomerProfileId { get; set; }
         public string OrderCode { get; set; } = string.Empty; // Mã độc nhất đối soát SePay
+
+        // GH-02/GH-15: concurrency token — chặn 2 request cùng lúc (webhook + manual-confirm, hoặc
+        // 2 lần duyệt huỷ song song) đều đọc cùng 1 trạng thái rồi cùng ghi đè nhau. Request thua sẽ
+        // nhận DbUpdateConcurrencyException, middleware map sẵn 409.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
         public decimal TotalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
@@ -38,6 +46,10 @@ namespace VietTien.API.Models
 
         /// <summary>URL bằng chứng đối soát do Sales Manager upload</summary>
         public string? ManualConfirmEvidenceUrl { get; set; }
+
+        /// <summary>Snapshot địa chỉ giao hàng đã chọn tại thời điểm đặt hàng (bất biến).
+        /// Đơn tạo trước khi có trường này (null) fallback về địa chỉ mặc định hiện tại của khách.</summary>
+        public string? ShippingAddress { get; set; }
 
         public int? DeliveryVehicleId { get; set; } // Giới hạn từ xe 1 -> xe 5
         public string? DeliveryShift { get; set; }   // Sáng, Trưa, Chiều

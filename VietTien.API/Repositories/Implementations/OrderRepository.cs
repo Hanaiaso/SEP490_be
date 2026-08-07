@@ -127,6 +127,7 @@ namespace VietTien.API.Repositories.Implementations
             // Kiểm tra quyền sở hữu tại DB query (BR-OH-02, NFR-OH-03)
             return await _context.Orders
                 .AsNoTracking()
+                .AsSplitQuery() // Tách query cho từng Include collection (Addresses, OrderItems, ReturnedGoodsLogs, ReturnExchangeRequests...) để tránh nhân bản dòng kiểu tích Descartes khi JOIN nhiều bảng 1-nhiều cùng lúc
                 .Where(o => o.Id == orderId && o.CustomerProfileId == customerProfileId)
                 .Include(o => o.CustomerProfile)
                     .ThenInclude(cp => cp.User)

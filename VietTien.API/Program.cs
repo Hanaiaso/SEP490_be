@@ -98,7 +98,16 @@ builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
 builder.Services.AddScoped<IVehicleService, VehicleService>();
 builder.Services.AddScoped<IDiscountTierService, DiscountTierService>();
 
+builder.Services.AddScoped<IReviewService, ReviewService>();
+
 var jwtSettings = builder.Configuration.GetSection("JwtSettings").Get<JwtSettings>()!;
+
+if (string.IsNullOrWhiteSpace(jwtSettings.SecretKey))
+{
+    throw new InvalidOperationException(
+        "JwtSettings:SecretKey chưa được cấu hình. Thêm giá trị vào appsettings.Development.json (file này nằm trong .gitignore) hoặc biến môi trường JwtSettings__SecretKey.");
+}
+
 var key = Encoding.UTF8.GetBytes(jwtSettings.SecretKey);
 
 builder.Services.AddAuthentication(options =>

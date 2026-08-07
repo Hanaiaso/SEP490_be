@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace VietTien.API.Models
 {
-    public enum StockTransferStatus { Draft, Dispatched, Received, Cancelled }
+    public enum StockTransferStatus { Draft, TransportRequested, TransportArranged, Dispatched, Received, Cancelled }
 
     public class StockTransfer
     {
@@ -30,6 +30,11 @@ namespace VietTien.API.Models
         public string? ReceiveNote { get; set; }
         public string? ProofImageUrl { get; set; }
         public string? NotificationEmail { get; set; }
+
+        // Điều phối xe vận chuyển nội bộ (do Sale xếp)
+        public int? DeliveryVehicleId { get; set; }
+        public string? DeliveryShift { get; set; }
+        public DateTime? ScheduledDeliveryDate { get; set; }
 
         // Navigation
         public Warehouse SourceWarehouse { get; set; } = null!;

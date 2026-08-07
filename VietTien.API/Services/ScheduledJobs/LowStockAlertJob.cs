@@ -6,7 +6,8 @@ using VietTien.API.Services.Interfaces;
 namespace VietTien.API.Services.ScheduledJobs
 {
     // Cảnh báo tồn thấp cho (a) hàng thành phẩm qua Inventory.ReorderThreshold và
-    // (b) nguyên vật liệu qua Material.IsBelowSafetyThreshold() (field có sẵn, trước đây chưa job nào dùng).
+    // (b) nguyên vật liệu qua Material.SafetyThreshold, so với tồn tính từ Inventories (không dùng
+    // Material.CurrentStock trực tiếp vì field đó không được đồng bộ khi kho điều chỉnh tồn).
     public class LowStockAlertJob : IScheduledJob
     {
         private static readonly TimeSpan InventoryAlertCooldown = TimeSpan.FromHours(24);
@@ -66,20 +67,28 @@ namespace VietTien.API.Services.ScheduledJobs
             }
 
             // --- (b) Nguyên vật liệu (Material.SafetyThreshold) ---
-            var materials = await _context.Materials.ToListAsync(ct);
+            // Include Inventories: Material.CurrentStock luôn = 0 và không nơi nào khác cập nhật field này
+            // khi nhân viên kho điều chỉnh tồn qua Inventory (xem comment ở MaterialService.MapToDto) ->
+            // phải tính tồn thực tế từ Inventories.Sum(AvailableQuantity), nếu không job sẽ luôn coi tồn = 0
+            // và báo động sai dù kho thực tế đã đủ hàng.
+            var materials = await _context.Materials.Include(m => m.Inventories).ToListAsync(ct);
 
             foreach (var material in materials)
             {
                 try
                 {
-                    if (!material.IsBelowSafetyThreshold()) continue;
+                    var calculatedStock = material.Inventories.Any()
+                        ? material.Inventories.Sum(i => i.AvailableQuantity)
+                        : material.CurrentStock;
+
+                    if (calculatedStock > material.SafetyThreshold) continue;
 
                     if (material.LastAlertSentDate.HasValue && now - material.LastAlertSentDate.Value < MaterialAlertCooldown)
                         continue;
 
                     await SendLowStockAlertAsync(
                         $"Tồn nguyên vật liệu thấp: {material.Name}",
-                        $"Vật liệu {material.Name} còn {material.CurrentStock} {material.Unit}, dưới ngưỡng an toàn {material.SafetyThreshold}.",
+                        $"Vật liệu {material.Name} còn {calculatedStock} {material.Unit}, dưới ngưỡng an toàn {material.SafetyThreshold}.",
                         material.Id, "Material");
 
                     material.LastAlertSentDate = now;

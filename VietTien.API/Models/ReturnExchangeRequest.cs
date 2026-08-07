@@ -38,6 +38,9 @@ namespace VietTien.API.Models
         public int? PickupVehicleId { get; set; }
         public string? PickupShift { get; set; }
         public DateTime? ScheduledPickupDate { get; set; }
+
+        /// <summary>Snapshot địa chỉ lấy hàng, sao chép từ Order.ShippingAddress tại thời điểm tạo yêu cầu (bất biến).</summary>
+        public string? PickupAddress { get; set; }
         
 
         // Navigation Properties

@@ -28,7 +28,72 @@ namespace VietTien.API.Controllers
             return userId;
         }
 
-        [HttpGet("{warehouseId}")]
+        [HttpGet("report")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> GetInventoryReport(
+            [FromQuery] Guid? warehouseId,
+            [FromQuery] DateTime? fromDate,
+            [FromQuery] DateTime? toDate)
+        {
+            try
+            {
+                var result = await _inventoryService.GetInventoryReportAsync(warehouseId, fromDate, toDate);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet("slow-moving")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> GetSlowMovingItems([FromQuery] Guid? warehouseId, [FromQuery] int days = 14)
+        {
+            try
+            {
+                var result = await _inventoryService.GetSlowMovingItemsAsync(warehouseId, days);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("shift-count")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> SubmitShiftCount([FromBody] ShiftInventoryCountRequestDto request)
+        {
+            try
+            {
+                var staffId = GetUserId();
+                var result = await _inventoryService.SubmitShiftInventoryCountAsync(request, staffId);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Dữ liệu tồn kho đã bị thay đổi bởi tác vụ khác trong lúc kiểm kê. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet("{warehouseId:guid}")]
         public async Task<IActionResult> GetWarehouseInventory(
             Guid warehouseId, 
             [FromQuery] string? search,

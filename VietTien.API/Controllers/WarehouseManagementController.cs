@@ -307,7 +307,7 @@ namespace VietTien.API.Controllers
         }
         
         [HttpGet("staff")]
-        [Authorize(Roles = "CEO,WarehouseStaff,Admin")]
+        [Authorize]
         public async Task<IActionResult> GetStaff([FromServices] Data.ApplicationDbContext context)
         {
             try

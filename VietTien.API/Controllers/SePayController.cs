@@ -49,8 +49,10 @@ namespace VietTien.API.Controllers
 
                 Console.WriteLine($"[SePay Webhook] Token extracted: {(string.IsNullOrEmpty(providedToken) ? "(none)" : "(present)")}");
 
-                var isDevelopment = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
-                if (string.IsNullOrEmpty(providedToken) && !isDevelopment)
+                // GH-01/SEC-03: xác thực webhook KHÔNG được nới lỏng theo môi trường — thiếu token luôn
+                // bị từ chối, kể cả khi ASPNETCORE_ENVIRONMENT=Development (biến này dễ bị set sai trên
+                // server thật và không đáng tin để làm điều kiện bảo mật).
+                if (string.IsNullOrEmpty(providedToken))
                     return Unauthorized(new { success = false, message = "Missing Token" });
 
                 // Ghi lại payload đã xác thực (không ghi token) để có thể replay/retry nếu xử lý lỗi.
@@ -78,6 +80,12 @@ namespace VietTien.API.Controllers
             {
                 Console.WriteLine($"[SePay Webhook] Unauthorized access: {ex.Message}");
                 return Unauthorized(new { success = false, message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                // GH-02: đơn đã bị 1 luồng khác (vd. xác nhận thủ công) xử lý song song và commit trước.
+                Console.WriteLine("[SePay Webhook] Concurrency conflict — đơn đã được xử lý bởi request khác.");
+                return Conflict(new { success = false, message = "Đơn hàng đã được xử lý bởi một yêu cầu khác." });
             }
             catch (Exception ex)
             {

@@ -33,6 +33,8 @@ namespace VietTien.API.DTOs.Order
         public DateTime? PickingStartedAt { get; set; }
         public DateTime? PickingCompletedAt { get; set; }
         public string? InvoicePdfUrl { get; set; }
+        public bool HasReturnRequest { get; set; }
+        public string? ReturnRequestStatus { get; set; }
     }
 
     public class SalesOrderDetailDto : SalesOrderListDto

@@ -208,8 +208,8 @@ namespace VietTien.API.Services.Implementations
                 if (transfer == null)
                     throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
 
-                if (transfer.Status != StockTransferStatus.Draft)
-                    throw new Exception("Chỉ có thể xuất kho cho phiếu ở trạng thái Nháp.");
+                if (transfer.Status != StockTransferStatus.Draft && transfer.Status != StockTransferStatus.TransportArranged)
+                    throw new Exception("Chỉ có thể xuất kho cho phiếu ở trạng thái Nháp hoặc Đã xếp xe.");
 
                 // Deduct from Source Warehouse
                 foreach (var item in transfer.Items)
@@ -241,6 +241,21 @@ namespace VietTien.API.Services.Implementations
                     // Trừ tồn kho và cộng vào hàng đi đường
                     availableInv.OnHandQuantity -= item.Quantity;
                     availableInv.InTransitQuantity += item.Quantity;
+
+                    // GH-06/BR-035: mọi biến động tồn phải để lại vết StockTransaction (append-only).
+                    _context.StockTransactions.Add(new StockTransaction
+                    {
+                        InventoryId = availableInv.Id,
+                        ProductId = item.ProductId,
+                        MaterialId = item.MaterialId,
+                        WarehouseLocationId = availableInv.WarehouseLocationId,
+                        QuantityChange = -item.Quantity,
+                        TransactionType = TransactionType.StockAdjustment,
+                        ReferenceId = transfer.Id,
+                        Note = $"Xuất điều chuyển {transfer.Code} sang kho {transfer.DestinationWarehouse.Name}",
+                        CreatedByUserId = transfer.CreatedByUserId,
+                        CreatedAt = DateTime.UtcNow
+                    });
                 }
 
                 transfer.Status = StockTransferStatus.Dispatched;
@@ -400,6 +415,21 @@ namespace VietTien.API.Services.Implementations
                     {
                         destInv.OnHandQuantity += rcvItem.ReceivedQuantity;
                     }
+
+                    // GH-06/BR-035: mọi biến động tồn phải để lại vết StockTransaction (append-only).
+                    _context.StockTransactions.Add(new StockTransaction
+                    {
+                        InventoryId = destInv.Id,
+                        ProductId = rcvItem.ProductId,
+                        MaterialId = rcvItem.MaterialId,
+                        WarehouseLocationId = destLocation.Id,
+                        QuantityChange = rcvItem.ReceivedQuantity,
+                        TransactionType = TransactionType.StockAdjustment,
+                        ReferenceId = transfer.Id,
+                        Note = $"Nhận điều chuyển {transfer.Code} từ kho {transfer.SourceWarehouse.Name}",
+                        CreatedByUserId = staffId,
+                        CreatedAt = DateTime.UtcNow
+                    });
                 }
                 transfer.Status = StockTransferStatus.Received;
                 transfer.ReceivedAt = DateTime.UtcNow;
@@ -497,6 +527,30 @@ namespace VietTien.API.Services.Implementations
             }
         }
 
+        public async Task<StockTransferDto> RequestTransportAsync(Guid id)
+        {
+            var transfer = await _context.StockTransfers
+                .Include(st => st.SourceWarehouse)
+                .Include(st => st.DestinationWarehouse)
+                .Include(st => st.CreatedByUser)
+                .Include(st => st.Items)
+                    .ThenInclude(i => i.Product)
+                .Include(st => st.Items)
+                    .ThenInclude(i => i.Material)
+                .FirstOrDefaultAsync(st => st.Id == id);
+
+            if (transfer == null)
+                throw new KeyNotFoundException("Không tìm thấy phiếu điều chuyển.");
+
+            if (transfer.Status != StockTransferStatus.Draft)
+                throw new Exception("Chỉ có thể gửi yêu cầu xếp xe cho phiếu ở trạng thái Nháp.");
+
+            transfer.Status = StockTransferStatus.TransportRequested;
+            await _context.SaveChangesAsync();
+
+            return MapToDto(transfer);
+        }
+
         private static StockTransferDto MapToDto(StockTransfer st)
         {
             return new StockTransferDto
@@ -529,7 +583,10 @@ namespace VietTien.API.Services.Implementations
                     ItemType = i.MaterialId != null ? "Material" : "Product",
                     Quantity = i.Quantity,
                     ReceivedQuantity = i.ReceivedQuantity
-                }).ToList()
+                }).ToList(),
+                DeliveryVehicleId = st.DeliveryVehicleId,
+                DeliveryShift = st.DeliveryShift,
+                ScheduledDeliveryDate = st.ScheduledDeliveryDate
             };
         }
     }

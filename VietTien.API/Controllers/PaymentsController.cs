@@ -95,6 +95,11 @@ namespace VietTien.API.Controllers
             {
                 return Unauthorized(new { code = "UNAUTHORIZED", message = ex.Message });
             }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                // GH-02: đơn đã bị 1 luồng khác (vd. webhook SePay) xử lý song song và commit trước.
+                return Conflict(new { code = "CONFLICT_ERROR", message = "Đơn hàng đã được xử lý bởi một yêu cầu khác." });
+            }
             catch (Exception ex)
             {
                 return StatusCode(500, new { code = "INTERNAL_ERROR", message = ex.Message });

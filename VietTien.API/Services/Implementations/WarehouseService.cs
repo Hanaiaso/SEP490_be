@@ -720,7 +720,21 @@ namespace VietTien.API.Services.Implementations
 
                     inventory.OnHandQuantity -= item.Quantity;
                     _context.Inventories.Update(inventory);
-                    
+
+                    // Log biến động tồn kho StockTransaction — thiếu bước này khiến báo cáo xuất/nhập và
+                    // "hàng chậm luân chuyển" (đọc từ StockTransaction) không thấy được các đơn đã xuất thật qua luồng này.
+                    _context.StockTransactions.Add(new StockTransaction
+                    {
+                        InventoryId = inventory.Id,
+                        ProductId = item.ProductId,
+                        WarehouseLocationId = inventory.WarehouseLocationId,
+                        QuantityChange = -item.Quantity,
+                        TransactionType = TransactionType.GoodsIssue,
+                        ReferenceId = goodsIssue.Id,
+                        CreatedByUserId = staffId,
+                        CreatedAt = DateTime.UtcNow
+                    });
+
                     goodsIssue.Items.Add(new GoodsIssueItem { GoodsIssueId = goodsIssue.Id, ProductId = item.ProductId, Quantity = item.Quantity });
                 }
 

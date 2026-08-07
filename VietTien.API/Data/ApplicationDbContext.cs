@@ -90,6 +90,9 @@ namespace VietTien.API.Data
         public DbSet<Vehicle> Vehicles => Set<Vehicle>();
         public DbSet<DiscountTier> DiscountTiers => Set<DiscountTier>();
 
+        // Đánh giá sản phẩm (khách hàng)
+        public DbSet<ProductReview> ProductReviews => Set<ProductReview>();
+
         public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             // AuditLog là bảng chỉ-ghi (insert-only): chặn mọi hành vi Update/Delete ở tầng DbContext
@@ -420,6 +423,37 @@ namespace VietTien.API.Data
                 .WithMany(p => p.OrderItems)
                 .HasForeignKey(oi => oi.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // --- PHÂN HỆ ĐÁNH GIÁ SẢN PHẨM ---
+            modelBuilder.Entity<ProductReview>()
+                .HasOne(r => r.Product)
+                .WithMany(p => p.Reviews)
+                .HasForeignKey(r => r.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ProductReview>()
+                .HasOne(r => r.CustomerProfile)
+                .WithMany()
+                .HasForeignKey(r => r.CustomerProfileId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ProductReview>()
+                .HasOne(r => r.Order)
+                .WithMany()
+                .HasForeignKey(r => r.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Sales phụ trách/Admin trả lời công khai — 1 phản hồi/đánh giá
+            modelBuilder.Entity<ProductReview>()
+                .HasOne(r => r.RepliedByUser)
+                .WithMany()
+                .HasForeignKey(r => r.RepliedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Mỗi khách chỉ đánh giá 1 lần cho 1 sản phẩm (mua lại vẫn sửa qua PUT, không tạo review mới)
+            modelBuilder.Entity<ProductReview>()
+                .HasIndex(r => new { r.CustomerProfileId, r.ProductId })
+                .IsUnique();
 
             // Quan hệ 1 - n giữa Order và Nhật ký giao dịch SePay (PaymentTransaction)
             modelBuilder.Entity<PaymentTransaction>()
@@ -877,12 +911,23 @@ namespace VietTien.API.Data
             var ceoUser = new User { Id = Guid.Parse("22222222-2222-2222-2222-222222222222"), FullName = "CEO Test", Email = "ceo.test@viettien.com", PhoneNumber = "0999000002", PasswordHash = defaultPasswordHash, Role = SystemRole.CEO, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
             var smUser = new User { Id = Guid.Parse("33333333-3333-3333-3333-333333333333"), FullName = "Sales Manager Test", Email = "salesmanager.test@viettien.com", PhoneNumber = "0999000003", PasswordHash = defaultPasswordHash, Role = SystemRole.SalesManager, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
             var ssUser = new User { Id = Guid.Parse("44444444-4444-4444-4444-444444444444"), FullName = "Sales Staff Test", Email = "salesstaff.test@viettien.com", PhoneNumber = "0999000004", PasswordHash = defaultPasswordHash, Role = SystemRole.SalesStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
-            var wsUser = new User { Id = Guid.Parse("55555555-5555-5555-5555-555555555555"), FullName = "Warehouse Staff Test", Email = "warehousestaff.test@viettien.com", PhoneNumber = "0999000005", PasswordHash = defaultPasswordHash, Role = SystemRole.WarehouseStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            // AssignedWarehouseId = WH-DEFAULT: bắt buộc phải set, nếu không InventoryService/StockTransferService
+            // sẽ chặn luôn mọi thao tác kho của WarehouseStaff này (so sánh AssignedWarehouseId != warehouseId, null luôn lệch).
+            var wsUser = new User { Id = Guid.Parse("55555555-5555-5555-5555-555555555555"), FullName = "Warehouse Staff Test", Email = "warehousestaff.test@viettien.com", PhoneNumber = "0999000005", PasswordHash = defaultPasswordHash, Role = SystemRole.WarehouseStaff, AssignedWarehouseId = Guid.Parse("ee73f2cc-05fd-4b0e-8a48-61f89a2d345a"), IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
             var asUser = new User { Id = Guid.Parse("66666666-6666-6666-6666-666666666666"), FullName = "Accounting Staff Test", Email = "accountingstaff.test@viettien.com", PhoneNumber = "0999000006", PasswordHash = defaultPasswordHash, Role = SystemRole.AccountingStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
             var customerUser = new User { Id = Guid.Parse("77777777-7777-7777-7777-777777777777"), FullName = "Customer Test", Email = "customer.test@viettien.com", PhoneNumber = "0999000007", PasswordHash = defaultPasswordHash, Role = SystemRole.Customer, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
 
+            // Thêm Sales Staff #2/#3 để Round-robin (WF-01) có nhiều hơn 1 lượt xoay vòng thật sự
+            var ss2User = new User { Id = Guid.Parse("44444444-4444-4444-4444-444444444402"), FullName = "Sales Staff Test 2", Email = "salesstaff2.test@viettien.com", PhoneNumber = "0999000104", PasswordHash = defaultPasswordHash, Role = SystemRole.SalesStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var ss3User = new User { Id = Guid.Parse("44444444-4444-4444-4444-444444444403"), FullName = "Sales Staff Test 3", Email = "salesstaff3.test@viettien.com", PhoneNumber = "0999000204", PasswordHash = defaultPasswordHash, Role = SystemRole.SalesStaff, IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+
+            // Warehouse Staff #2/#3: mỗi kho vệ tinh mới (WH-TRADE/WH-PE) có 1 người phụ trách riêng
+            var ws2User = new User { Id = Guid.Parse("55555555-5555-5555-5555-555555555502"), FullName = "Warehouse Staff Test 2", Email = "warehousestaff2.test@viettien.com", PhoneNumber = "0999000105", PasswordHash = defaultPasswordHash, Role = SystemRole.WarehouseStaff, AssignedWarehouseId = Guid.Parse("f0000003-0003-4003-a003-000000000001"), IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+            var ws3User = new User { Id = Guid.Parse("55555555-5555-5555-5555-555555555503"), FullName = "Warehouse Staff Test 3", Email = "warehousestaff3.test@viettien.com", PhoneNumber = "0999000205", PasswordHash = defaultPasswordHash, Role = SystemRole.WarehouseStaff, AssignedWarehouseId = Guid.Parse("f0000004-0004-4004-a004-000000000001"), IsEmailVerified = true, IsPhoneVerified = true, CreatedAt = baseDate };
+
             modelBuilder.Entity<User>().HasData(
-                adminUser, ceoUser, smUser, ssUser, wsUser, asUser, customerUser
+                adminUser, ceoUser, smUser, ssUser, wsUser, asUser, customerUser,
+                ss2User, ss3User, ws2User, ws3User
             );
 
             var customerProfile = new CustomerProfile
@@ -910,6 +955,23 @@ namespace VietTien.API.Data
                 Name = "Vị trí mặc định",
                 Type = "Normal"
             });
+
+            // Seed Data: 2 kho vệ tinh theo đúng cấu trúc 3 kho ở business.md §1.4 (WH-TRADE, WH-PE).
+            // WH-DEFAULT giữ nguyên vai trò WH-PROD (kho SX + điểm tập kết trung tâm) vì OrderService.cs
+            // đang hard-code chuỗi "WH-DEFAULT" ở nhiều chỗ -> không được đổi code/tên của kho này.
+            var whTradeId = Guid.Parse("f0000003-0003-4003-a003-000000000001");
+            var whPeId = Guid.Parse("f0000004-0004-4004-a004-000000000001");
+            modelBuilder.Entity<Warehouse>().HasData(
+                new Warehouse { Id = whTradeId, Name = "Kho Thương Mại", Code = "WH-TRADE" },
+                new Warehouse { Id = whPeId, Name = "Kho Màng PE & Xốp", Code = "WH-PE" }
+            );
+
+            var whTradeLocId = Guid.Parse("f0000003-0003-4003-a003-000000000002");
+            var whPeLocId = Guid.Parse("f0000004-0004-4004-a004-000000000002");
+            modelBuilder.Entity<WarehouseLocation>().HasData(
+                new WarehouseLocation { Id = whTradeLocId, WarehouseId = whTradeId, Name = "Vị trí mặc định", Type = "Normal" },
+                new WarehouseLocation { Id = whPeLocId, WarehouseId = whPeId, Name = "Vị trí mặc định", Type = "Normal" }
+            );
 
             // Seed Data: WarehouseShifts
             modelBuilder.Entity<WarehouseShift>().HasData(
@@ -948,6 +1010,12 @@ namespace VietTien.API.Data
                 new Product { Id = pCartonId, CategoryId = catCartonId, Name = "Thùng Carton 3 Lớp Gửi GHTK 30x20x15cm", Sku = "BOX-3L-302015", StandardListedPrice = 3500m, Description = "Thùng carton đóng hàng 3 lớp sóng B cứng cáp, chịu lực tốt. Kích thước phù hợp gửi hàng qua đơn vị vận chuyển.", Specifications = "Kích Thước: 30x20x15 cm\nCấu Tạo: 3 lớp sóng B\nĐịnh Lượng: 120g", ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Thung+Carton", IsDiscontinued = false }
             );
 
+            // Sản phẩm riêng cho WH-TRADE: hàng nhập ngoài từ nhà cung cấp (business.md §1.4), chỉ tồn kho tại WH-TRADE
+            var pTapeLogoImportId = Guid.Parse("f0000007-0007-4007-a007-000000000001");
+            modelBuilder.Entity<Product>().HasData(
+                new Product { Id = pTapeLogoImportId, CategoryId = catTapeId, Name = "Băng Keo In Logo Nhập Khẩu 5F 100 Yard (Cây 6 Cuộn)", Sku = "TAPE-IMP-LOGO5F", StandardListedPrice = 95000m, Description = "Băng keo in logo theo yêu cầu, nhập khẩu từ nhà cung cấp đối tác, chất lượng cao cấp cho khách hàng doanh nghiệp.", Specifications = "Quy Cách: Cây 6 cuộn\nChiều Rộng: 5cm (5F)\nChiều Dài: 100 Yard\nNguồn Gốc: Nhập khẩu", ImageUrl = "https://placehold.co/600x600/f3f4f6/9ca3af?text=Tape+Import", IsDiscontinued = false }
+            );
+
             // --- STOCK TRANSACTION (LỊCH SỬ TỒN KHO) ---
             modelBuilder.Entity<StockTransaction>()
                 .HasOne(st => st.Inventory)
@@ -983,6 +1051,14 @@ namespace VietTien.API.Data
                 .HasForeignKey(st => st.CreatedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Seed Data: Materials (nguyên liệu thô cho WH-PE, phục vụ WF-17 xuất NVL cho sản xuất ngoài hệ thống)
+            var matPeResinId = Guid.Parse("f0000005-0005-4005-a005-000000000001");
+            var matPeFilmRawId = Guid.Parse("f0000005-0005-4005-a005-000000000002");
+            modelBuilder.Entity<Material>().HasData(
+                new Material { Id = matPeResinId, Name = "Hạt Nhựa PE Nguyên Sinh", Unit = "Kg", CurrentStock = 0, SafetyThreshold = 100 },
+                new Material { Id = matPeFilmRawId, Name = "Cuộn Màng PE Thô (Chưa Cắt)", Unit = "Cuộn", CurrentStock = 0, SafetyThreshold = 50 }
+            );
+
             // Seed Data: Inventories
             modelBuilder.Entity<Inventory>().HasData(
                 new Inventory { Id = Guid.Parse("b115bc37-ab72-40e4-b1fa-274d7b329efe"), ProductId = pPeWrapId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
@@ -990,7 +1066,20 @@ namespace VietTien.API.Data
                 new Inventory { Id = Guid.Parse("16eaf448-d4e7-4757-b60c-3a3348cbf10c"), ProductId = pTapeTrongId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 1000, QuarantineQuantity = 1000, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
                 new Inventory { Id = Guid.Parse("d934b287-a9e9-4d7c-86cf-4e82d97957f6"), ProductId = pCartonId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 5000, QuarantineQuantity = 5000, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
                 new Inventory { Id = Guid.Parse("c9e0fca9-3d26-402b-b6a4-58357e527d10"), ProductId = pCutToolId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 10000, ReservedQuantity = 200, QuarantineQuantity = 200, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
-                new Inventory { Id = Guid.Parse("9925c3cf-e4af-4a88-8840-961d4281f417"), ProductId = pTapeDucId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 9999, ReservedQuantity = 799, QuarantineQuantity = 749, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 }
+                new Inventory { Id = Guid.Parse("9925c3cf-e4af-4a88-8840-961d4281f417"), ProductId = pTapeDucId, WarehouseLocationId = defaultLocationId, OnHandQuantity = 9999, ReservedQuantity = 799, QuarantineQuantity = 749, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+
+                // WH-PE: đúng chuyên trách "Màng PE & Xốp" -> tồn thêm 2 sản phẩm màng/xốp đã có sẵn tại kho này
+                new Inventory { Id = Guid.Parse("f0000008-0008-4008-a008-000000000001"), ProductId = pPeWrapId, WarehouseLocationId = whPeLocId, OnHandQuantity = 8000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("f0000008-0008-4008-a008-000000000002"), ProductId = pBubbleId, WarehouseLocationId = whPeLocId, OnHandQuantity = 8000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                // WH-PE: nguyên liệu thô phục vụ WF-17 (xuất NVL cho sản xuất ngoài hệ thống)
+                new Inventory { Id = Guid.Parse("f0000008-0008-4008-a008-000000000003"), MaterialId = matPeResinId, WarehouseLocationId = whPeLocId, OnHandQuantity = 500, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("f0000008-0008-4008-a008-000000000004"), MaterialId = matPeFilmRawId, WarehouseLocationId = whPeLocId, OnHandQuantity = 300, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+
+                // WH-TRADE: hàng nhập ngoài từ nhà cung cấp -> vài SKU thương mại phổ biến + 1 SKU riêng chỉ có ở kho này
+                new Inventory { Id = Guid.Parse("f0000009-0009-4009-a009-000000000001"), ProductId = pTapeTrongId, WarehouseLocationId = whTradeLocId, OnHandQuantity = 5000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("f0000009-0009-4009-a009-000000000002"), ProductId = pCartonId, WarehouseLocationId = whTradeLocId, OnHandQuantity = 6000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("f0000009-0009-4009-a009-000000000003"), ProductId = pCutToolId, WarehouseLocationId = whTradeLocId, OnHandQuantity = 3000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 },
+                new Inventory { Id = Guid.Parse("f0000009-0009-4009-a009-000000000004"), ProductId = pTapeLogoImportId, WarehouseLocationId = whTradeLocId, OnHandQuantity = 2000, ReservedQuantity = 0, QuarantineQuantity = 0, AllocatedQuantity = 0, DamagedQuantity = 0, InTransitQuantity = 0 }
             );
 
             // =========================================================================

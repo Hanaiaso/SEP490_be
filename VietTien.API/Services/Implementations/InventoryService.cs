@@ -75,6 +75,7 @@ namespace VietTien.API.Services.Implementations
                     ItemName = i.Product != null ? i.Product.Name : i.Material != null ? i.Material.Name : "N/A",
                     ItemSku = i.Product != null ? i.Product.Sku : "",
                     ItemType = i.MaterialId != null ? "Material" : "Product",
+                    Unit = i.Product != null ? i.Product.Unit : i.Material != null ? i.Material.Unit : "",
                     OnHandQuantity = i.OnHandQuantity,
                     ReservedQuantity = i.ReservedQuantity,
                     AvailableQuantity = i.AvailableQuantity,
@@ -122,8 +123,19 @@ namespace VietTien.API.Services.Implementations
             inventory.LastUpdatedByUserId = staffId;
             inventory.LastUpdatedAt = DateTime.UtcNow;
 
-            // In a real system, you might want to log the `note` to an Audit table
-            // For now, we update the inventory directly per requirements
+            // GH-12/BR-044/BR-022: mọi điều chỉnh tồn phải để lại vết StockTransaction append-only.
+            _context.StockTransactions.Add(new StockTransaction
+            {
+                InventoryId = inventory.Id,
+                ProductId = inventory.ProductId,
+                MaterialId = inventory.MaterialId,
+                WarehouseLocationId = inventory.WarehouseLocationId,
+                QuantityChange = newQuantity - oldQuantity,
+                TransactionType = TransactionType.StockAdjustment,
+                Note = note,
+                CreatedByUserId = staffId,
+                CreatedAt = DateTime.UtcNow
+            });
 
             await _context.SaveChangesAsync();
 
@@ -263,5 +275,295 @@ namespace VietTien.API.Services.Implementations
         // unique index (Inventories) khỏi các lỗi DbUpdateException khác không nên bị nuốt thành 409.
         private static bool IsUniqueConstraintViolation(DbUpdateException ex)
             => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
+
+        public async Task<InventoryReportDto> GetInventoryReportAsync(Guid? warehouseId, DateTime? fromDate, DateTime? toDate)
+        {
+            var to = toDate ?? DateTime.UtcNow;
+            var from = fromDate ?? to.AddDays(-30);
+            if (from > to)
+                throw new ArgumentException("Khoảng thời gian không hợp lệ: 'fromDate' phải nhỏ hơn hoặc bằng 'toDate'.");
+
+            var inventoryQuery = _context.Inventories
+                .AsNoTracking()
+                .Include(i => i.Product).ThenInclude(p => p!.Category)
+                .Include(i => i.Material)
+                .Include(i => i.WarehouseLocation)
+                .AsQueryable();
+
+            if (warehouseId.HasValue)
+                inventoryQuery = inventoryQuery.Where(i => i.WarehouseLocation.WarehouseId == warehouseId.Value);
+
+            // AvailableQuantity/OnHandQuantity*Price là tính toán ở C# (không dịch được sang SQL cho phần
+            // OnHandQuantity*StandardListedPrice do decimal*decimal? overload) -> nạp về memory rồi tổng hợp,
+            // theo đúng pattern đã dùng ở CeoDashboardService/LowStockAlertJob.
+            var inventories = await inventoryQuery.ToListAsync();
+
+            var totalSkus = inventories.Where(i => i.ProductId != null).Select(i => i.ProductId).Distinct().Count()
+                          + inventories.Where(i => i.MaterialId != null).Select(i => i.MaterialId).Distinct().Count();
+
+            var totalInventoryValue = inventories
+                .Where(i => i.ProductId != null && i.Product != null)
+                .Sum(i => i.OnHandQuantity * i.Product!.StandardListedPrice);
+
+            bool IsLow(Inventory i) =>
+                (i.ProductId != null && i.ReorderThreshold != null && i.AvailableQuantity < i.ReorderThreshold.Value) ||
+                (i.MaterialId != null && i.Material != null && i.AvailableQuantity <= i.Material.SafetyThreshold);
+
+            var lowStockItems = inventories.Where(IsLow).ToList();
+
+            var totalWarehouses = warehouseId.HasValue ? 1 : await _context.Warehouses.CountAsync();
+
+            var categoryBreakdown = inventories
+                .GroupBy(i => i.Product?.Category?.Name ?? (i.MaterialId != null ? "Nguyên vật liệu" : "Khác"))
+                .Select(g => new CategoryStockDto
+                {
+                    CategoryName = g.Key,
+                    ItemCount = g.Select(i => i.ProductId ?? i.MaterialId).Distinct().Count(),
+                    TotalOnHand = g.Sum(i => i.OnHandQuantity),
+                    TotalValue = g.Where(i => i.ProductId != null && i.Product != null).Sum(i => i.OnHandQuantity * i.Product!.StandardListedPrice)
+                })
+                .OrderByDescending(c => c.TotalValue)
+                .ToList();
+
+            var topLowStockItems = lowStockItems
+                .OrderBy(i => i.AvailableQuantity)
+                .Take(5)
+                .Select(i => new InventoryItemDto
+                {
+                    Id = i.Id,
+                    ProductId = i.ProductId,
+                    MaterialId = i.MaterialId,
+                    ItemName = i.Product != null ? i.Product.Name : i.Material != null ? i.Material.Name : "N/A",
+                    ItemSku = i.Product != null ? i.Product.Sku : "",
+                    ItemType = i.MaterialId != null ? "Material" : "Product",
+                    Unit = i.Product != null ? i.Product.Unit : i.Material != null ? i.Material.Unit : "",
+                    OnHandQuantity = i.OnHandQuantity,
+                    ReservedQuantity = i.ReservedQuantity,
+                    AvailableQuantity = i.AvailableQuantity,
+                    LastUpdatedByUserId = i.LastUpdatedByUserId,
+                    LastUpdatedAt = i.LastUpdatedAt
+                })
+                .ToList();
+
+            var txQuery = _context.StockTransactions
+                .AsNoTracking()
+                .Where(t => t.CreatedAt >= from && t.CreatedAt <= to);
+
+            if (warehouseId.HasValue)
+                txQuery = txQuery.Where(t => t.WarehouseLocation.WarehouseId == warehouseId.Value);
+
+            var transactionsByDay = await txQuery
+                .GroupBy(t => t.CreatedAt.Date)
+                .Select(g => new
+                {
+                    Date = g.Key,
+                    TotalIn = g.Where(t => t.QuantityChange > 0).Sum(t => t.QuantityChange),
+                    TotalOut = g.Where(t => t.QuantityChange < 0).Sum(t => -t.QuantityChange)
+                })
+                .ToDictionaryAsync(x => x.Date, x => x);
+
+            var stockMovement = new List<StockMovementPointDto>();
+            for (var day = from.Date; day <= to.Date; day = day.AddDays(1))
+            {
+                transactionsByDay.TryGetValue(day, out var point);
+                stockMovement.Add(new StockMovementPointDto
+                {
+                    Date = day,
+                    TotalIn = point?.TotalIn ?? 0,
+                    TotalOut = point?.TotalOut ?? 0
+                });
+            }
+
+            return new InventoryReportDto
+            {
+                TotalSkus = totalSkus,
+                TotalInventoryValue = totalInventoryValue,
+                TotalWarehouses = totalWarehouses,
+                LowStockCount = lowStockItems.Count,
+                CategoryBreakdown = categoryBreakdown,
+                StockMovement = stockMovement,
+                TopLowStockItems = topLowStockItems
+            };
+        }
+
+        public async Task<List<SlowMovingItemDto>> GetSlowMovingItemsAsync(Guid? warehouseId, int days)
+        {
+            if (days <= 0)
+                throw new ArgumentException("Số ngày phải lớn hơn 0.");
+
+            var cutoff = DateTime.UtcNow.AddDays(-days);
+
+            // Chỉ xét các mã còn tồn kho vật lý > 0 -> hết hàng không phải "chậm luân chuyển", đó là hết hàng.
+            var inventoryQuery = _context.Inventories
+                .AsNoTracking()
+                .Include(i => i.Product)
+                .Include(i => i.Material)
+                .Include(i => i.WarehouseLocation)
+                .Where(i => i.OnHandQuantity > 0);
+
+            if (warehouseId.HasValue)
+                inventoryQuery = inventoryQuery.Where(i => i.WarehouseLocation.WarehouseId == warehouseId.Value);
+
+            var inventories = await inventoryQuery.ToListAsync();
+            var inventoryIds = inventories.Select(i => i.Id).ToList();
+
+            // "Xuất kho" = StockTransaction loại GoodsIssue làm giảm tồn (QuantityChange < 0); không tính
+            // GoodsIssue dương (phiếu Reversal hoàn tồn) vì đó là nhập lại, không phải hàng rời kho.
+            var lastOutboundMap = await _context.StockTransactions
+                .AsNoTracking()
+                .Where(t => t.TransactionType == TransactionType.GoodsIssue && t.QuantityChange < 0 && inventoryIds.Contains(t.InventoryId))
+                .GroupBy(t => t.InventoryId)
+                .Select(g => new { InventoryId = g.Key, LastOutboundAt = g.Max(t => t.CreatedAt) })
+                .ToDictionaryAsync(x => x.InventoryId, x => x.LastOutboundAt);
+
+            var now = DateTime.UtcNow;
+            var result = new List<SlowMovingItemDto>();
+
+            foreach (var inv in inventories)
+            {
+                var hasLast = lastOutboundMap.TryGetValue(inv.Id, out var lastOutboundAt);
+                if (hasLast && lastOutboundAt >= cutoff) continue; // vừa xuất gần đây -> không phải hàng chậm luân chuyển
+
+                var isMaterial = inv.MaterialId != null;
+                int? daysSince = hasLast ? (int)Math.Floor((now - lastOutboundAt).TotalDays) : null;
+
+                result.Add(new SlowMovingItemDto
+                {
+                    Id = inv.Id,
+                    ProductId = inv.ProductId,
+                    MaterialId = inv.MaterialId,
+                    ItemType = isMaterial ? "Material" : "Product",
+                    Sku = inv.Product?.Sku ?? string.Empty,
+                    ItemName = inv.Product?.Name ?? inv.Material?.Name ?? "N/A",
+                    Unit = inv.Product?.Unit ?? inv.Material?.Unit ?? string.Empty,
+                    OnHandQuantity = inv.OnHandQuantity,
+                    LastOutboundAt = hasLast ? lastOutboundAt : null,
+                    DaysSinceLastOutbound = daysSince,
+                    Suggestion = BuildSlowMovingSuggestion(isMaterial, daysSince)
+                });
+            }
+
+            return result.OrderByDescending(r => r.DaysSinceLastOutbound ?? int.MaxValue).ToList();
+        }
+
+        private static string BuildSlowMovingSuggestion(bool isMaterial, int? daysSinceLastOutbound)
+        {
+            var d = daysSinceLastOutbound ?? int.MaxValue;
+
+            if (isMaterial)
+            {
+                if (d >= 60) return "Chuyển dùng cho đơn hàng khác";
+                if (d >= 30) return "Xuất sử dụng nội bộ";
+                if (d >= 14) return "Kiểm tra nhu cầu sản xuất";
+                return "Theo dõi thêm";
+            }
+
+            if (d >= 60) return "Cân nhắc thanh lý hoặc tái chế";
+            if (d >= 30) return "Báo Marketing xây dựng chiến dịch";
+            if (d >= 14) return "Giảm giá khuyến mãi";
+            return "Theo dõi thêm";
+        }
+
+        public async Task<ShiftInventoryCountResultDto> SubmitShiftInventoryCountAsync(ShiftInventoryCountRequestDto request, Guid staffId)
+        {
+            if (request.Items == null || request.Items.Count == 0)
+                throw new ArgumentException("Danh sách kiểm kê không được để trống.");
+
+            if (request.Items.Select(i => i.InventoryId).Distinct().Count() != request.Items.Count)
+                throw new ArgumentException("Danh sách kiểm kê có mã tồn kho bị trùng lặp.");
+
+            // Cho phép trễ 1 ngày để bù lệch múi giờ giữa client/server, không cho kiểm kê cho ngày ở tương lai.
+            if (request.CountDate.Date > DateTime.UtcNow.AddDays(1).Date)
+                throw new ArgumentException("Ngày kiểm kê không được ở tương lai.");
+
+            var warehouseExists = await _context.Warehouses.AnyAsync(w => w.Id == request.WarehouseId);
+            if (!warehouseExists)
+                throw new KeyNotFoundException("Không tìm thấy kho đã chọn.");
+
+            var staff = await _context.Users.FindAsync(staffId);
+
+            var shiftLabel = "ca không xác định";
+            if (request.ShiftId.HasValue)
+            {
+                var shift = await _context.WarehouseShifts.FindAsync(request.ShiftId.Value);
+                if (shift != null)
+                    shiftLabel = $"{shift.Name} ({shift.StartTime:hh\\:mm}-{shift.EndTime:hh\\:mm})";
+            }
+
+            var inventoryIds = request.Items.Select(i => i.InventoryId).ToList();
+            var inventories = await _context.Inventories
+                .Include(i => i.Product)
+                .Include(i => i.Material)
+                .Include(i => i.WarehouseLocation)
+                .Where(i => inventoryIds.Contains(i.Id))
+                .ToListAsync();
+
+            var result = new ShiftInventoryCountResultDto { TotalCounted = request.Items.Count };
+
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                foreach (var itemReq in request.Items)
+                {
+                    var inv = inventories.FirstOrDefault(i => i.Id == itemReq.InventoryId);
+                    if (inv == null) continue; // dòng không tồn tại -> bỏ qua, không chặn cả phiên kiểm kê
+
+                    if (inv.WarehouseLocation.WarehouseId != request.WarehouseId)
+                        continue; // an toàn: bỏ qua dòng không thuộc kho đã chọn trong request
+
+                    if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
+                        staff.AssignedWarehouseId != inv.WarehouseLocation.WarehouseId)
+                    {
+                        throw new UnauthorizedAccessException("Bạn không có quyền kiểm kê tồn kho của kho này.");
+                    }
+
+                    var diff = itemReq.ActualQuantity - inv.OnHandQuantity;
+                    if (diff == 0) continue; // khớp tồn hệ thống -> không cần ghi nhận điều chỉnh
+
+                    var oldQuantity = inv.OnHandQuantity;
+                    inv.OnHandQuantity = itemReq.ActualQuantity;
+                    inv.LastUpdatedByUserId = staffId;
+                    inv.LastUpdatedAt = DateTime.UtcNow;
+
+                    var noteText = $"Kiểm kê {shiftLabel} ngày {request.CountDate:dd/MM/yyyy}";
+                    if (!string.IsNullOrWhiteSpace(itemReq.Note))
+                        noteText += $": {itemReq.Note.Trim()}";
+                    if (noteText.Length > 500)
+                        noteText = noteText.Substring(0, 500); // giới hạn theo cột Note (nvarchar(500))
+
+                    _context.StockTransactions.Add(new StockTransaction
+                    {
+                        InventoryId = inv.Id,
+                        ProductId = inv.ProductId,
+                        MaterialId = inv.MaterialId,
+                        WarehouseLocationId = inv.WarehouseLocationId,
+                        QuantityChange = diff,
+                        TransactionType = TransactionType.StockAdjustment,
+                        CreatedByUserId = staffId,
+                        CreatedAt = DateTime.UtcNow,
+                        Note = noteText
+                    });
+
+                    result.AdjustedItems.Add(new ShiftAdjustedItemDto
+                    {
+                        InventoryId = inv.Id,
+                        ItemName = inv.Product?.Name ?? inv.Material?.Name ?? "N/A",
+                        OldQuantity = oldQuantity,
+                        NewQuantity = itemReq.ActualQuantity
+                    });
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+
+            result.AdjustedCount = result.AdjustedItems.Count;
+            return result;
+        }
     }
 }
