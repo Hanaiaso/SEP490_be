@@ -38,11 +38,9 @@ namespace VietTien.API.Migrations
                 maxLength: 500,
                 nullable: true);
 
-            migrationBuilder.AddColumn<string>(
-                name: "PickupAddress",
-                table: "ReturnExchangeRequests",
-                type: "nvarchar(max)",
-                nullable: true);
+            // PickupAddress: cot nay da nam trong CreateTable cua migration
+            // 20260807191339_CreateReturnExchangeRequestTables (bang ReturnExchangeRequests
+            // truoc do bi thieu hoan toan tren production DB), nen khong AddColumn lai o day nua.
 
             migrationBuilder.AddColumn<double>(
                 name: "AverageRating",
@@ -363,9 +361,8 @@ namespace VietTien.API.Migrations
                 name: "Note",
                 table: "StockTransactions");
 
-            migrationBuilder.DropColumn(
-                name: "PickupAddress",
-                table: "ReturnExchangeRequests");
+            // PickupAddress: xem ghi chu trong Up() - cot nay thuoc CreateTable cua migration
+            // 20260807191339_CreateReturnExchangeRequestTables, khong DropColumn o day.
 
             migrationBuilder.DropColumn(
                 name: "AverageRating",
