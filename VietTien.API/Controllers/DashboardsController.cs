@@ -15,15 +15,18 @@ namespace VietTien.API.Controllers
         private readonly ISalesStaffDashboardService _salesStaffDashboardService;
         private readonly ISalesManagerDashboardService _salesManagerDashboardService;
         private readonly ICeoDashboardService _ceoDashboardService;
+        private readonly IWarehouseDashboardService _warehouseDashboardService;
 
         public DashboardsController(
             ISalesStaffDashboardService salesStaffDashboardService,
             ISalesManagerDashboardService salesManagerDashboardService,
-            ICeoDashboardService ceoDashboardService)
+            ICeoDashboardService ceoDashboardService,
+            IWarehouseDashboardService warehouseDashboardService)
         {
             _salesStaffDashboardService = salesStaffDashboardService;
             _salesManagerDashboardService = salesManagerDashboardService;
             _ceoDashboardService = ceoDashboardService;
+            _warehouseDashboardService = warehouseDashboardService;
         }
 
         private Guid GetUserId()
@@ -91,6 +94,14 @@ namespace VietTien.API.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
+        }
+
+        [HttpGet("warehouse-staff")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> GetWarehouseDashboard()
+        {
+            var result = await _warehouseDashboardService.GetDashboardAsync();
+            return Ok(result);
         }
     }
 }

@@ -93,6 +93,7 @@ builder.Services.AddScoped<IKpiService, KpiService>();
 builder.Services.AddScoped<ISalesStaffDashboardService, SalesStaffDashboardService>();
 builder.Services.AddScoped<ISalesManagerDashboardService, SalesManagerDashboardService>();
 builder.Services.AddScoped<ICeoDashboardService, CeoDashboardService>();
+builder.Services.AddScoped<IWarehouseDashboardService, WarehouseDashboardService>();
 
 // Admin module: Master Data (Vehicle, DiscountTier)
 builder.Services.AddScoped<IVehicleService, VehicleService>();
