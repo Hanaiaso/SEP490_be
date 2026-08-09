@@ -991,24 +991,18 @@ namespace VietTien.API.Services.Implementations
             {
                 try
                 {
-                    var base64Data = pdfBase64;
-                    if (base64Data.Contains(","))
-                    {
-                        base64Data = base64Data.Split(',')[1];
-                    }
+                    // Luu tren Cloudinary thay vi dia phuong: Azure App Service (Linux container) khong
+                    // dam bao Directory.GetCurrentDirectory() trung voi WebRootPath ma UseStaticFiles() dang
+                    // serve, va file ghi vao dia mat khi container restart/redeploy -> URL /invoices/xxx.pdf
+                    // tra 404 du ghi file "thanh cong" khong loi. Dung chung ha tang upload voi cac loai
+                    // file khac trong he thong (chu ky, anh bang chung...).
+                    var pdfUrl = await _cloudinaryService.UploadBase64ImageAsync(
+                        pdfBase64,
+                        "invoices",
+                        order.OrderCode
+                    );
 
-                    var wwwrootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-                    var invoicesPath = Path.Combine(wwwrootPath, "invoices");
-                    if (!Directory.Exists(invoicesPath))
-                    {
-                        Directory.CreateDirectory(invoicesPath);
-                    }
-
-                    var filePath = Path.Combine(invoicesPath, $"{order.OrderCode}.pdf");
-                    var fileBytes = Convert.FromBase64String(base64Data);
-                    await File.WriteAllBytesAsync(filePath, fileBytes);
-
-                    order.InvoicePdfUrl = $"/invoices/{order.OrderCode}.pdf";
+                    order.InvoicePdfUrl = pdfUrl;
                     await _unitOfWork.Orders.UpdateOrderAsync(order);
                     await _unitOfWork.SaveChangesAsync();
 
