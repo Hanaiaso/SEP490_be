@@ -146,10 +146,11 @@ namespace VietTien.Tests.Controllers
         private readonly Mock<ISalesManagerDashboardService> _manager = new();
         private readonly Mock<ICeoDashboardService> _ceo = new();
         private readonly Mock<IWarehouseDashboardService> _warehouse = new();
+        private readonly Mock<IAdminDashboardService> _admin = new();
         private readonly Guid _userId = Guid.NewGuid();
 
         private DashboardsController Build(string role)
-            => new DashboardsController(_staff.Object, _manager.Object, _ceo.Object, _warehouse.Object).WithUser(_userId, role);
+            => new DashboardsController(_staff.Object, _manager.Object, _ceo.Object, _warehouse.Object, _admin.Object).WithUser(_userId, role);
 
         [Fact]
         public async Task GetSalesStaffDashboard_WhenNoRange_DefaultsToLast30Days()

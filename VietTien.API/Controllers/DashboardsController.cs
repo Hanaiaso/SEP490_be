@@ -16,17 +16,20 @@ namespace VietTien.API.Controllers
         private readonly ISalesManagerDashboardService _salesManagerDashboardService;
         private readonly ICeoDashboardService _ceoDashboardService;
         private readonly IWarehouseDashboardService _warehouseDashboardService;
+        private readonly IAdminDashboardService _adminDashboardService;
 
         public DashboardsController(
             ISalesStaffDashboardService salesStaffDashboardService,
             ISalesManagerDashboardService salesManagerDashboardService,
             ICeoDashboardService ceoDashboardService,
-            IWarehouseDashboardService warehouseDashboardService)
+            IWarehouseDashboardService warehouseDashboardService,
+            IAdminDashboardService adminDashboardService)
         {
             _salesStaffDashboardService = salesStaffDashboardService;
             _salesManagerDashboardService = salesManagerDashboardService;
             _ceoDashboardService = ceoDashboardService;
             _warehouseDashboardService = warehouseDashboardService;
+            _adminDashboardService = adminDashboardService;
         }
 
         private Guid GetUserId()
@@ -102,6 +105,22 @@ namespace VietTien.API.Controllers
         {
             var result = await _warehouseDashboardService.GetDashboardAsync();
             return Ok(result);
+        }
+
+        [HttpGet("admin")]
+        [Authorize(Roles = "Admin")]
+        public async Task<IActionResult> GetAdminDashboard([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+        {
+            try
+            {
+                var (f, t) = ResolveRange(from, to);
+                var result = await _adminDashboardService.GetDashboardAsync(f, t);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
         }
     }
 }

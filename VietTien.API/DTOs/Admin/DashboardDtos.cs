@@ -111,4 +111,52 @@ namespace VietTien.API.DTOs.Admin
         public int TotalDamagedQuantity { get; set; }
         public int TotalWrongItemQuantity { get; set; }
     }
+
+    // ─── Admin (tổng quan hệ thống) ────────────────────────────────────────────
+
+    public class AdminDashboardDto
+    {
+        public DateTime PeriodFrom { get; set; }
+        public DateTime PeriodTo { get; set; }
+
+        public decimal Revenue { get; set; }
+        public decimal PreviousPeriodRevenue { get; set; }
+
+        // Đếm theo trạng thái hiện tại (live queue), không phụ thuộc kỳ chọn
+        public int ReceivedOrderCount { get; set; } // OrderStatus.Confirmed hoặc Processing
+        public int ShippingOrderCount { get; set; } // DeliveryStatus.InDelivery
+
+        // Đếm trong kỳ đã chọn
+        public int DeliveredOrderCount { get; set; }
+        public int CancelledOrderCount { get; set; }
+        public int PreviousPeriodCancelledOrderCount { get; set; }
+
+        public int PendingQuotationApprovalCount { get; set; } // Quotation đang chờ Manager/CEO duyệt
+        public int StaleOrderCount { get; set; } // Đơn đã nhận nhưng quá hạn xử lý (>48h)
+        public int LowStockAlertCount { get; set; }
+
+        public List<AdminLowStockItemDto> LowStockItems { get; set; } = new();
+        public List<AdminTopProductDto> TopProducts { get; set; } = new();
+        public List<AdminTopCustomerDto> TopCustomers { get; set; } = new();
+    }
+
+    public class AdminLowStockItemDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public int AvailableQuantity { get; set; }
+        public string Unit { get; set; } = string.Empty;
+        public bool Urgent { get; set; }
+    }
+
+    public class AdminTopProductDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public int OrderCount { get; set; }
+    }
+
+    public class AdminTopCustomerDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public decimal TotalSpent { get; set; }
+    }
 }
