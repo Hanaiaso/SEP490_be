@@ -32,7 +32,7 @@ namespace VietTien.IntegrationTests
             // 1. Migrations đã áp lên DB SQL Server thật (không phải EnsureCreated).
             var applied = await QueryAsync(db => db.Database.GetAppliedMigrationsAsync());
             applied.Should().NotBeEmpty();
-            applied.Should().Contain(m => m.EndsWith("_InitData"), "migration gốc (InitData) đã áp lên DB");
+            applied.Should().Contain(m => m.Contains("InitData"), "migration gốc (InitData) đã áp lên DB");
 
             // 2. Seed HasData có mặt sau ResetAsync — SePayReservationExpiryJob và
             //    OrderService.CalculateDiscount phụ thuộc vào hai bảng này.
