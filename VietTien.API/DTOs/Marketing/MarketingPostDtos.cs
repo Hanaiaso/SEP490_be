@@ -18,9 +18,8 @@ namespace VietTien.API.DTOs.Marketing
         [Required]
         public Guid ProductId { get; set; }
 
-        [Required(ErrorMessage = "Prompt là bắt buộc.")]
         [MaxLength(2000, ErrorMessage = "Prompt không được vượt quá 2000 ký tự.")]
-        public string Prompt { get; set; } = string.Empty;
+        public string? Prompt { get; set; } = string.Empty;
 
         [MaxLength(100)]
         public string? TemplateName { get; set; } // "Khuyến mãi", "Bán hàng B2B", "Ra mắt sản phẩm"
@@ -30,6 +29,11 @@ namespace VietTien.API.DTOs.Marketing
 
         [MaxLength(500)]
         public string? Goal { get; set; }
+    }
+
+    public class GenerateImageRequestDto
+    {
+        public string? Prompt { get; set; }
     }
 
     public class GenerateAiContentResponseDto

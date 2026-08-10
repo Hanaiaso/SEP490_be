@@ -42,6 +42,28 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPost("generate-image")]
+        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        public IActionResult GenerateImage([FromBody] GenerateImageRequestDto request)
+        {
+            try
+            {
+                var rawPrompt = request?.Prompt ?? "";
+                var englishDesc = VietTien.API.Services.Implementations.AiGeneratorService.TranslateToEnglishPackaging(rawPrompt);
+
+                var enhancedPrompt = $"{englishDesc}, hyperrealistic commercial product photography, 8k resolution, soft studio lighting, sharp focus, clean white studio background, packaging supply product, no humans, no people, no face, no anime";
+                var encodedPrompt = System.Text.Encodings.Web.UrlEncoder.Default.Encode(enhancedPrompt);
+                var seed = Random.Shared.Next(10000, 999999);
+                var imageUrl = $"https://image.pollinations.ai/prompt/{encodedPrompt}?width=1024&height=1024&nologo=true&seed={seed}";
+
+                return Ok(new { imageUrl });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpGet]
         [Authorize]
         public async Task<IActionResult> GetPosts([FromQuery] string? status, [FromQuery] Guid? productId)
