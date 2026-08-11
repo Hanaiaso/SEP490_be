@@ -7,35 +7,38 @@ namespace VietTien.API.Services.Implementations
     public class eSmsService : ISmsService
     {
         private readonly HttpClient _httpClient;
-        private readonly string _apiKey;
-        private readonly string _secretKey;
-        private readonly string _brandname;
+        private readonly ISystemConfigService _systemConfigService;
+        private readonly string _fallbackApiKey;
+        private readonly string _fallbackSecretKey;
 
-        public eSmsService(HttpClient httpClient, IConfiguration configuration)
+        public eSmsService(HttpClient httpClient, IConfiguration configuration, ISystemConfigService systemConfigService)
         {
             _httpClient = httpClient;
-            _apiKey = configuration["eSMS:ApiKey"] ?? string.Empty;
-            _secretKey = configuration["eSMS:SecretKey"] ?? string.Empty;
-            _brandname = configuration["eSMS:Brandname"] ?? "Baotrimac"; // Default brandname or just use SmsType=2
+            _systemConfigService = systemConfigService;
+            _fallbackApiKey = configuration["eSMS:ApiKey"] ?? string.Empty;
+            _fallbackSecretKey = configuration["eSMS:SecretKey"] ?? string.Empty;
         }
 
         public async Task<(bool Success, string ErrorMessage)> SendSmsAsync(string phoneNumber, string message)
         {
-            if (string.IsNullOrEmpty(_apiKey) || string.IsNullOrEmpty(_secretKey))
+            var apiKey = await _systemConfigService.GetEffectiveValueAsync("ESMS_API_KEY") ?? _fallbackApiKey;
+            var secretKey = await _systemConfigService.GetEffectiveValueAsync("ESMS_SECRET_KEY") ?? _fallbackSecretKey;
+
+            if (string.IsNullOrEmpty(apiKey) || string.IsNullOrEmpty(secretKey))
             {
                 // Mặc định trả về true nếu chưa cấu hình để không block luồng dev
                 Console.WriteLine($"[Mock SMS to {phoneNumber}]: {message}");
-                return (true, string.Empty); 
+                return (true, string.Empty);
             }
 
             try
             {
                 var requestUrl = "https://rest.esms.vn/MainService.svc/json/SendMultipleMessage_V4_post_json/";
-                
+
                 var payload = new
                 {
-                    ApiKey = _apiKey,
-                    SecretKey = _secretKey,
+                    ApiKey = apiKey,
+                    SecretKey = secretKey,
                     Content = message,
                     Phone = phoneNumber,
                     Brandname = "Baotrixemay", // Hardcode for eSMS trial template

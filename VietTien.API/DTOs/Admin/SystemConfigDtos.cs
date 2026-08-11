@@ -10,6 +10,7 @@ namespace VietTien.API.DTOs.Admin
         public string? Unit { get; set; }
         public string OwnerLevel { get; set; } = string.Empty;
         public bool IsActive { get; set; }
+        public bool IsSecret { get; set; }
         public string? EffectiveValue { get; set; }
         public DateTime? EffectiveDate { get; set; }
         public int VersionCount { get; set; }

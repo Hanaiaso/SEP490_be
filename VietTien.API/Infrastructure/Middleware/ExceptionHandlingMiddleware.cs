@@ -68,6 +68,14 @@ namespace VietTien.API.Infrastructure.Middleware
                     // Giữ đúng hành vi hiện tại của CartController cho exception này.
                     return (StatusCodes.Status409Conflict, new { code = "PROFILE_INCOMPLETE", message = profileEx.Message });
 
+                case PhoneVerificationRequiredException phoneEx:
+                    // Giữ đúng hành vi hiện tại của OrderController cho exception này.
+                    return (StatusCodes.Status409Conflict, new { code = "PHONE_OTP_REQUIRED", message = phoneEx.Message });
+
+                case ScheduleConflictException conflictEx:
+                    // Giữ đúng hành vi hiện tại của DeliveryController cho exception này.
+                    return (StatusCodes.Status409Conflict, new { code = "SCHEDULE_CONFLICT", conflictId = conflictEx.ConflictId, message = conflictEx.Message });
+
                 case KeyNotFoundException notFoundEx:
                     return (StatusCodes.Status404NotFound, new { message = Redact(notFoundEx) });
 

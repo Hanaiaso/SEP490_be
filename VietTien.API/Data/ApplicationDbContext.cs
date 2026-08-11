@@ -62,6 +62,9 @@ namespace VietTien.API.Data
         public DbSet<QuarantineLog> QuarantineLogs => Set<QuarantineLog>();
         public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
 
+        // UC-34: Sales Manager xử lý xung đột lịch xe/ca khi lập lịch giao hàng
+        public DbSet<DeliveryScheduleConflict> DeliveryScheduleConflicts => Set<DeliveryScheduleConflict>();
+
         // Phân bổ khách hàng cho Sale (Round-robin)
         public DbSet<RoundRobinState> RoundRobinStates => Set<RoundRobinState>();
         public DbSet<RoundRobinParticipant> RoundRobinParticipants => Set<RoundRobinParticipant>();
@@ -873,6 +876,15 @@ namespace VietTien.API.Data
                 .HasConversion<string>()
                 .HasMaxLength(30);
 
+            modelBuilder.Entity<DeliveryScheduleConflict>(entity =>
+            {
+                entity.Property(c => c.Shift).HasMaxLength(20);
+                entity.Property(c => c.OrderIds).HasMaxLength(2000);
+                entity.Property(c => c.ResolutionAction).HasMaxLength(20);
+                entity.Property(c => c.Status).HasConversion<string>().HasMaxLength(20);
+                entity.HasIndex(c => c.Status);
+            });
+
             // =========================================================================
             // 3. CẤU HÌNH CÁC CHỈ MỤC ĐỘC NHẤT (UNIQUE INDEXES) & ĐỘ CHÍNH XÁC (PRECISION)
             // =========================================================================
@@ -1106,6 +1118,7 @@ namespace VietTien.API.Data
                 entity.Property(c => c.Key).HasMaxLength(100);
                 entity.Property(c => c.ValueType).HasConversion<string>().HasMaxLength(20);
                 entity.Property(c => c.OwnerLevel).HasMaxLength(50);
+                entity.Property(c => c.IsSecret).HasDefaultValue(false);
             });
 
             modelBuilder.Entity<SystemConfigVersion>(entity =>
@@ -1147,6 +1160,39 @@ namespace VietTien.API.Data
                     OwnerLevel = s.Owner,
                     Description = s.Description,
                     IsActive = true
+                }).ToArray()
+            );
+
+            // Đăng ký (registry only, KHÔNG seed version) các tham số Integrations cho Admin cấu hình
+            // runtime thay vì hardcode trong appsettings.json (UC-59). Không seed SystemConfigVersion ở
+            // đây để tránh chép secret vào file migration — chừng nào Admin chưa set giá trị mới qua UI,
+            // EffectiveValue = null và mọi service đọc config sẽ tự fallback về appsettings/IConfiguration
+            // như hiện tại (hành vi không đổi ngay sau migration).
+            var integrationConfigSeeds = new (string Key, SystemConfigValueType Type, string? Unit, string Owner, string Description, bool IsSecret)[]
+            {
+                ("SEPAY_API_TOKEN", SystemConfigValueType.String, null, "Admin", "API Token xác thực webhook SePay", true),
+                ("SEPAY_BANK_ACCOUNT", SystemConfigValueType.String, null, "Admin", "Số tài khoản ngân hàng nhận thanh toán SePay", false),
+                ("SEPAY_BANK_ID", SystemConfigValueType.String, null, "Admin", "Mã ngân hàng (bankId) dùng sinh QR SePay", false),
+                ("GOOGLE_OAUTH_CLIENT_ID", SystemConfigValueType.String, null, "Admin", "Google OAuth Client ID dùng xác thực đăng nhập Google", false),
+                ("ESMS_API_KEY", SystemConfigValueType.String, null, "Admin", "API Key dịch vụ SMS eSMS", true),
+                ("ESMS_SECRET_KEY", SystemConfigValueType.String, null, "Admin", "Secret Key dịch vụ SMS eSMS", true),
+                ("EMAIL_SMTP_HOST", SystemConfigValueType.String, null, "Admin", "SMTP host gửi email hệ thống", false),
+                ("EMAIL_SMTP_PORT", SystemConfigValueType.Int, null, "Admin", "SMTP port gửi email hệ thống", false),
+                ("EMAIL_SENDER_EMAIL", SystemConfigValueType.String, null, "Admin", "Địa chỉ email gửi đi", false),
+                ("EMAIL_SENDER_PASSWORD", SystemConfigValueType.String, null, "Admin", "Mật khẩu ứng dụng (App Password) của hộp thư gửi", true),
+                ("MAKE_WEBHOOK_URL", SystemConfigValueType.String, null, "Admin", "Webhook URL kịch bản Make.com đăng bài Facebook", false),
+            };
+
+            modelBuilder.Entity<SystemConfig>().HasData(
+                integrationConfigSeeds.Select(s => new SystemConfig
+                {
+                    Key = s.Key,
+                    ValueType = s.Type,
+                    Unit = s.Unit,
+                    OwnerLevel = s.Owner,
+                    Description = s.Description,
+                    IsActive = true,
+                    IsSecret = s.IsSecret
                 }).ToArray()
             );
 

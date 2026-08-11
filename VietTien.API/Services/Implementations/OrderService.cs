@@ -4,6 +4,7 @@ using VietTien.API.DTOs.Cart;
 using VietTien.API.DTOs.Delivery;
 using VietTien.API.DTOs.Order;
 using VietTien.API.DTOs.SePay;
+using VietTien.API.Exceptions;
 using VietTien.API.Models;
 using VietTien.API.Repositories.Interfaces;
 using VietTien.API.Services.Interfaces;
@@ -53,6 +54,16 @@ namespace VietTien.API.Services.Implementations
             if (profile == null)
                 throw new KeyNotFoundException("Customer Profile not found.");
             return profile;
+        }
+
+        // UC-13/BR-004: khách chưa từng có đơn hàng nào (đơn đầu tiên) VÀ số điện thoại chưa được
+        // xác thực OTP -> bắt buộc verify trước khi cho đặt hàng. Đa số khách sẽ vướng điều kiện này
+        // vì IsPhoneVerified mặc định false, chỉ true sau khi hoàn tất UC-09 (đổi SĐT) ít nhất 1 lần.
+        private async Task<bool> RequiresFirstOrderPhoneOtpAsync(CustomerProfile profile)
+        {
+            if (profile.User.IsPhoneVerified) return false;
+            var hasExistingOrder = await _context.Orders.AnyAsync(o => o.CustomerProfileId == profile.Id);
+            return !hasExistingOrder;
         }
 
         private static readonly HashSet<string> StaffRolesWithOrderAccess = new(StringComparer.OrdinalIgnoreCase)
@@ -134,10 +145,11 @@ namespace VietTien.API.Services.Implementations
             {
                 TotalAmount = baseTotal,
                 DiscountAmount = discountAmount,
-                DiscountPercentage = discountPercentage * 100, 
+                DiscountPercentage = discountPercentage * 100,
                 VatPercentage = vatPercentage * 100,
                 VatAmount = vatAmount,
                 FinalPayment = finalPayment,
+                RequiresPhoneOtp = await RequiresFirstOrderPhoneOtpAsync(profile),
                 Items = cart.Items
             };
         }
@@ -157,6 +169,11 @@ namespace VietTien.API.Services.Implementations
 
             if (cart == null || !cart.Items.Any() || cartEntity == null)
                 throw new Exception("Giỏ hàng trống.");
+
+            // UC-13/BR-004: chặn TRƯỚC khi giữ tồn (ReserveAsync) — không giữ tồn vô ích cho một đơn
+            // sẽ bị từ chối ngay vì thiếu xác thực OTP.
+            if (await RequiresFirstOrderPhoneOtpAsync(profile))
+                throw new PhoneVerificationRequiredException("Vui lòng xác thực số điện thoại qua OTP trước khi đặt đơn hàng đầu tiên.");
 
             Order order;
 
@@ -322,8 +339,8 @@ namespace VietTien.API.Services.Implementations
             if (order.PaymentStatus == PaymentStatus.Paid)
                 throw new InvalidOperationException("Đơn hàng đã thanh toán, không thể sinh mã QR mới.");
 
-            var bankAccount = _configuration["SePaySettings:BankAccount"];
-            var bankId = _configuration["SePaySettings:BankId"];
+            var bankAccount = await _systemConfigService.GetEffectiveValueAsync("SEPAY_BANK_ACCOUNT") ?? _configuration["SePaySettings:BankAccount"];
+            var bankId = await _systemConfigService.GetEffectiveValueAsync("SEPAY_BANK_ID") ?? _configuration["SePaySettings:BankId"];
             
             var qrUrl = $"https://qr.sepay.vn/img?acc={bankAccount}&bank={bankId}&amount={(int)order.FinalPayment}&des={order.OrderCode}";
 
@@ -337,7 +354,7 @@ namespace VietTien.API.Services.Implementations
         public async Task ProcessSePayWebhookAsync(SePayWebhookDto payload, string providedToken)
         {
             // GH-01/SEC-03: không bypass theo môi trường — token sai/thiếu luôn bị từ chối.
-            var apiToken = _configuration["SePaySettings:ApiToken"];
+            var apiToken = await _systemConfigService.GetEffectiveValueAsync("SEPAY_API_TOKEN") ?? _configuration["SePaySettings:ApiToken"];
             if (providedToken != apiToken)
                 throw new UnauthorizedAccessException("Token không hợp lệ.");
 
@@ -1962,16 +1979,6 @@ namespace VietTien.API.Services.Implementations
             if (!validShifts.Contains(dto.Shift))
                 throw new Exception("Ca giao hàng không hợp lệ. Chọn: Sáng / Trưa / Chiều.");
 
-            // Kiểm tra xung đột xe + ca
-            var conflictExists = await _context.Orders
-                .AnyAsync(o => o.DeliveryVehicleId == dto.VehicleId
-                            && o.DeliveryShift == dto.Shift
-                            && o.DeliveryStatus == DeliveryStatus.InDelivery
-                            && !dto.OrderIds.Contains(o.Id));
-
-            if (conflictExists)
-                throw new InvalidOperationException($"Xe {dto.VehicleId} đang trong ca {dto.Shift}. Không thể xếp thêm đơn.");
-
             // Kiểm tra ngày và ca giao hàng hết hạn (MGR-06 / BR-DL-02)
             var targetDate = dto.DeliveryDate ?? DateTime.UtcNow.Date;
             var localNow = DateTime.UtcNow.AddHours(7); // Giả định múi giờ GMT+7 Việt Nam
@@ -1997,6 +2004,52 @@ namespace VietTien.API.Services.Implementations
                 {
                     throw new InvalidOperationException("Đã quá 22:00 (10:00 PM), không thể thêm/sửa đơn hàng cho Ca chiều ngày hôm nay.");
                 }
+            }
+
+            // UC-34: kiểm tra xung đột xe + ca + NGÀY — tính cả chuyến đã Scheduled (chưa chạy) chứ
+            // không chỉ InDelivery như trước, đúng yêu cầu "tối đa 1 chuyến / xe / ngày / ca". Khi
+            // trùng, KHÔNG chặn cứng nữa mà tạo hàng đợi cho Sales Manager chủ động xử lý.
+            var conflictingOrderIds = await _context.Orders
+                .Where(o => o.DeliveryVehicleId == dto.VehicleId
+                         && o.DeliveryShift == dto.Shift
+                         && o.ScheduledDeliveryDate.HasValue && o.ScheduledDeliveryDate.Value.Date == targetDate.Date
+                         && (o.DeliveryStatus == DeliveryStatus.InDelivery || o.DeliveryStatus == DeliveryStatus.Scheduled)
+                         && !dto.OrderIds.Contains(o.Id))
+                .Select(o => o.Id)
+                .ToListAsync();
+
+            if (conflictingOrderIds.Any())
+            {
+                var conflict = new DeliveryScheduleConflict
+                {
+                    VehicleId = dto.VehicleId,
+                    Shift = dto.Shift,
+                    RequestedDate = targetDate.Date,
+                    OrderIds = string.Join(",", dto.OrderIds),
+                    RaisedByUserId = scheduledByUserId,
+                    Status = DeliveryConflictStatus.Pending
+                };
+                _context.DeliveryScheduleConflicts.Add(conflict);
+                await _context.SaveChangesAsync();
+
+                try
+                {
+                    await _notificationService.CreateRoleNotificationAsync(
+                        NotificationType.SYS_11_DeliveryScheduleConflict,
+                        SystemRole.SalesManager,
+                        "Xung đột lịch xe/ca",
+                        $"Xe {dto.VehicleId} ca {dto.Shift} ngày {targetDate:dd/MM/yyyy} đã có lịch trùng. Cần Sales Manager xử lý.",
+                        conflict.Id,
+                        "DeliveryScheduleConflict");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[OrderService] Error sending delivery conflict notification: {ex.Message}");
+                }
+
+                throw new ScheduleConflictException(
+                    $"Xe {dto.VehicleId} đang có lịch trùng ca {dto.Shift} ngày {targetDate:dd/MM/yyyy}. Đã gửi yêu cầu xử lý tới Sales Manager.",
+                    conflict.Id);
             }
 
             var orders = await _context.Orders
@@ -2047,6 +2100,119 @@ namespace VietTien.API.Services.Implementations
                 DeliveryDate = targetDate,
                 OrdersScheduled = scheduled,
                 Message = $"Đã lập lịch {scheduled} đơn hàng cho xe {dto.VehicleId} ca {dto.Shift} ngày {targetDate:dd/MM/yyyy}."
+            };
+        }
+
+        // =====================================================================
+        // UC-34: SALES MANAGER XỬ LÝ XUNG ĐỘT LỊCH XE/CA
+        // =====================================================================
+
+        public async Task<List<DeliveryScheduleConflictDto>> GetPendingDeliveryConflictsAsync()
+        {
+            var conflicts = await _context.DeliveryScheduleConflicts
+                .AsNoTracking()
+                .Where(c => c.Status == DeliveryConflictStatus.Pending)
+                .OrderBy(c => c.RaisedAt)
+                .ToListAsync();
+
+            var result = new List<DeliveryScheduleConflictDto>();
+            foreach (var c in conflicts)
+                result.Add(await BuildConflictDtoAsync(c));
+            return result;
+        }
+
+        public async Task<DeliveryScheduleConflictDto> ResolveDeliveryConflictAsync(Guid conflictId, Guid managerId, ResolveDeliveryConflictRequestDto dto)
+        {
+            var conflict = await _context.DeliveryScheduleConflicts.FirstOrDefaultAsync(c => c.Id == conflictId);
+            if (conflict == null) throw new KeyNotFoundException("Không tìm thấy xung đột lịch giao hàng.");
+            if (conflict.Status != DeliveryConflictStatus.Pending)
+                throw new InvalidOperationException("Xung đột này đã được xử lý trước đó.");
+
+            var orderIds = conflict.OrderIds.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
+
+            if (dto.Action == "Reassign" || dto.Action == "Override")
+            {
+                int vehicleId;
+                string shift;
+                DateTime date;
+
+                if (dto.Action == "Reassign")
+                {
+                    if (!dto.NewVehicleId.HasValue || string.IsNullOrWhiteSpace(dto.NewShift) || !dto.NewDate.HasValue)
+                        throw new Exception("Vui lòng chọn xe/ca/ngày mới khi chuyển lịch (Reassign).");
+
+                    vehicleId = dto.NewVehicleId.Value;
+                    shift = dto.NewShift;
+                    date = dto.NewDate.Value.Date;
+
+                    var stillConflicting = await _context.Orders.AnyAsync(o =>
+                        o.DeliveryVehicleId == vehicleId && o.DeliveryShift == shift &&
+                        o.ScheduledDeliveryDate.HasValue && o.ScheduledDeliveryDate.Value.Date == date &&
+                        (o.DeliveryStatus == DeliveryStatus.InDelivery || o.DeliveryStatus == DeliveryStatus.Scheduled) &&
+                        !orderIds.Contains(o.Id));
+                    if (stillConflicting)
+                        throw new InvalidOperationException("Lịch mới được chọn cũng đang trùng. Vui lòng chọn xe/ca/ngày khác.");
+                }
+                else // Override: Manager chấp nhận trùng lịch, áp lại đúng lịch gốc đã yêu cầu.
+                {
+                    vehicleId = conflict.VehicleId;
+                    shift = conflict.Shift;
+                    date = conflict.RequestedDate;
+                }
+
+                // Chỉ áp lại cho Order — StockTransfer (điều chuyển nội bộ) nằm trong cùng lô xung đột
+                // (nếu có) cần Sales/Warehouse tự lập lịch lại qua endpoint schedule sau khi xung đột
+                // được đóng, vì đây là trường hợp hiếm (trộn PO + Order cùng chuyến).
+                var orders = await _context.Orders.Where(o => orderIds.Contains(o.Id)).ToListAsync();
+                foreach (var order in orders)
+                {
+                    if (order.DeliveryStatus != DeliveryStatus.NotScheduled && order.DeliveryStatus != DeliveryStatus.Rescheduled)
+                        continue;
+
+                    order.DeliveryVehicleId = vehicleId;
+                    order.DeliveryShift = shift;
+                    order.ScheduledDeliveryDate = date;
+                    order.DeliveryStatus = DeliveryStatus.Scheduled;
+                }
+            }
+            // Reject: không đổi gì trên Order — Sales phải tự lập lịch lại từ đầu qua endpoint schedule.
+
+            conflict.Status = dto.Action == "Reject" ? DeliveryConflictStatus.Rejected : DeliveryConflictStatus.Resolved;
+            conflict.ResolvedByUserId = managerId;
+            conflict.ResolvedAt = DateTime.UtcNow;
+            conflict.ResolutionAction = dto.Action;
+            conflict.ResolutionNote = dto.Note;
+
+            await _context.SaveChangesAsync();
+
+            return await BuildConflictDtoAsync(conflict);
+        }
+
+        private async Task<DeliveryScheduleConflictDto> BuildConflictDtoAsync(DeliveryScheduleConflict c)
+        {
+            var orderIds = c.OrderIds.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList();
+            var orderCodes = await _context.Orders.Where(o => orderIds.Contains(o.Id)).Select(o => o.OrderCode).ToListAsync();
+
+            var userIds = new List<Guid> { c.RaisedByUserId };
+            if (c.ResolvedByUserId.HasValue) userIds.Add(c.ResolvedByUserId.Value);
+            var users = await _context.Users.Where(u => userIds.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+            return new DeliveryScheduleConflictDto
+            {
+                Id = c.Id,
+                VehicleId = c.VehicleId,
+                Shift = c.Shift,
+                RequestedDate = c.RequestedDate,
+                OrderCodes = orderCodes,
+                Status = c.Status.ToString(),
+                RaisedByUserId = c.RaisedByUserId,
+                RaisedByUserName = users.GetValueOrDefault(c.RaisedByUserId),
+                RaisedAt = c.RaisedAt,
+                ResolvedByUserId = c.ResolvedByUserId,
+                ResolvedByUserName = c.ResolvedByUserId.HasValue ? users.GetValueOrDefault(c.ResolvedByUserId.Value) : null,
+                ResolvedAt = c.ResolvedAt,
+                ResolutionAction = c.ResolutionAction,
+                ResolutionNote = c.ResolutionNote
             };
         }
 

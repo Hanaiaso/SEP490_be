@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Delivery;
+using VietTien.API.Exceptions;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Controllers
@@ -37,6 +38,53 @@ namespace VietTien.API.Controllers
                 var userId = GetUserId();
                 var result = await _orderService.ScheduleDeliveryAsync(userId, dto);
                 return Ok(result);
+            }
+            catch (ScheduleConflictException ex)
+            {
+                // 409: FE dựa vào code này để báo khách đã gửi yêu cầu tới Sales Manager thay vì lỗi chung
+                return Conflict(new { code = "SCHEDULE_CONFLICT", conflictId = ex.ConflictId, message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // ─── UC-34: SALES MANAGER XỬ LÝ XUNG ĐỘT LỊCH XE/CA ─────────────────
+        [HttpGet("conflicts")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<ActionResult<List<DeliveryScheduleConflictDto>>> GetPendingConflicts()
+        {
+            try
+            {
+                var result = await _orderService.GetPendingDeliveryConflictsAsync();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("conflicts/{id:guid}/resolve")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> ResolveConflict(Guid id, [FromBody] ResolveDeliveryConflictRequestDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            try
+            {
+                var managerId = GetUserId();
+                var result = await _orderService.ResolveDeliveryConflictAsync(id, managerId, dto);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {

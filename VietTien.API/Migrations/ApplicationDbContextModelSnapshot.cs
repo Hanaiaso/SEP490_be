@@ -517,6 +517,60 @@ namespace VietTien.API.Migrations
                         });
                 });
 
+            modelBuilder.Entity("VietTien.API.Models.DeliveryScheduleConflict", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasDefaultValueSql("NEWSEQUENTIALID()");
+
+                    b.Property<string>("OrderIds")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime>("RaisedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RaisedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RequestedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ResolutionAction")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Shift")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int>("VehicleId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("DeliveryScheduleConflicts");
+                });
+
             modelBuilder.Entity("VietTien.API.Models.DiscountTier", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2947,6 +3001,11 @@ namespace VietTien.API.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsSecret")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
+
                     b.Property<string>("OwnerLevel")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -2970,6 +3029,7 @@ namespace VietTien.API.Migrations
                             Key = "PRICE_LOCK_HOURS",
                             Description = "Thời gian khóa giá báo giá",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Giờ",
                             ValueType = "Int"
@@ -2979,6 +3039,7 @@ namespace VietTien.API.Migrations
                             Key = "SEPAY_RESERVATION_MINUTES",
                             Description = "Thời gian giữ tồn cho đơn SePay chờ thanh toán",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Phút",
                             ValueType = "Int"
@@ -2988,6 +3049,7 @@ namespace VietTien.API.Migrations
                             Key = "COD_RESERVATION_MINUTES",
                             Description = "Thời gian giữ tồn cho đơn COD chờ xác nhận",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Phút",
                             ValueType = "Int"
@@ -2997,6 +3059,7 @@ namespace VietTien.API.Migrations
                             Key = "COD_WARNING_MINUTES",
                             Description = "Mốc cảnh báo Sale trước khi hết hạn giữ tồn COD",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Phút",
                             ValueType = "Int"
@@ -3006,6 +3069,7 @@ namespace VietTien.API.Migrations
                             Key = "COD_ESCALATION_MINUTES",
                             Description = "Mốc leo thang cảnh báo Manager cho đơn COD",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Phút",
                             ValueType = "Int"
@@ -3015,6 +3079,7 @@ namespace VietTien.API.Migrations
                             Key = "OTP_EXPIRE_MINUTES",
                             Description = "Thời gian hết hạn mã OTP",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Phút",
                             ValueType = "Int"
@@ -3024,6 +3089,7 @@ namespace VietTien.API.Migrations
                             Key = "OTP_RESEND_SECONDS",
                             Description = "Thời gian tối thiểu giữa 2 lần gửi lại OTP",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Giây",
                             ValueType = "Int"
@@ -3033,6 +3099,7 @@ namespace VietTien.API.Migrations
                             Key = "OTP_MAX_ATTEMPTS",
                             Description = "Số lần gửi OTP tối đa trong 30 phút",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Lần",
                             ValueType = "Int"
@@ -3042,6 +3109,7 @@ namespace VietTien.API.Migrations
                             Key = "QUOTATION_MIN_VALUE",
                             Description = "Ngưỡng giá trị đơn bắt buộc chuyển sang luồng báo giá",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin/CEO",
                             Unit = "VND",
                             ValueType = "Decimal"
@@ -3051,6 +3119,7 @@ namespace VietTien.API.Migrations
                             Key = "LIST_PRICE_MAX_EXCLUSIVE",
                             Description = "Ngưỡng áp dụng giá niêm yết (dưới ngưỡng này)",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin/CEO",
                             Unit = "VND",
                             ValueType = "Decimal"
@@ -3060,6 +3129,7 @@ namespace VietTien.API.Migrations
                             Key = "MAX_SCHEDULED_MARKETING_POSTS",
                             Description = "Số bài viết marketing được lên lịch tối đa",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin",
                             Unit = "Bài viết",
                             ValueType = "Int"
@@ -3069,9 +3139,109 @@ namespace VietTien.API.Migrations
                             Key = "DELIVERY_FAILURE_MANAGER_THRESHOLD",
                             Description = "Số lần giao thất bại trước khi báo Manager",
                             IsActive = true,
+                            IsSecret = false,
                             OwnerLevel = "Admin/Manager",
                             Unit = "Lần thử giao",
                             ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "SEPAY_API_TOKEN",
+                            Description = "API Token xác thực webhook SePay",
+                            IsActive = true,
+                            IsSecret = true,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "SEPAY_BANK_ACCOUNT",
+                            Description = "Số tài khoản ngân hàng nhận thanh toán SePay",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "SEPAY_BANK_ID",
+                            Description = "Mã ngân hàng (bankId) dùng sinh QR SePay",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "GOOGLE_OAUTH_CLIENT_ID",
+                            Description = "Google OAuth Client ID dùng xác thực đăng nhập Google",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "ESMS_API_KEY",
+                            Description = "API Key dịch vụ SMS eSMS",
+                            IsActive = true,
+                            IsSecret = true,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "ESMS_SECRET_KEY",
+                            Description = "Secret Key dịch vụ SMS eSMS",
+                            IsActive = true,
+                            IsSecret = true,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "EMAIL_SMTP_HOST",
+                            Description = "SMTP host gửi email hệ thống",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "EMAIL_SMTP_PORT",
+                            Description = "SMTP port gửi email hệ thống",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "Int"
+                        },
+                        new
+                        {
+                            Key = "EMAIL_SENDER_EMAIL",
+                            Description = "Địa chỉ email gửi đi",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "EMAIL_SENDER_PASSWORD",
+                            Description = "Mật khẩu ứng dụng (App Password) của hộp thư gửi",
+                            IsActive = true,
+                            IsSecret = true,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
+                        },
+                        new
+                        {
+                            Key = "MAKE_WEBHOOK_URL",
+                            Description = "Webhook URL kịch bản Make.com đăng bài Facebook",
+                            IsActive = true,
+                            IsSecret = false,
+                            OwnerLevel = "Admin",
+                            ValueType = "String"
                         });
                 });
 

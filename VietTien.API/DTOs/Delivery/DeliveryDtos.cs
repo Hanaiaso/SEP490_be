@@ -29,6 +29,41 @@ namespace VietTien.API.DTOs.Delivery
         public string Message { get; set; } = string.Empty;
     }
 
+    // ─── UC-34: XUNG ĐỘT LỊCH XE/CA ─────────────────────────────────────────
+    public class DeliveryScheduleConflictDto
+    {
+        public Guid Id { get; set; }
+        public int VehicleId { get; set; }
+        public string Shift { get; set; } = string.Empty;
+        public DateTime RequestedDate { get; set; }
+        public List<string> OrderCodes { get; set; } = new();
+        public string Status { get; set; } = string.Empty;
+        public Guid RaisedByUserId { get; set; }
+        public string? RaisedByUserName { get; set; }
+        public DateTime RaisedAt { get; set; }
+        public Guid? ResolvedByUserId { get; set; }
+        public string? ResolvedByUserName { get; set; }
+        public DateTime? ResolvedAt { get; set; }
+        public string? ResolutionAction { get; set; }
+        public string? ResolutionNote { get; set; }
+    }
+
+    public class ResolveDeliveryConflictRequestDto
+    {
+        [Required(ErrorMessage = "Vui lòng chọn hành động xử lý.")]
+        [RegularExpression("^(Reassign|Override|Reject)$", ErrorMessage = "Hành động không hợp lệ. Chọn: Reassign / Override / Reject.")]
+        public string Action { get; set; } = string.Empty;
+
+        // Bắt buộc khi Action = Reassign — lịch mới thay cho lịch bị trùng.
+        public int? NewVehicleId { get; set; }
+        public string? NewShift { get; set; }
+        public DateTime? NewDate { get; set; }
+
+        [Required(ErrorMessage = "Vui lòng nhập ghi chú xử lý.")]
+        [MaxLength(1000)]
+        public string Note { get; set; } = string.Empty;
+    }
+
     // ─── BƯỚC 1: DANH SÁCH ĐƠN GIAO HÀNG ────────────────────────────────────
     public class DeliveryOrderListDto
     {
