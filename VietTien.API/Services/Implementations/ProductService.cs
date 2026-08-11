@@ -103,6 +103,12 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<ProductDetailDto> CreateProductAsync(CreateProductDto dto)
         {
+            if (!await _context.Categories.AnyAsync(c => c.Id == dto.CategoryId))
+                throw new Exception("Danh mục không tồn tại.");
+
+            if (await _context.Products.AnyAsync(p => p.Sku == dto.Sku))
+                throw new Exception($"SKU '{dto.Sku}' đã được sử dụng bởi sản phẩm khác.");
+
             string? imageUrl = null;
             if (dto.ImageFile != null && dto.ImageFile.Length > 0)
             {
@@ -184,6 +190,12 @@ namespace VietTien.API.Services.Implementations
             if (product is null)
                 throw new KeyNotFoundException("Không tìm thấy sản phẩm.");
 
+            if (!await _context.Categories.AnyAsync(c => c.Id == dto.CategoryId))
+                throw new Exception("Danh mục không tồn tại.");
+
+            if (await _context.Products.AnyAsync(p => p.Sku == dto.Sku && p.Id != id))
+                throw new Exception($"SKU '{dto.Sku}' đã được sử dụng bởi sản phẩm khác.");
+
             if (dto.ImageFile != null && dto.ImageFile.Length > 0)
             {
                 product.ImageUrl = await _cloudinaryService.UploadImageAsync(dto.ImageFile, "products");
@@ -194,8 +206,10 @@ namespace VietTien.API.Services.Implementations
             product.StandardListedPrice = dto.StandardListedPrice;
             product.CategoryId = dto.CategoryId;
             product.Unit = dto.Unit;
-            product.Description = dto.Description;
-            product.Specifications = dto.Specifications;
+            // Chỉ ghi đè khi client thực sự gửi giá trị -> tránh xóa mất du lieu neu client (API call truc tiep,
+            // khong qua form CEO) khong gui 2 truong optional nay (da tung gay mat du lieu that tren production).
+            if (dto.Description != null) product.Description = dto.Description;
+            if (dto.Specifications != null) product.Specifications = dto.Specifications;
             product.IsDiscontinued = dto.IsDiscontinued;
 
             await _unitOfWork.SaveChangesAsync();
