@@ -18,7 +18,7 @@ namespace VietTien.Tests.Services
         private static (ProductService sut, VietTien.API.Data.ApplicationDbContext db) CreateSut()
         {
             var db = TestDbFactory.Create();
-            var sut = new ProductService(new UnitOfWork(db), new Mock<ICloudinaryService>().Object);
+            var sut = new ProductService(new UnitOfWork(db), new Mock<ICloudinaryService>().Object, db);
             return (sut, db);
         }
 
