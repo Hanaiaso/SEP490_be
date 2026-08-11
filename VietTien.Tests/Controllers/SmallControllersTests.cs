@@ -198,6 +198,61 @@ namespace VietTien.Tests.Controllers
 
             (await _sut.CreateProduct(new CreateProductDto())).StatusOf().Should().Be(400);
         }
+
+        // ── UpdateProduct / DeleteProduct: RowVersion concurrency (2 CEO/Admin cùng sửa 1 sản phẩm) ──
+
+        [Fact]
+        public async Task UpdateProduct_WhenConcurrent_Returns409()
+        {
+            _service.Setup(s => s.UpdateProductAsync(It.IsAny<Guid>(), It.IsAny<UpdateProductDto>()))
+                .ThrowsAsync(new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException());
+
+            (await _sut.UpdateProduct(Guid.NewGuid(), new UpdateProductDto())).StatusOf().Should().Be(409);
+        }
+
+        [Fact]
+        public async Task UpdateProduct_WhenNotFound_Returns404()
+        {
+            _service.Setup(s => s.UpdateProductAsync(It.IsAny<Guid>(), It.IsAny<UpdateProductDto>()))
+                .ThrowsAsync(new KeyNotFoundException("Không tìm thấy sản phẩm."));
+
+            (await _sut.UpdateProduct(Guid.NewGuid(), new UpdateProductDto())).StatusOf().Should().Be(404);
+        }
+
+        [Fact]
+        public async Task UpdateProduct_Success_ReturnsOk()
+        {
+            _service.Setup(s => s.UpdateProductAsync(It.IsAny<Guid>(), It.IsAny<UpdateProductDto>()))
+                .ReturnsAsync(new ProductDetailDto());
+
+            (await _sut.UpdateProduct(Guid.NewGuid(), new UpdateProductDto())).StatusOf().Should().Be(200);
+        }
+
+        [Fact]
+        public async Task DeleteProduct_WhenConcurrent_Returns409()
+        {
+            _service.Setup(s => s.DeleteProductAsync(It.IsAny<Guid>()))
+                .ThrowsAsync(new Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException());
+
+            (await _sut.DeleteProduct(Guid.NewGuid())).StatusOf().Should().Be(409);
+        }
+
+        [Fact]
+        public async Task DeleteProduct_WhenNotFound_Returns404()
+        {
+            _service.Setup(s => s.DeleteProductAsync(It.IsAny<Guid>()))
+                .ThrowsAsync(new KeyNotFoundException("Không tìm thấy sản phẩm."));
+
+            (await _sut.DeleteProduct(Guid.NewGuid())).StatusOf().Should().Be(404);
+        }
+
+        [Fact]
+        public async Task DeleteProduct_Success_ReturnsNoContent()
+        {
+            _service.Setup(s => s.DeleteProductAsync(It.IsAny<Guid>())).Returns(Task.CompletedTask);
+
+            (await _sut.DeleteProduct(Guid.NewGuid())).StatusOf().Should().Be(204);
+        }
     }
 
     /// <summary>
