@@ -347,8 +347,8 @@ namespace VietTien.API.Services.Implementations
             _unitOfWork.Users.Update(user);
             await _unitOfWork.SaveChangesAsync();
 
-            // Tạo link reset (frontend URL)
-            var frontendUrl = _configuration["AppSettings:FrontendUrl"] ?? "http://localhost:3000";
+            // Tạo link reset (frontend URL từ cấu hình)
+            var frontendUrl = _configuration["AppSettings:FrontendUrl"] ?? "https://viettien.store";
             var resetLink = $"{frontendUrl}/reset-password?token={resetToken}&email={Uri.EscapeDataString(user.Email)}";
 
             // Token đã tạo và commit thành công ở trên -> lỗi gửi email không được làm cả request

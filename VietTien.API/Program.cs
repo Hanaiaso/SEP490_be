@@ -47,6 +47,7 @@ builder.Services.AddScoped<IQuotationRepository, QuotationRepository>();
 builder.Services.AddScoped<IQuotationService, QuotationService>();
 builder.Services.AddScoped<IWarehouseService, WarehouseService>();
 builder.Services.AddScoped<IStockTransferService, StockTransferService>();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IWarehouseManagementService, WarehouseManagementService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
