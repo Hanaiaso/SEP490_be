@@ -70,6 +70,14 @@ namespace VietTien.API.Repositories.Implementations
                 .FirstOrDefaultAsync(p => p.Id == id && !p.IsDiscontinued);
         }
 
+        public async Task<Product?> GetByIdIncludingDiscontinuedAsync(Guid id)
+        {
+            return await _context.Products
+                .Include(p => p.Category)
+                .Include(p => p.Inventories)
+                .FirstOrDefaultAsync(p => p.Id == id);
+        }
+
         public async Task<IEnumerable<Category>> GetActiveCategoriesAsync()
         {
             return await _context.Categories
@@ -81,6 +89,43 @@ namespace VietTien.API.Repositories.Implementations
         public async Task AddAsync(Product product)
         {
             await _context.Products.AddAsync(product);
+        }
+
+        public async Task<(IEnumerable<Product> Items, int TotalCount)> GetAllForManagementAsync(
+            int page,
+            int pageSize,
+            Guid? categoryId = null,
+            string? searchKeyword = null,
+            bool? isDiscontinued = null)
+        {
+            var query = _context.Products
+                .Include(p => p.Category)
+                .Include(p => p.Inventories)
+                .AsQueryable();
+
+            if (isDiscontinued.HasValue)
+                query = query.Where(p => p.IsDiscontinued == isDiscontinued.Value);
+
+            if (categoryId.HasValue)
+                query = query.Where(p => p.CategoryId == categoryId.Value);
+
+            if (!string.IsNullOrWhiteSpace(searchKeyword))
+            {
+                var keyword = searchKeyword.Trim().ToLower();
+                query = query.Where(p =>
+                    p.Name.ToLower().Contains(keyword) ||
+                    p.Sku.ToLower().Contains(keyword));
+            }
+
+            var totalCount = await query.CountAsync();
+
+            var items = await query
+                .OrderBy(p => p.Name)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync();
+
+            return (items, totalCount);
         }
     }
 }

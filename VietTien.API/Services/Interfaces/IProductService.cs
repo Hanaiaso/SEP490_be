@@ -29,5 +29,30 @@ namespace VietTien.API.Services.Interfaces
         /// Tạo sản phẩm mới
         /// </summary>
         Task<ProductDetailDto> CreateProductAsync(CreateProductDto dto);
+
+        /// <summary>
+        /// Lấy danh sách sản phẩm cho trang quản lý (CEO/Admin), bao gồm số lượng đã bán all-time.
+        /// </summary>
+        Task<ProductManagementPagedResultDto> GetProductsForManagementAsync(
+            int page,
+            int pageSize,
+            Guid? categoryId = null,
+            string? searchKeyword = null,
+            bool? isDiscontinued = null);
+
+        /// <summary>
+        /// Cập nhật sản phẩm. Ném KeyNotFoundException nếu không tìm thấy.
+        /// </summary>
+        Task<ProductDetailDto> UpdateProductAsync(Guid id, UpdateProductDto dto);
+
+        /// <summary>
+        /// Xóa mềm sản phẩm (đánh dấu ngừng kinh doanh). Ném KeyNotFoundException nếu không tìm thấy.
+        /// </summary>
+        Task DeleteProductAsync(Guid id);
+
+        /// <summary>
+        /// Thống kê bán hàng theo sản phẩm trong khoảng thời gian: tổng quan, top bán chạy, top bán chậm.
+        /// </summary>
+        Task<ProductStatsResultDto> GetProductStatsAsync(DateTime from, DateTime to);
     }
 }
