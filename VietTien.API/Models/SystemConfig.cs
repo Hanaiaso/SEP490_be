@@ -19,6 +19,10 @@ namespace VietTien.API.Models
         public string OwnerLevel { get; set; } = "Admin"; // Thông tin cấp sở hữu cấu hình, vd "Admin", "Admin/CEO"
         public bool IsActive { get; set; } = true;
 
+        // true = giá trị nhạy cảm (API key/secret/password). SystemConfigService sẽ mã hoá khi lưu
+        // và che giá trị (mask) khi trả về qua API thay vì trả plaintext.
+        public bool IsSecret { get; set; } = false;
+
         public ICollection<SystemConfigVersion> Versions { get; set; } = new List<SystemConfigVersion>();
     }
 }

@@ -23,6 +23,7 @@ namespace VietTien.API.Services.Implementations
         private readonly ISalesAllocationService _salesAllocationService;
         private readonly ILogger<AuthService> _logger;
         private readonly IGoogleTokenValidator _googleTokenValidator;
+        private readonly ISystemConfigService _systemConfigService;
 
         public AuthService(
             IUnitOfWork unitOfWork,
@@ -33,7 +34,8 @@ namespace VietTien.API.Services.Implementations
             IConfiguration configuration,
             ISalesAllocationService salesAllocationService,
             ILogger<AuthService> logger,
-            IGoogleTokenValidator googleTokenValidator)
+            IGoogleTokenValidator googleTokenValidator,
+            ISystemConfigService systemConfigService)
         {
             _unitOfWork = unitOfWork;
             _jwtService = jwtService;
@@ -45,6 +47,7 @@ namespace VietTien.API.Services.Implementations
             _salesAllocationService = salesAllocationService;
             _logger = logger;
             _googleTokenValidator = googleTokenValidator;
+            _systemConfigService = systemConfigService;
         }
 
         // ─── ĐĂNG KÝ ───────────────────────────────────────────────────────────────
@@ -275,7 +278,8 @@ namespace VietTien.API.Services.Implementations
 
             try
             {
-                payload = await _googleTokenValidator.ValidateAsync(dto.IdToken, _googleClientId);
+                var googleClientId = await _systemConfigService.GetEffectiveValueAsync("GOOGLE_OAUTH_CLIENT_ID") ?? _googleClientId;
+                payload = await _googleTokenValidator.ValidateAsync(dto.IdToken, googleClientId);
             }
             catch (InvalidJwtException)
             {

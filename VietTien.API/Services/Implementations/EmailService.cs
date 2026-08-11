@@ -12,10 +12,25 @@ namespace VietTien.API.Services.Implementations
     public class EmailService : IEmailService
     {
         private readonly EmailSettings _emailSettings;
+        private readonly ISystemConfigService _systemConfigService;
 
-        public EmailService(IOptions<EmailSettings> emailSettings)
+        public EmailService(IOptions<EmailSettings> emailSettings, ISystemConfigService systemConfigService)
         {
             _emailSettings = emailSettings.Value;
+            _systemConfigService = systemConfigService;
+        }
+
+        // Đọc cấu hình SMTP động từ Admin Integrations (UC-59), fallback về appsettings nếu Admin
+        // chưa cấu hình key nào trong DB. Đọc mỗi lần gửi thay vì cache 1 lần ở constructor để Admin
+        // đổi cấu hình có hiệu lực ngay, không cần restart server.
+        private async Task<(string Host, int Port, string SenderEmail, string SenderPassword, string SenderName)> ResolveSmtpSettingsAsync()
+        {
+            var host = await _systemConfigService.GetEffectiveValueAsync("EMAIL_SMTP_HOST") ?? _emailSettings.SmtpHost;
+            var portValue = await _systemConfigService.GetEffectiveValueAsync("EMAIL_SMTP_PORT");
+            var port = int.TryParse(portValue, out var parsedPort) ? parsedPort : _emailSettings.SmtpPort;
+            var senderEmail = await _systemConfigService.GetEffectiveValueAsync("EMAIL_SENDER_EMAIL") ?? _emailSettings.SenderEmail;
+            var senderPassword = await _systemConfigService.GetEffectiveValueAsync("EMAIL_SENDER_PASSWORD") ?? _emailSettings.SenderPassword;
+            return (host, port, senderEmail, senderPassword, _emailSettings.SenderName);
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
@@ -353,8 +368,10 @@ namespace VietTien.API.Services.Implementations
             var content = $@"<div style='font-size:14px; color:{TextDark}; line-height:1.6;'>{body}</div>";
             var wrappedBody = WrapLayout(content, subject);
 
+            var smtpSettings = await ResolveSmtpSettingsAsync();
+
             var message = new MimeMessage();
-            message.From.Add(new MailboxAddress(_emailSettings.SenderName, _emailSettings.SenderEmail));
+            message.From.Add(new MailboxAddress(smtpSettings.SenderName, smtpSettings.SenderEmail));
             message.To.Add(new MailboxAddress(toEmail, toEmail));
             message.Subject = subject;
 
@@ -363,8 +380,8 @@ namespace VietTien.API.Services.Implementations
 
             using (var client = new SmtpClient())
             {
-                await client.ConnectAsync(_emailSettings.SmtpHost, _emailSettings.SmtpPort, SecureSocketOptions.StartTls);
-                await client.AuthenticateAsync(_emailSettings.SenderEmail, _emailSettings.SenderPassword);
+                await client.ConnectAsync(smtpSettings.Host, smtpSettings.Port, SecureSocketOptions.StartTls);
+                await client.AuthenticateAsync(smtpSettings.SenderEmail, smtpSettings.SenderPassword);
                 await client.SendAsync(message);
                 await client.DisconnectAsync(true);
             }
@@ -374,8 +391,10 @@ namespace VietTien.API.Services.Implementations
 
         private async Task SendEmailAsync(string toEmail, string toName, string subject, string htmlBody, string? attachmentPath = null)
         {
+            var smtpSettings = await ResolveSmtpSettingsAsync();
+
             var email = new MimeMessage();
-            email.From.Add(new MailboxAddress(_emailSettings.SenderName, _emailSettings.SenderEmail));
+            email.From.Add(new MailboxAddress(smtpSettings.SenderName, smtpSettings.SenderEmail));
             email.To.Add(new MailboxAddress(toName, toEmail));
             email.Subject = subject;
 
@@ -387,8 +406,8 @@ namespace VietTien.API.Services.Implementations
             email.Body = bodyBuilder.ToMessageBody();
 
             using var smtp = new SmtpClient();
-            await smtp.ConnectAsync(_emailSettings.SmtpHost, _emailSettings.SmtpPort, SecureSocketOptions.StartTls);
-            await smtp.AuthenticateAsync(_emailSettings.SenderEmail, _emailSettings.SenderPassword);
+            await smtp.ConnectAsync(smtpSettings.Host, smtpSettings.Port, SecureSocketOptions.StartTls);
+            await smtp.AuthenticateAsync(smtpSettings.SenderEmail, smtpSettings.SenderPassword);
             await smtp.SendAsync(email);
             await smtp.DisconnectAsync(true);
         }

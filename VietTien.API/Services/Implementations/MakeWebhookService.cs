@@ -15,17 +15,21 @@ namespace VietTien.API.Services.Implementations
         private readonly HttpClient _httpClient;
         private readonly IConfiguration _configuration;
         private readonly ILogger<MakeWebhookService> _logger;
+        private readonly ISystemConfigService _systemConfigService;
 
-        public MakeWebhookService(HttpClient httpClient, IConfiguration configuration, ILogger<MakeWebhookService> logger)
+        public MakeWebhookService(HttpClient httpClient, IConfiguration configuration, ILogger<MakeWebhookService> logger, ISystemConfigService systemConfigService)
         {
             _httpClient = httpClient;
             _configuration = configuration;
             _logger = logger;
+            _systemConfigService = systemConfigService;
         }
 
         public async Task<bool> TriggerPostToMakeAsync(MarketingPost post)
         {
-            var webhookUrl = _configuration["MakeCom:WebhookUrl"] ?? "https://hook.eu1.make.com/placeholder-viettien-marketing";
+            var webhookUrl = await _systemConfigService.GetEffectiveValueAsync("MAKE_WEBHOOK_URL")
+                ?? _configuration["MakeCom:WebhookUrl"]
+                ?? "https://hook.eu1.make.com/placeholder-viettien-marketing";
 
             var payload = new
             {

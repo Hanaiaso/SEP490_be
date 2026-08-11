@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Order;
+using VietTien.API.Exceptions;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Controllers
@@ -61,6 +62,11 @@ namespace VietTien.API.Controllers
                 var userId = GetUserId();
                 var response = await _orderService.PlaceOrderAsync(userId, request);
                 return Ok(response);
+            }
+            catch (PhoneVerificationRequiredException ex)
+            {
+                // 409: FE dựa vào code này để mở modal xác thực OTP thay vì báo lỗi chung
+                return Conflict(new { code = "PHONE_OTP_REQUIRED", message = ex.Message });
             }
             catch (KeyNotFoundException ex)
             {
