@@ -35,8 +35,14 @@ namespace VietTien.Tests.TestHelpers
 
     /// <summary>
     /// Gỡ các cấu hình chỉ có trên SQL Server để EnsureCreated() sinh được DDL hợp lệ cho SQLite.
-    /// Hiện tại: default value NEWSEQUENTIALID() mà ApplicationDbContext gán cho mọi khoá chính Guid
-    /// (SQLite không biết hàm này). Id vẫn có giá trị vì model tự khởi tạo Guid.NewGuid().
+    /// Hiện tại:
+    /// - default value NEWSEQUENTIALID() mà ApplicationDbContext gán cho mọi khoá chính Guid
+    ///   (SQLite không biết hàm này). Id vẫn có giá trị vì model tự khởi tạo Guid.NewGuid().
+    /// - Cột [Timestamp]/rowversion (concurrency token): trên SQL Server được engine tự sinh giá trị
+    ///   khi INSERT nên HasData() không cần set — nhưng SQLite không có cơ chế tương đương, nên các
+    ///   dòng seed qua HasData() (vd Products) sẽ INSERT giá trị NULL và vi phạm NOT NULL. Gán default
+    ///   value SQL randomblob(8) để SQLite tự sinh 8 byte ngẫu nhiên, tương đương rowversion cho mục
+    ///   đích test (không cần đúng semantics tăng dần của SQL Server thật).
     /// </summary>
     public class SqliteCompatibleModelCustomizer : RelationalModelCustomizer
     {
@@ -54,6 +60,11 @@ namespace VietTien.Tests.TestHelpers
                     {
                         property.SetDefaultValueSql(null);
                         property.ValueGenerated = Microsoft.EntityFrameworkCore.Metadata.ValueGenerated.Never;
+                    }
+
+                    if (property.IsConcurrencyToken && property.ClrType == typeof(byte[]))
+                    {
+                        property.SetDefaultValueSql("randomblob(8)");
                     }
                 }
             }

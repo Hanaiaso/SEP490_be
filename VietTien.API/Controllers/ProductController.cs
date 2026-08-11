@@ -134,6 +134,10 @@ namespace VietTien.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Sản phẩm đã bị thay đổi bởi người khác. Vui lòng tải lại và thử lại." });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -156,6 +160,10 @@ namespace VietTien.API.Controllers
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Sản phẩm đã bị thay đổi bởi người khác. Vui lòng tải lại và thử lại." });
             }
         }
     }

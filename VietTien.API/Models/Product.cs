@@ -1,9 +1,17 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace VietTien.API.Models
 {
     public class Product
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid CategoryId { get; set; }
+
+        // Concurrency token: chặn 2 CEO/Admin cùng sửa 1 sản phẩm ghi đè lẫn nhau âm thầm ->
+        // throw DbUpdateConcurrencyException, middleware map sẵn 409.
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
         public string Name { get; set; } = string.Empty;
         public string Sku { get; set; } = string.Empty;
         public decimal StandardListedPrice { get; set; }
