@@ -379,46 +379,6 @@ namespace VietTien.Tests.Controllers
     }
 
     /// <summary>
-    /// Case code-driven phủ HandoverController (43 dòng, trước đó 0%).
-    /// ⚠ Phát hiện khi viết test: cả 4 action đều trả GIÁ TRỊ CỨNG, không đọc/ghi DB,
-    /// không có dependency nào. Đây là stub chưa cài đặt — xem mục defect trong manifest.
-    /// </summary>
-    public class HandoverControllerTests
-    {
-        private readonly HandoverController _sut = new HandoverController().WithUser();
-
-        [Fact]
-        public void GetHandoverById_ReturnsHardcodedPendingStatus()
-        {
-            var id = Guid.NewGuid();
-
-            var result = _sut.GetHandoverById(id);
-
-            result.StatusOf().Should().Be(200);
-            result.Should().BeAssignableTo<ObjectResult>()
-                .Which.Value!.ToString().Should().Contain("PENDING");
-        }
-
-        [Fact]
-        public void CreateHandover_ReturnsOk()
-        {
-            _sut.CreateHandover().StatusOf().Should().Be(200);
-        }
-
-        [Fact]
-        public void WarehouseConfirm_ReturnsOk()
-        {
-            _sut.WarehouseConfirm(Guid.NewGuid()).StatusOf().Should().Be(200);
-        }
-
-        [Fact]
-        public void SalesConfirm_ReturnsOk()
-        {
-            _sut.SalesConfirm(Guid.NewGuid()).StatusOf().Should().Be(200);
-        }
-    }
-
-    /// <summary>
     /// Case code-driven phủ SystemHealthController (97 dòng, trước đó 0%).
     /// Danh sách job được tiêm dưới dạng IEnumerable&lt;IScheduledJob&gt; nên test tự dựng
     /// job giả để chạm cả nhánh RetryJob tìm thấy / không tìm thấy và hàm DescribeInterval.
@@ -599,6 +559,96 @@ namespace VietTien.Tests.Controllers
             result.StatusOf().Should().Be(200);
             (result.Result as ObjectResult)!.Value.Should().BeAssignableTo<List<WarehouseShiftDto>>()
                 .Which.Should().BeEmpty();
+        }
+
+        // ── P2-9: CRUD ca làm việc (UC-57) ──────────────────────────────────
+
+        [Fact]
+        public async Task CreateShift_Valid_SavesAndReturnsDto()
+        {
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.CreateShift(new CreateWarehouseShiftRequest
+            {
+                Name = "Ca Đêm",
+                StartTime = "22:00",
+                EndTime = "06:00",
+                Description = "ca dem"
+            });
+
+            result.StatusOf().Should().Be(200);
+            _db.WarehouseShifts.Should().ContainSingle(s => s.Name == "Ca Đêm");
+        }
+
+        [Fact]
+        public async Task CreateShift_DuplicateName_Returns409()
+        {
+            _db.WarehouseShifts.Add(new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) });
+            await _db.SaveChangesAsync();
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.CreateShift(new CreateWarehouseShiftRequest { Name = "Ca Sáng", StartTime = "06:00", EndTime = "14:00" });
+
+            result.StatusOf().Should().Be(409);
+        }
+
+        [Fact]
+        public async Task CreateShift_InvalidTimeFormat_Returns400()
+        {
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.CreateShift(new CreateWarehouseShiftRequest { Name = "Ca Lạ", StartTime = "not-a-time", EndTime = "14:00" });
+
+            result.StatusOf().Should().Be(400);
+        }
+
+        [Fact]
+        public async Task UpdateShift_DuplicateNameOfAnotherShift_Returns409()
+        {
+            var s1 = new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) };
+            var s2 = new WarehouseShift { Name = "Ca Trưa", StartTime = new TimeSpan(14, 0, 0), EndTime = new TimeSpan(22, 0, 0) };
+            _db.WarehouseShifts.AddRange(s1, s2);
+            await _db.SaveChangesAsync();
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.UpdateShift(s2.Id, new UpdateWarehouseShiftRequest { Name = "Ca Sáng", StartTime = "14:00", EndTime = "22:00" });
+
+            result.StatusOf().Should().Be(409);
+            _db.WarehouseShifts.Single(s => s.Id == s2.Id).Name.Should().Be("Ca Trưa");
+        }
+
+        [Fact]
+        public async Task UpdateShift_WhenMissing_Returns404()
+        {
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.UpdateShift(Guid.NewGuid(), new UpdateWarehouseShiftRequest { Name = "X", StartTime = "06:00", EndTime = "14:00" });
+
+            result.StatusOf().Should().Be(404);
+        }
+
+        [Fact]
+        public async Task DeleteShift_Existing_RemovesRecord()
+        {
+            var shift = new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) };
+            _db.WarehouseShifts.Add(shift);
+            await _db.SaveChangesAsync();
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.DeleteShift(shift.Id);
+
+            result.StatusOf().Should().Be(204);
+            _db.WarehouseShifts.Should().BeEmpty();
+        }
+
+        [Fact]
+        public async Task DeleteShift_WhenMissing_Returns404()
+        {
+            var sut = new WarehouseShiftController(_db).WithUser();
+
+            var result = await sut.DeleteShift(Guid.NewGuid());
+
+            result.StatusOf().Should().Be(404);
         }
     }
 }

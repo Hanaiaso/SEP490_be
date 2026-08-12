@@ -3,6 +3,7 @@ using Moq;
 using VietTien.API.DTOs.Delivery;
 using VietTien.API.Models;
 using VietTien.API.Services.Interfaces;
+using VietTien.Tests.TestHelpers;
 using Xunit;
 
 namespace VietTien.Tests.Services
@@ -72,6 +73,122 @@ namespace VietTien.Tests.Services
             saved.FailedDeliveryCount.Should().Be(3);
             saved.IsBlockedForDelivery.Should().BeFalse(
                 "ngưỡng đã được Admin đổi thành 5 nên 3 lần hỏng chưa được phép khoá đơn");
+        }
+
+        // ─── P2-6: Sales Manager mở khóa đơn & tất toán công nợ (UC-35) ───────
+
+        private Order SeedBlockedOrder()
+            => SeedOrder(o =>
+            {
+                o.OrderStatus = OrderStatus.Confirmed;
+                o.DeliveryStatus = DeliveryStatus.Failed;
+                o.FailedDeliveryCount = 3;
+                o.IsBlockedForDelivery = true;
+            });
+
+        private CustomerDebt SeedDebt(Order order, DebtStatus status = DebtStatus.InDebt, decimal amount = 500_000m, int daysAgo = 0)
+        {
+            var debt = new CustomerDebt
+            {
+                CustomerProfileId = order.CustomerProfileId,
+                OrderId = order.Id,
+                DebtAmount = amount,
+                Status = status,
+                CreatedAt = DateTime.UtcNow.AddDays(-daysAgo)
+            };
+            _db.CustomerDebts.Add(debt);
+            _db.SaveChanges();
+            return debt;
+        }
+
+        [Fact]
+        public async Task P2_6_UnblockOrder_WhenBlocked_ResetsFlagsAndCountAndRecordsAudit()
+        {
+            var order = SeedBlockedOrder();
+            var manager = TestData.User(u => u.Role = SystemRole.SalesManager);
+            _db.Users.Add(manager);
+            _db.SaveChanges();
+
+            await _sut.UnblockOrderForRedeliveryAsync(order.Id, manager.Id, "Khách đã xác nhận lịch giao lại qua điện thoại.");
+
+            _db.ChangeTracker.Clear();
+            var saved = _db.Orders.Single(o => o.Id == order.Id);
+            saved.IsBlockedForDelivery.Should().BeFalse();
+            saved.FailedDeliveryCount.Should().Be(0, "phải reset để lần giao thất bại tiếp theo không bị khoá lại ngay");
+            saved.DeliveryStatus.Should().Be(DeliveryStatus.Rescheduled);
+            saved.UnblockedByUserId.Should().Be(manager.Id);
+            saved.UnblockedAt.Should().NotBeNull();
+            saved.UnblockReason.Should().Be("Khách đã xác nhận lịch giao lại qua điện thoại.");
+        }
+
+        [Fact]
+        public async Task P2_6_UnblockOrder_WhenNotBlocked_Rejected()
+        {
+            var order = SeedOrder(o => o.IsBlockedForDelivery = false);
+            var manager = TestData.User(u => u.Role = SystemRole.SalesManager);
+            _db.Users.Add(manager);
+            _db.SaveChanges();
+
+            var act = () => _sut.UnblockOrderForRedeliveryAsync(order.Id, manager.Id, "ly do");
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+
+        [Fact]
+        public async Task P2_6_SettleDebt_WhenInDebt_MarksSettledAndZeroesAmount()
+        {
+            var order = SeedOrder();
+            var debt = SeedDebt(order);
+            var manager = TestData.User(u => u.Role = SystemRole.SalesManager);
+            _db.Users.Add(manager);
+            _db.SaveChanges();
+
+            await _sut.SettleDebtAsync(debt.Id, manager.Id, "Khách chuyển khoản bổ sung.");
+
+            _db.ChangeTracker.Clear();
+            var saved = _db.CustomerDebts.Single(d => d.Id == debt.Id);
+            saved.Status.Should().Be(DebtStatus.Settled);
+            saved.DebtAmount.Should().Be(0);
+            saved.SettledByUserId.Should().Be(manager.Id);
+            saved.SettledAt.Should().NotBeNull();
+            saved.SettlementNote.Should().Be("Khách chuyển khoản bổ sung.");
+        }
+
+        [Fact]
+        public async Task P2_6_SettleDebt_AlreadySettled_Rejected()
+        {
+            var order = SeedOrder();
+            var debt = SeedDebt(order, status: DebtStatus.Settled, amount: 0);
+            var manager = TestData.User(u => u.Role = SystemRole.SalesManager);
+            _db.Users.Add(manager);
+            _db.SaveChanges();
+
+            var act = () => _sut.SettleDebtAsync(debt.Id, manager.Id, null);
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+
+        [Fact]
+        public async Task P2_6_GetDebts_ComputesOverdueDaysFromCreatedAt()
+        {
+            var order = SeedOrder();
+            SeedDebt(order, daysAgo: 10);
+
+            var result = await _sut.GetDebtsAsync();
+
+            result.Should().ContainSingle();
+            result[0].OverdueDays.Should().BeInRange(9, 10, "seed lùi 10 ngày, cho phép sai số làm tròn/độ trễ chạy test");
+        }
+
+        [Fact]
+        public async Task P2_6_GetBlockedOrders_OnlyReturnsBlockedOrders()
+        {
+            var blocked = SeedBlockedOrder();
+            SeedOrder(o => o.IsBlockedForDelivery = false);
+
+            var result = await _sut.GetBlockedOrdersAsync();
+
+            result.Should().ContainSingle(o => o.OrderId == blocked.Id);
         }
     }
 }

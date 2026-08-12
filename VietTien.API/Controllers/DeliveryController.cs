@@ -236,6 +236,94 @@ namespace VietTien.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        // ─── P2-6: SALES MANAGER XỬ LÝ ĐƠN BỊ KHÓA & CÔNG NỢ COD (UC-35) ──────
+
+        /// <summary>Sales Manager xem danh sách đơn đang bị khóa do giao thất bại vượt ngưỡng</summary>
+        [HttpGet("blocked-orders")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> GetBlockedOrders()
+        {
+            try
+            {
+                var result = await _orderService.GetBlockedOrdersAsync();
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Sales Manager mở khóa đơn để cho phép lên lịch giao lại</summary>
+        [HttpPost("{orderId:guid}/unblock")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> UnblockOrder(Guid orderId, [FromBody] UnblockOrderRequest dto)
+        {
+            try
+            {
+                var managerId = GetUserId();
+                await _orderService.UnblockOrderForRedeliveryAsync(orderId, managerId, dto.Reason);
+                return Ok(new { message = "Đã mở khóa đơn hàng, có thể lên lịch giao lại." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Đơn hàng đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Sales Manager xem danh sách công nợ COD (mặc định: đang nợ + đã tất toán)</summary>
+        [HttpGet("debts")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> GetDebts([FromQuery] string? status = null)
+        {
+            try
+            {
+                var result = await _orderService.GetDebtsAsync(status);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Sales Manager đánh dấu một khoản công nợ đã được tất toán</summary>
+        [HttpPost("debts/{debtId:guid}/settle")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> SettleDebt(Guid debtId, [FromBody] SettleDebtRequest dto)
+        {
+            try
+            {
+                var managerId = GetUserId();
+                await _orderService.SettleDebtAsync(debtId, managerId, dto.Note);
+                return Ok(new { message = "Đã đánh dấu công nợ là đã tất toán." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }
 

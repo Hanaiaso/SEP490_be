@@ -261,6 +261,56 @@ namespace VietTien.API.Services.Implementations
             return dto;
         }
 
+        public async Task<AdminUserDto> RevokeSessionAsync(Guid userId, RevokeSessionRequest request, Guid actorUserId, string actorEmail, string? ipAddress)
+        {
+            if (string.IsNullOrWhiteSpace(request.Reason))
+                throw new Exception("Vui lòng nhập lý do đăng xuất từ xa để phục vụ audit.");
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+            if (user == null) throw new KeyNotFoundException("Không tìm thấy người dùng.");
+
+            var hadActiveSession = user.RefreshToken != null && user.RefreshTokenExpiryTime > DateTime.UtcNow;
+            if (!hadActiveSession) return ToDto(user);
+
+            user.RefreshToken = null;
+            user.RefreshTokenExpiryTime = null;
+
+            await _context.SaveChangesAsync();
+
+            var dto = ToDto(user);
+
+            await _auditLogService.LogAsync(
+                entityName: "User",
+                entityId: user.Id.ToString(),
+                action: "SESSION_REVOKE",
+                actorUserId: actorUserId,
+                actorEmail: actorEmail,
+                actorRole: "Admin",
+                before: new { HasActiveSession = true },
+                after: new { HasActiveSession = false },
+                reason: request.Reason,
+                ipAddress: ipAddress);
+
+            // Phiên đã bị thu hồi và commit thành công ở trên -> lỗi gửi notification không
+            // được làm fail request đăng xuất từ xa, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    NotificationType.SYS_38_SessionRevoked,
+                    user.Id,
+                    "Phiên đăng nhập đã bị thu hồi",
+                    $"Quản trị viên đã đăng xuất bạn khỏi hệ thống từ xa. Lý do: {request.Reason}. Vui lòng đăng nhập lại.",
+                    user.Id,
+                    "User");
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[AdminUserService] Error sending session revoked notification: {notifyEx.Message}");
+            }
+
+            return dto;
+        }
+
         private static SystemRole ParseAssignableRole(string role)
         {
             if (!AdminAssignableRoles.Values.Contains(role, StringComparer.OrdinalIgnoreCase))
@@ -278,7 +328,9 @@ namespace VietTien.API.Services.Implementations
             Role = u.Role.ToString(),
             IsActive = u.IsActive,
             IsEmailVerified = u.IsEmailVerified,
-            CreatedAt = u.CreatedAt
+            CreatedAt = u.CreatedAt,
+            HasActiveSession = u.RefreshToken != null && u.RefreshTokenExpiryTime > DateTime.UtcNow,
+            SessionExpiresAt = u.RefreshTokenExpiryTime
         };
     }
 }

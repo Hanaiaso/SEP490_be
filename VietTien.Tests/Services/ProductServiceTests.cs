@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Moq;
+using VietTien.API.DTOs.Product;
 using VietTien.API.Repositories.Implementations;
 using VietTien.API.Services.Implementations;
 using VietTien.API.Services.Interfaces;
@@ -105,6 +106,84 @@ namespace VietTien.Tests.Services
             var result = await sut.GetProductByIdAsync(Guid.NewGuid());
 
             result.Should().BeNull();
+        }
+
+        // ── Block: Category CRUD (P2-8, UC-56) ───────────────────────────────
+
+        // L1-PROD-06 | EP-Valid | Tạo danh mục mới -> lưu đúng, IsActive=true mặc định
+        [Fact]
+        public async Task L1_PROD_06_CreateCategory_Succeeds_DefaultsActive()
+        {
+            var (sut, db) = CreateSut();
+
+            var dto = await sut.CreateCategoryAsync(new CreateCategoryRequest { Name = "Vải cotton", Description = "Vải may đồng phục" });
+
+            dto.IsActive.Should().BeTrue();
+            db.Categories.Should().ContainSingle(c => c.Name == "Vải cotton");
+        }
+
+        // L1-PROD-07 | EP-Invalid | Tạo trùng tên -> từ chối, không tạo bản ghi thứ 2
+        [Fact]
+        public async Task L1_PROD_07_CreateCategory_DuplicateName_IsRejected()
+        {
+            var (sut, db) = CreateSut();
+            db.Categories.Add(TestData.Category(c => c.Name = "Vải cotton"));
+            db.SaveChanges();
+
+            var act = () => sut.CreateCategoryAsync(new CreateCategoryRequest { Name = "Vải cotton" });
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            db.Categories.Count(c => c.Name == "Vải cotton").Should().Be(1);
+        }
+
+        // L1-PROD-08 | EP-Invalid | Đổi tên trùng category khác -> từ chối
+        [Fact]
+        public async Task L1_PROD_08_UpdateCategory_DuplicateName_IsRejected()
+        {
+            var (sut, db) = CreateSut();
+            var c1 = TestData.Category(c => c.Name = "Vải cotton");
+            var c2 = TestData.Category(c => c.Name = "Vải kaki");
+            db.Categories.AddRange(c1, c2);
+            db.SaveChanges();
+
+            var act = () => sut.UpdateCategoryAsync(c2.Id, new UpdateCategoryRequest { Name = "Vải cotton", IsActive = true });
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            db.Categories.Single(c => c.Id == c2.Id).Name.Should().Be("Vải kaki");
+        }
+
+        // L1-PROD-09 | EP-Valid | Xóa mềm -> IsActive=false, bản ghi vẫn còn (không xóa vật lý)
+        [Fact]
+        public async Task L1_PROD_09_DeleteCategory_SoftDeletes_RecordStillExists()
+        {
+            var (sut, db) = CreateSut();
+            var category = TestData.Category();
+            db.Categories.Add(category);
+            var product = TestData.Product(category.Id);
+            db.Products.Add(product);
+            db.SaveChanges();
+
+            await sut.DeleteCategoryAsync(category.Id);
+
+            db.Categories.Should().ContainSingle(c => c.Id == category.Id && !c.IsActive);
+            db.Products.Single(p => p.Id == product.Id).CategoryId.Should().Be(category.Id, "sản phẩm cũ không được mất liên kết danh mục");
+        }
+
+        // L1-PROD-10 | EP-Valid | GetCategoriesForManagementAsync trả cả active/inactive; GetCategoriesAsync (cũ) chỉ trả active
+        [Fact]
+        public async Task L1_PROD_10_GetCategoriesForManagement_ReturnsAll_PublicListStaysActiveOnly()
+        {
+            var (sut, db) = CreateSut();
+            db.Categories.AddRange(
+                TestData.Category(c => { c.Name = "Đang bật"; c.IsActive = true; }),
+                TestData.Category(c => { c.Name = "Đã tắt"; c.IsActive = false; }));
+            db.SaveChanges();
+
+            var management = await sut.GetCategoriesForManagementAsync();
+            var publicList = await sut.GetCategoriesAsync();
+
+            management.Should().HaveCount(2);
+            publicList.Should().ContainSingle(c => c.Name == "Đang bật");
         }
     }
 }

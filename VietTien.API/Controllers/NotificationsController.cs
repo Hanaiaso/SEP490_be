@@ -20,28 +20,40 @@ namespace VietTien.API.Controllers
 
         private const int MaxPageLimit = 100;
 
+        // P1: tham số trước đây tên là "page"/"limit" trong khi FE (notificationService.js) luôn gửi
+        // "pageNumber"/"pageSize"/"isRead" -> model binder không khớp tên nên "page"/"limit" luôn rơi về
+        // giá trị mặc định (trang 1, 20 dòng) bất kể FE gửi gì, và "isRead" chưa từng được đọc/áp dụng.
         [HttpGet]
-        public async Task<IActionResult> GetNotifications([FromQuery] int page = 1, [FromQuery] int limit = 20)
+        public async Task<IActionResult> GetNotifications(
+            [FromQuery] int pageNumber = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] bool? isRead = null)
         {
             var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
                 return Unauthorized();
 
-            page = page < 1 ? 1 : page;
-            limit = limit < 1 ? 20 : Math.Min(limit, MaxPageLimit);
+            pageNumber = pageNumber < 1 ? 1 : pageNumber;
+            pageSize = pageSize < 1 ? 20 : Math.Min(pageSize, MaxPageLimit);
 
             var query = _context.Notifications
-                .Where(n => n.RecipientUserId == userId)
-                .OrderByDescending(n => n.CreatedAt);
+                .Where(n => n.RecipientUserId == userId);
+
+            if (isRead.HasValue)
+            {
+                query = query.Where(n => n.IsRead == isRead.Value);
+            }
+
+            query = query.OrderByDescending(n => n.CreatedAt);
 
             var total = await query.CountAsync();
-            var items = await query.Skip((page - 1) * limit).Take(limit).ToListAsync();
+            var items = await query.Skip((pageNumber - 1) * pageSize).Take(pageSize).ToListAsync();
 
             return Ok(new
             {
                 Total = total,
-                Page = page,
-                Limit = limit,
+                PageNumber = pageNumber,
+                PageSize = pageSize,
                 Items = items
             });
         }

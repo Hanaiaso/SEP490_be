@@ -61,6 +61,7 @@ namespace VietTien.API.Data
         public DbSet<WarehouseShift> WarehouseShifts => Set<WarehouseShift>();
         public DbSet<QuarantineLog> QuarantineLogs => Set<QuarantineLog>();
         public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
+        public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
 
         // Phân bổ khách hàng cho Sale (Round-robin)
         public DbSet<RoundRobinState> RoundRobinStates => Set<RoundRobinState>();
@@ -514,6 +515,22 @@ namespace VietTien.API.Data
                 .HasOne(cd => cd.Order)
                 .WithMany(o => o.Debts)
                 .HasForeignKey(cd => cd.OrderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // P2-6: Sales Manager tất toán công nợ (UC-35)
+            modelBuilder.Entity<CustomerDebt>()
+                .HasOne(cd => cd.SettledByUser)
+                .WithMany()
+                .HasForeignKey(cd => cd.SettledByUserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // P2-6: Sales Manager mở khóa đơn giao lại (UC-35)
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.UnblockedByUser)
+                .WithMany()
+                .HasForeignKey(o => o.UnblockedByUserId)
+                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // Quan hệ 1 - 1 giữa User và Hồ sơ lương gốc (EmployeeSalary)
@@ -1050,6 +1067,31 @@ namespace VietTien.API.Data
                 .WithMany()
                 .HasForeignKey(st => st.CreatedByUserId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // --- P0-1: Đề xuất điều chỉnh tồn kho (Warehouse Staff -> CEO duyệt) ---
+            modelBuilder.Entity<StockAdjustment>()
+                .HasOne(a => a.Inventory)
+                .WithMany()
+                .HasForeignKey(a => a.InventoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockAdjustment>()
+                .HasOne(a => a.ProposedByUser)
+                .WithMany()
+                .HasForeignKey(a => a.ProposedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockAdjustment>()
+                .HasOne(a => a.DecidedByUser)
+                .WithMany()
+                .HasForeignKey(a => a.DecidedByUserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<StockAdjustment>()
+                .Property(a => a.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20);
 
             // Seed Data: Materials (nguyên liệu thô cho WH-PE, phục vụ WF-17 xuất NVL cho sản xuất ngoài hệ thống)
             var matPeResinId = Guid.Parse("f0000005-0005-4005-a005-000000000001");

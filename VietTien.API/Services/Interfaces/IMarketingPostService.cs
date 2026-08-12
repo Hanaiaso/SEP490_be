@@ -13,7 +13,6 @@ namespace VietTien.API.Services.Interfaces
         Task<MarketingPostDto> UpdatePostAsync(Guid id, UpdateMarketingPostDto dto, Guid userId, string userRole);
         Task<MarketingPostDto> SubmitPostAsync(Guid id, Guid userId, string userRole);
         Task<MarketingPostDto> MakeDecisionAsync(Guid id, MarketingPostDecisionDto dto, Guid managerId);
-        Task<MarketingPostDto> PublishNowAsync(Guid id, Guid managerId);
         Task<MarketingPostDto> HandleMakeWebhookCallbackAsync(Guid id, MakeWebhookCallbackDto dto);
     }
 }

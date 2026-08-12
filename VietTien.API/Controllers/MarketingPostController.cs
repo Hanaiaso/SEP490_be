@@ -180,24 +180,6 @@ namespace VietTien.API.Controllers
             }
         }
 
-        [HttpPost("{id}/publish-now")]
-        [Authorize(Roles = "SalesManager,SaleManager,Admin,CEO")]
-        public async Task<IActionResult> PublishNow(Guid id)
-        {
-            try
-            {
-                var managerIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
-                if (string.IsNullOrEmpty(managerIdStr)) return Unauthorized();
-
-                var result = await _marketingPostService.PublishNowAsync(id, Guid.Parse(managerIdStr));
-                return Ok(result);
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-        }
-
         [HttpPost("{id}/webhook-callback")]
         [AllowAnonymous]
         public async Task<IActionResult> MakeWebhookCallback(Guid id, [FromBody] MakeWebhookCallbackDto dto)

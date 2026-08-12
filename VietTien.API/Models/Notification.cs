@@ -54,6 +54,11 @@ namespace VietTien.API.Models
         SYS_30_AccountStatusChanged,
         SYS_31_RoleChanged,
         SYS_32_PaymentAnomaly,
-        SYS_33_ReviewReplyPosted
+        SYS_33_ReviewReplyPosted,
+        SYS_34_StockAdjustmentPendingApproval,
+        SYS_35_StockAdjustmentDecisionResult,
+        SYS_36_OrderUnblockedForRedelivery,
+        SYS_37_DebtSettled,
+        SYS_38_SessionRevoked
     }
 }

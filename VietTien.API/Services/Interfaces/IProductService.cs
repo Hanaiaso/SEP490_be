@@ -26,6 +26,20 @@ namespace VietTien.API.Services.Interfaces
         Task<IEnumerable<CategoryDto>> GetCategoriesAsync();
 
         /// <summary>
+        /// P2-8: Lấy TOÀN BỘ danh mục (kể cả đã tắt) cho trang quản lý CEO/Admin.
+        /// </summary>
+        Task<IEnumerable<CategoryDto>> GetCategoriesForManagementAsync();
+
+        /// <summary>P2-8: Tạo danh mục mới.</summary>
+        Task<CategoryDto> CreateCategoryAsync(CreateCategoryRequest dto);
+
+        /// <summary>P2-8: Cập nhật danh mục. Ném KeyNotFoundException nếu không tìm thấy.</summary>
+        Task<CategoryDto> UpdateCategoryAsync(Guid id, UpdateCategoryRequest dto);
+
+        /// <summary>P2-8: Xóa mềm danh mục (IsActive=false). Ném KeyNotFoundException nếu không tìm thấy.</summary>
+        Task DeleteCategoryAsync(Guid id);
+
+        /// <summary>
         /// Tạo sản phẩm mới
         /// </summary>
         Task<ProductDetailDto> CreateProductAsync(CreateProductDto dto);

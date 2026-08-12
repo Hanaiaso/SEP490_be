@@ -97,8 +97,72 @@ namespace VietTien.API.Services.Implementations
             {
                 Id          = c.Id,
                 Name        = c.Name,
-                Description = c.Description
+                Description = c.Description,
+                IsActive    = c.IsActive
             });
+        }
+
+        // P2-8: trang quản lý CEO/Admin cần thấy cả danh mục đã tắt để có thể bật lại.
+        public async Task<IEnumerable<CategoryDto>> GetCategoriesForManagementAsync()
+        {
+            var categories = await _context.Categories
+                .AsNoTracking()
+                .OrderBy(c => c.Name)
+                .ToListAsync();
+
+            return categories.Select(c => new CategoryDto
+            {
+                Id          = c.Id,
+                Name        = c.Name,
+                Description = c.Description,
+                IsActive    = c.IsActive
+            });
+        }
+
+        public async Task<CategoryDto> CreateCategoryAsync(CreateCategoryRequest dto)
+        {
+            var name = dto.Name.Trim();
+            if (await _context.Categories.AnyAsync(c => c.Name == name))
+                throw new InvalidOperationException($"Danh mục '{name}' đã tồn tại.");
+
+            var category = new Category
+            {
+                Name = name,
+                Description = dto.Description?.Trim(),
+                IsActive = true
+            };
+
+            _context.Categories.Add(category);
+            await _context.SaveChangesAsync();
+
+            return new CategoryDto { Id = category.Id, Name = category.Name, Description = category.Description, IsActive = category.IsActive };
+        }
+
+        public async Task<CategoryDto> UpdateCategoryAsync(Guid id, UpdateCategoryRequest dto)
+        {
+            var category = await _context.Categories.FirstOrDefaultAsync(c => c.Id == id)
+                ?? throw new KeyNotFoundException("Không tìm thấy danh mục.");
+
+            var name = dto.Name.Trim();
+            if (await _context.Categories.AnyAsync(c => c.Id != id && c.Name == name))
+                throw new InvalidOperationException($"Danh mục '{name}' đã tồn tại.");
+
+            category.Name = name;
+            category.Description = dto.Description?.Trim();
+            category.IsActive = dto.IsActive;
+
+            await _context.SaveChangesAsync();
+
+            return new CategoryDto { Id = category.Id, Name = category.Name, Description = category.Description, IsActive = category.IsActive };
+        }
+
+        public async Task DeleteCategoryAsync(Guid id)
+        {
+            var category = await _context.Categories.FirstOrDefaultAsync(c => c.Id == id)
+                ?? throw new KeyNotFoundException("Không tìm thấy danh mục.");
+
+            category.IsActive = false;
+            await _context.SaveChangesAsync();
         }
 
         public async Task<ProductDetailDto> CreateProductAsync(CreateProductDto dto)

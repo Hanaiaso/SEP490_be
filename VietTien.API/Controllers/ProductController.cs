@@ -59,6 +59,79 @@ namespace VietTien.API.Controllers
             return Ok(categories);
         }
 
+        /// <summary>P2-8: Lấy toàn bộ danh mục (kể cả đã tắt) cho trang quản lý CEO/Admin</summary>
+        [HttpGet("categories/management")]
+        [Authorize(Roles = "CEO,Admin")]
+        [ProducesResponseType(typeof(IEnumerable<CategoryDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetCategoriesForManagement()
+        {
+            var categories = await _productService.GetCategoriesForManagementAsync();
+            return Ok(categories);
+        }
+
+        /// <summary>P2-8: Tạo danh mục mới</summary>
+        [HttpPost("categories")]
+        [Authorize(Roles = "CEO,Admin")]
+        [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> CreateCategory([FromBody] CreateCategoryRequest dto)
+        {
+            try
+            {
+                var result = await _productService.CreateCategoryAsync(dto);
+                return Ok(result);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>P2-8: Cập nhật danh mục</summary>
+        [HttpPut("categories/{id:guid}")]
+        [Authorize(Roles = "CEO,Admin")]
+        [ProducesResponseType(typeof(CategoryDto), StatusCodes.Status200OK)]
+        public async Task<IActionResult> UpdateCategory([FromRoute] Guid id, [FromBody] UpdateCategoryRequest dto)
+        {
+            try
+            {
+                var result = await _productService.UpdateCategoryAsync(id, dto);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>P2-8: Xóa mềm danh mục (tắt IsActive)</summary>
+        [HttpDelete("categories/{id:guid}")]
+        [Authorize(Roles = "CEO,Admin")]
+        [ProducesResponseType(StatusCodes.Status204NoContent)]
+        public async Task<IActionResult> DeleteCategory([FromRoute] Guid id)
+        {
+            try
+            {
+                await _productService.DeleteCategoryAsync(id);
+                return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
         /// <summary>Tạo sản phẩm mới</summary>
         [HttpPost]
         [Authorize(Roles = "CEO,Admin")]

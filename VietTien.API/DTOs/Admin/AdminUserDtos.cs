@@ -31,6 +31,10 @@ namespace VietTien.API.DTOs.Admin
         public bool IsActive { get; set; }
         public bool IsEmailVerified { get; set; }
         public DateTime CreatedAt { get; set; }
+
+        // P2-7: trạng thái phiên đăng nhập (UC-55)
+        public bool HasActiveSession { get; set; }
+        public DateTime? SessionExpiresAt { get; set; }
     }
 
     public class CreateStaffUserRequest
@@ -70,6 +74,13 @@ namespace VietTien.API.DTOs.Admin
         public bool IsActive { get; set; }
 
         [Required(ErrorMessage = "Vui lòng nhập lý do.")]
+        [MaxLength(1000)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public class RevokeSessionRequest
+    {
+        [Required(ErrorMessage = "Vui lòng nhập lý do đăng xuất từ xa.")]
         [MaxLength(1000)]
         public string Reason { get; set; } = string.Empty;
     }

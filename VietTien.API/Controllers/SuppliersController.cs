@@ -7,7 +7,7 @@ namespace VietTien.API.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [Authorize(Roles = "CEO")]
+    [Authorize(Roles = "CEO,Admin")]
     public class SuppliersController : ControllerBase
     {
         private readonly ISupplierService _supplierService;

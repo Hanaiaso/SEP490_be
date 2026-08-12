@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VietTien.API.Data;
 
@@ -11,9 +12,11 @@ using VietTien.API.Data;
 namespace VietTien.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260811212204_AddStockAdjustments")]
+    partial class AddStockAdjustments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -426,9 +429,6 @@ namespace VietTien.API.Migrations
                         .HasColumnType("uniqueidentifier")
                         .HasDefaultValueSql("NEWSEQUENTIALID()");
 
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
                     b.Property<Guid>("CustomerProfileId")
                         .HasColumnType("uniqueidentifier");
 
@@ -442,15 +442,6 @@ namespace VietTien.API.Migrations
                     b.Property<int>("OverdueDays")
                         .HasColumnType("int");
 
-                    b.Property<DateTime?>("SettledAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("SettledByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SettlementNote")
-                        .HasColumnType("nvarchar(max)");
-
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
@@ -459,8 +450,6 @@ namespace VietTien.API.Migrations
                     b.HasIndex("CustomerProfileId");
 
                     b.HasIndex("OrderId");
-
-                    b.HasIndex("SettledByUserId");
 
                     b.ToTable("CustomerDebts");
                 });
@@ -1503,15 +1492,6 @@ namespace VietTien.API.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<string>("UnblockReason")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("UnblockedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("UnblockedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<decimal>("VatAmount")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)");
@@ -1531,8 +1511,6 @@ namespace VietTien.API.Migrations
                     b.HasIndex("ReplacementOrderId");
 
                     b.HasIndex("SalesStaffId");
-
-                    b.HasIndex("UnblockedByUserId");
 
                     b.ToTable("Orders");
                 });
@@ -4020,16 +3998,9 @@ namespace VietTien.API.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("VietTien.API.Models.User", "SettledByUser")
-                        .WithMany()
-                        .HasForeignKey("SettledByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("CustomerProfile");
 
                     b.Navigation("Order");
-
-                    b.Navigation("SettledByUser");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.CustomerProfile", b =>
@@ -4260,11 +4231,6 @@ namespace VietTien.API.Migrations
                         .HasForeignKey("SalesStaffId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("VietTien.API.Models.User", "UnblockedByUser")
-                        .WithMany()
-                        .HasForeignKey("UnblockedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.Navigation("CustomerProfile");
 
                     b.Navigation("ManualConfirmedBy");
@@ -4272,8 +4238,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("ReplacementOrder");
 
                     b.Navigation("SalesStaff");
-
-                    b.Navigation("UnblockedByUser");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.OrderItem", b =>

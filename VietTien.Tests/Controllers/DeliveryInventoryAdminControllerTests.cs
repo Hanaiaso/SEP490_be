@@ -947,32 +947,6 @@ namespace VietTien.Tests.Controllers
             (await Build().MakeDecision(Guid.NewGuid(), new MarketingPostDecisionDto())).StatusOf().Should().Be(400);
         }
 
-        [Fact]
-        public async Task PublishNow_WithoutUserClaim_Returns401()
-        {
-            var sut = Build();
-            sut.WithAnonymousUser();
-
-            (await sut.PublishNow(Guid.NewGuid())).StatusOf().Should().Be(401);
-        }
-
-        [Fact]
-        public async Task PublishNow_Success_ReturnsOk()
-        {
-            _service.Setup(s => s.PublishNowAsync(It.IsAny<Guid>(), _userId)).ReturnsAsync(new MarketingPostDto());
-
-            (await Build().PublishNow(Guid.NewGuid())).StatusOf().Should().Be(200);
-        }
-
-        [Fact]
-        public async Task PublishNow_WhenNotApproved_Returns400()
-        {
-            _service.Setup(s => s.PublishNowAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
-                .ThrowsAsync(new InvalidOperationException("Bai chua duoc duyet"));
-
-            (await Build().PublishNow(Guid.NewGuid())).StatusOf().Should().Be(400);
-        }
-
         // ── callback từ Make.com ─────────────────────────────────────────────
         // Secret trong cấu hình luôn khác rỗng ở các case dưới, nên nhánh kiểm tra
         // secret chạy tất định, KHÔNG phụ thuộc biến môi trường ASPNETCORE_ENVIRONMENT.

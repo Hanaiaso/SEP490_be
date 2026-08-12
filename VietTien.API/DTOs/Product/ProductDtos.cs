@@ -61,6 +61,31 @@ namespace VietTien.API.DTOs.Product
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string? Description { get; set; }
+
+        // P2-8: trạng thái danh mục (Admin/CEO quản lý)
+        public bool IsActive { get; set; }
+    }
+
+    public class CreateCategoryRequest
+    {
+        [Required(ErrorMessage = "Tên danh mục là bắt buộc.")]
+        [MaxLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? Description { get; set; }
+    }
+
+    public class UpdateCategoryRequest
+    {
+        [Required(ErrorMessage = "Tên danh mục là bắt buộc.")]
+        [MaxLength(200)]
+        public string Name { get; set; } = string.Empty;
+
+        [MaxLength(1000)]
+        public string? Description { get; set; }
+
+        public bool IsActive { get; set; } = true;
     }
 
     public class CreateProductDto

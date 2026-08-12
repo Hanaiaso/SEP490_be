@@ -8,7 +8,7 @@ namespace VietTien.API.Services.Interfaces
 {
     public interface IStockTransferService
     {
-        Task<IEnumerable<StockTransferDto>> GetAllAsync();
+        Task<IEnumerable<StockTransferDto>> GetAllAsync(string? status = null);
         Task<StockTransferDto> GetByIdAsync(Guid id);
         Task<StockTransferDto> CreateAsync(CreateStockTransferDto dto, Guid createdByUserId);
         Task<StockTransferDto> UpdateAsync(Guid id, UpdateStockTransferDto dto);

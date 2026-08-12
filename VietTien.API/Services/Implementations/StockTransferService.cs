@@ -21,9 +21,9 @@ namespace VietTien.API.Services.Implementations
             _notificationService = notificationService;
         }
 
-        public async Task<IEnumerable<StockTransferDto>> GetAllAsync()
+        public async Task<IEnumerable<StockTransferDto>> GetAllAsync(string? status = null)
         {
-            var transfers = await _context.StockTransfers
+            var query = _context.StockTransfers
                 .Include(st => st.SourceWarehouse)
                 .Include(st => st.DestinationWarehouse)
                 .Include(st => st.CreatedByUser)
@@ -31,6 +31,15 @@ namespace VietTien.API.Services.Implementations
                     .ThenInclude(i => i.Product)
                 .Include(st => st.Items)
                     .ThenInclude(i => i.Material)
+                .AsQueryable();
+
+            // P1: trước đây tham số này chưa từng được đọc -> FE gửi status gì cũng luôn trả toàn bộ danh sách.
+            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<StockTransferStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(st => st.Status == parsedStatus);
+            }
+
+            var transfers = await query
                 .OrderByDescending(st => st.CreatedAt)
                 .ToListAsync();
 

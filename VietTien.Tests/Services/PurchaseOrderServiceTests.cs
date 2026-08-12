@@ -1,3 +1,4 @@
+using ClosedXML.Excel;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -18,6 +19,7 @@ namespace VietTien.Tests.Services
     {
         private readonly ApplicationDbContext _db = TestDbFactory.Create();
         private readonly Mock<INotificationService> _noti = new();
+        private readonly Mock<IOcrService> _ocr = new();
         private readonly PurchaseOrderService _sut;
         private readonly User _ceo;
         private readonly Supplier _supplier;
@@ -25,7 +27,7 @@ namespace VietTien.Tests.Services
 
         public PurchaseOrderServiceTests()
         {
-            _sut = new PurchaseOrderService(_db, _noti.Object, new Mock<ILogger<PurchaseOrderService>>().Object);
+            _sut = new PurchaseOrderService(_db, _noti.Object, new Mock<ILogger<PurchaseOrderService>>().Object, _ocr.Object);
             _ceo = TestData.User(u => u.Role = SystemRole.CEO);
             _supplier = new Supplier { Name = "NCC A", Code = "SUP-01" };
             (_warehouse, _) = TestData.Warehouse();
@@ -177,6 +179,250 @@ namespace VietTien.Tests.Services
             var act = () => _sut.ClosePurchaseOrderAsync(po.Id, _ceo.Id);
 
             await act.Should().ThrowAsync<Exception>().WithMessage("*FullyReceived*");
+        }
+
+        // ── Block: Import PO từ ảnh OCR (P2-1, UC-44/UC-52) ──────────────────
+
+        private static Microsoft.AspNetCore.Http.IFormFile FakeImageFile(string name = "invoice.jpg")
+        {
+            var file = new Mock<Microsoft.AspNetCore.Http.IFormFile>();
+            file.SetupGet(f => f.Length).Returns(128);
+            file.SetupGet(f => f.FileName).Returns(name);
+            file.SetupGet(f => f.ContentType).Returns("image/jpeg");
+            file.Setup(f => f.OpenReadStream()).Returns(() => new MemoryStream(new byte[] { 1, 2, 3 }));
+            return file.Object;
+        }
+
+        [Fact]
+        public async Task ImportFromImage_VendorNameFuzzyMatches_UsesMatchedSupplier()
+        {
+            var supplier2 = new Supplier { Name = "Công ty TNHH Bao Bì Việt Tiến", Code = "SUP-02" };
+            _db.Suppliers.Add(supplier2);
+            _db.SaveChanges();
+            _ocr.Setup(o => o.ExtractInvoiceAsync(It.IsAny<Stream>(), It.IsAny<string>())).ReturnsAsync(new InvoiceOcrResult
+            {
+                VendorName = "Bao Bì Việt Tiến",
+                Items = new List<InvoiceOcrItem> { new() { Description = "Hàng lạ không khớp", Quantity = 2, UnitPrice = 5000m } }
+            });
+
+            var dto = await _sut.ImportFromImageAsync(FakeImageFile(), _ceo.Id);
+
+            dto.SupplierId.Should().Be(supplier2.Id);
+        }
+
+        [Fact]
+        public async Task ImportFromImage_ItemNameMatchesProduct_LinksProductId()
+        {
+            var product = TestData.SeedProduct(_db, p => p.Name = "Băng keo trong 5cm");
+            _ocr.Setup(o => o.ExtractInvoiceAsync(It.IsAny<Stream>(), It.IsAny<string>())).ReturnsAsync(new InvoiceOcrResult
+            {
+                VendorName = "NCC A",
+                Items = new List<InvoiceOcrItem> { new() { Description = "Băng keo trong", Quantity = 10, UnitPrice = 8000m } }
+            });
+
+            var dto = await _sut.ImportFromImageAsync(FakeImageFile(), _ceo.Id);
+
+            dto.Items.Should().ContainSingle();
+            var savedItem = _db.PurchaseOrderItems.Single(i => i.PurchaseOrderId == dto.Id);
+            savedItem.ProductId.Should().Be(product.Id);
+            savedItem.Note.Should().BeNull();
+        }
+
+        [Fact]
+        public async Task ImportFromImage_ItemNameUnmatched_KeepsNullIdsWithNote()
+        {
+            _ocr.Setup(o => o.ExtractInvoiceAsync(It.IsAny<Stream>(), It.IsAny<string>())).ReturnsAsync(new InvoiceOcrResult
+            {
+                VendorName = "NCC A",
+                Items = new List<InvoiceOcrItem> { new() { Description = "Sản phẩm không có trong hệ thống", Quantity = 3, UnitPrice = 1000m } }
+            });
+
+            var dto = await _sut.ImportFromImageAsync(FakeImageFile(), _ceo.Id);
+
+            var savedItem = _db.PurchaseOrderItems.Single(i => i.PurchaseOrderId == dto.Id);
+            savedItem.ProductId.Should().BeNull();
+            savedItem.MaterialId.Should().BeNull();
+            savedItem.Note.Should().Contain("Sản phẩm không có trong hệ thống");
+            dto.Note.Should().Contain("chưa khớp");
+        }
+
+        [Fact]
+        public async Task ImportFromImage_OcrReturnsNoItems_ThrowsAndCreatesNoPo()
+        {
+            _ocr.Setup(o => o.ExtractInvoiceAsync(It.IsAny<Stream>(), It.IsAny<string>()))
+                .ReturnsAsync(new InvoiceOcrResult());
+            var countBefore = _db.PurchaseOrders.Count();
+
+            var act = () => _sut.ImportFromImageAsync(FakeImageFile(), _ceo.Id);
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            _db.PurchaseOrders.Count().Should().Be(countBefore);
+        }
+
+        // ── Block: Import PO từ file Excel .xlsx thật (P2-2, UC-44/UC-52) ────
+
+        private static Microsoft.AspNetCore.Http.IFormFile FakeExcelFile(byte[] bytes, string name = "import.xlsx")
+        {
+            var file = new Mock<Microsoft.AspNetCore.Http.IFormFile>();
+            file.SetupGet(f => f.Length).Returns(bytes.Length);
+            file.SetupGet(f => f.FileName).Returns(name);
+            file.SetupGet(f => f.ContentType).Returns("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+            file.Setup(f => f.OpenReadStream()).Returns(() => new MemoryStream(bytes));
+            return file.Object;
+        }
+
+        private static byte[] BuildXlsx(params (string Sku, int Quantity, decimal UnitPrice)[] rows)
+        {
+            using var wb = new XLWorkbook();
+            var ws = wb.Worksheets.Add("Sheet1");
+            ws.Cell(1, 1).Value = "ProductSku";
+            ws.Cell(1, 2).Value = "Quantity";
+            ws.Cell(1, 3).Value = "UnitPrice";
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var r = i + 2;
+                ws.Cell(r, 1).Value = rows[i].Sku;
+                ws.Cell(r, 2).Value = rows[i].Quantity;
+                ws.Cell(r, 3).Value = rows[i].UnitPrice;
+            }
+            using var ms = new MemoryStream();
+            wb.SaveAs(ms);
+            return ms.ToArray();
+        }
+
+        [Fact]
+        public async Task ImportFromExcel_ValidXlsx_CreatesDraftWithMatchedProducts()
+        {
+            var p1 = TestData.SeedProduct(_db, p => p.Sku = "SKU-001");
+            var p2 = TestData.SeedProduct(_db, p => p.Sku = "SKU-002");
+            var bytes = BuildXlsx(("SKU-001", 10, 1000), ("SKU-002", 5, 2000));
+
+            var dto = await _sut.ImportFromExcelAsync(FakeExcelFile(bytes), _ceo.Id);
+
+            dto.Items.Should().HaveCount(2);
+            var saved = _db.PurchaseOrderItems.Where(i => i.PurchaseOrderId == dto.Id).ToList();
+            saved.Should().Contain(i => i.ProductId == p1.Id && i.ExpectedQuantity == 10);
+            saved.Should().Contain(i => i.ProductId == p2.Id && i.ExpectedQuantity == 5);
+        }
+
+        [Fact]
+        public async Task ImportFromExcel_SkuNotFound_KeepsRowWithNullProductAndNote()
+        {
+            var bytes = BuildXlsx(("SKU-KHONG-TON-TAI", 3, 500));
+
+            var dto = await _sut.ImportFromExcelAsync(FakeExcelFile(bytes), _ceo.Id);
+
+            var saved = _db.PurchaseOrderItems.Single(i => i.PurchaseOrderId == dto.Id);
+            saved.ProductId.Should().BeNull();
+            saved.Note.Should().Contain("SKU-KHONG-TON-TAI");
+        }
+
+        [Fact]
+        public async Task ImportFromExcel_NoValidRows_ThrowsAndCreatesNoPo()
+        {
+            var bytes = BuildXlsx();
+            var countBefore = _db.PurchaseOrders.Count();
+
+            var act = () => _sut.ImportFromExcelAsync(FakeExcelFile(bytes), _ceo.Id);
+
+            await act.Should().ThrowAsync<Exception>();
+            _db.PurchaseOrders.Count().Should().Be(countBefore);
+        }
+
+        [Fact]
+        public async Task ImportFromExcel_NotAValidXlsxFile_ThrowsFriendlyError()
+        {
+            var bytes = new byte[] { 1, 2, 3, 4, 5 };
+
+            var act = () => _sut.ImportFromExcelAsync(FakeExcelFile(bytes, "import.xls"), _ceo.Id);
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*.xlsx*");
+        }
+
+        // ── Block: Resolve Discrepancy theo resolutionType (P2-3) ────────────
+
+        private PurchaseOrder SeedPoWithReceipt(Guid productId, int expectedQty, int receivedQty, int excessQty, int quarantineQty)
+        {
+            var po = new PurchaseOrder
+            {
+                Code = $"PO-{Guid.NewGuid():N}"[..12],
+                CreatedById = _ceo.Id,
+                SupplierId = _supplier.Id,
+                WarehouseId = _warehouse.Id,
+                Status = PurchaseOrderStatus.DiscrepancyReview,
+            };
+            var poItem = new PurchaseOrderItem { ProductId = productId, ExpectedQuantity = expectedQty, ReceivedQuantity = receivedQty, UnitPrice = 1000m, Unit = "Cái" };
+            po.Items.Add(poItem);
+            _db.PurchaseOrders.Add(po);
+            _db.SaveChanges();
+
+            var location = _db.WarehouseLocations.First(l => l.WarehouseId == _warehouse.Id);
+            _db.Inventories.Add(new Inventory { ProductId = productId, WarehouseLocationId = location.Id, OnHandQuantity = receivedQty, QuarantineQuantity = quarantineQty });
+
+            var receipt = new GoodsReceipt { PurchaseOrderId = po.Id, ReceivedByUserId = _ceo.Id, Code = "GR-001", Status = GoodsReceiptStatus.Posted };
+            receipt.Items.Add(new GoodsReceiptItem { PurchaseOrderItemId = poItem.Id, AcceptedQuantity = receivedQty, ExcessQuantity = excessQty });
+            _db.GoodsReceipts.Add(receipt);
+            _db.SaveChanges();
+
+            return po;
+        }
+
+        [Fact]
+        public async Task ResolveDiscrepancy_ReturnExcess_DeductsQuarantineAndLogsTransaction()
+        {
+            var product = TestData.SeedProduct(_db);
+            var po = SeedPoWithReceipt(product.Id, expectedQty: 10, receivedQty: 10, excessQty: 3, quarantineQty: 3);
+
+            var dto = await _sut.ResolveDiscrepancyAsync(po.Id, _ceo.Id, new DiscrepancyResolutionRequest { ResolutionType = "ReturnExcess", Reason = "Thừa 3, trả NCC" });
+
+            dto.Status.Should().Be("Closed");
+            _db.Inventories.Single(i => i.ProductId == product.Id).QuarantineQuantity.Should().Be(0);
+            _db.StockTransactions.Should().ContainSingle(t => t.TransactionType == TransactionType.ReturnToSupplier && t.QuantityChange == -3);
+        }
+
+        [Fact]
+        public async Task ResolveDiscrepancy_ReturnExcess_NoExcessRecorded_Throws()
+        {
+            var po = SeedPo(PurchaseOrderStatus.DiscrepancyReview);
+
+            var act = () => _sut.ResolveDiscrepancyAsync(po.Id, _ceo.Id, new DiscrepancyResolutionRequest { ResolutionType = "ReturnExcess", Reason = "Không có hàng thừa" });
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            _db.PurchaseOrders.Single(p => p.Id == po.Id).Status.Should().Be(PurchaseOrderStatus.DiscrepancyReview);
+        }
+
+        [Fact]
+        public async Task ResolveDiscrepancy_RequestSupplemental_StillShort_ReopensToPartiallyReceived()
+        {
+            var product = TestData.SeedProduct(_db);
+            var po = SeedPoWithReceipt(product.Id, expectedQty: 10, receivedQty: 6, excessQty: 0, quarantineQty: 0);
+
+            var dto = await _sut.ResolveDiscrepancyAsync(po.Id, _ceo.Id, new DiscrepancyResolutionRequest { ResolutionType = "RequestSupplemental", Reason = "Yêu cầu giao bổ sung 4" });
+
+            dto.Status.Should().Be("PartiallyReceived");
+        }
+
+        [Fact]
+        public async Task ResolveDiscrepancy_RequestSupplemental_NoShortageLeft_Throws()
+        {
+            var product = TestData.SeedProduct(_db);
+            var po = SeedPoWithReceipt(product.Id, expectedQty: 10, receivedQty: 10, excessQty: 0, quarantineQty: 0);
+
+            var act = () => _sut.ResolveDiscrepancyAsync(po.Id, _ceo.Id, new DiscrepancyResolutionRequest { ResolutionType = "RequestSupplemental", Reason = "Không còn thiếu" });
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+
+        [Theory]
+        [InlineData("AcceptExcess")]
+        [InlineData("CloseShort")]
+        public async Task ResolveDiscrepancy_AcceptExcessOrCloseShort_ClosesPo(string resolutionType)
+        {
+            var po = SeedPo(PurchaseOrderStatus.DiscrepancyReview);
+
+            var dto = await _sut.ResolveDiscrepancyAsync(po.Id, _ceo.Id, new DiscrepancyResolutionRequest { ResolutionType = resolutionType, Reason = "Xử lý" });
+
+            dto.Status.Should().Be("Closed");
         }
     }
 }

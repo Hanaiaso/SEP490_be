@@ -150,6 +150,35 @@ namespace VietTien.Tests.Services
             _db.StockTransfers.Single(t => t.Id == draft.Id).Status.Should().Be(StockTransferStatus.Dispatched);
         }
 
+        // P1: trước đây GetAllAsync() không nhận/đọc status -> FE lọc kiểu gì cũng luôn trả toàn bộ danh sách.
+        [Fact]
+        public async Task P1_GetAll_FilterByStatus_OnlyReturnsMatchingTransfers()
+        {
+            SeedSourceStock(20);
+            var draftOnly = await CreateDraft(qty: 3);
+            var dispatched = await CreateDraft(qty: 5);
+            await _sut.DispatchAsync(dispatched.Id);
+
+            var dispatchedOnly = await _sut.GetAllAsync("Dispatched");
+            var draftOnlyResult = await _sut.GetAllAsync("draft"); // không phân biệt hoa/thường
+            var all = await _sut.GetAllAsync();
+
+            dispatchedOnly.Should().ContainSingle(t => t.Id == dispatched.Id);
+            draftOnlyResult.Should().ContainSingle(t => t.Id == draftOnly.Id);
+            all.Should().HaveCount(2, "không truyền status thì phải trả về toàn bộ, không lọc gì cả");
+        }
+
+        [Fact]
+        public async Task P1_GetAll_InvalidStatusString_IsIgnored_ReturnsAll()
+        {
+            SeedSourceStock(20);
+            await CreateDraft(qty: 3);
+
+            var result = await _sut.GetAllAsync("khong-phai-trang-thai-hop-le");
+
+            result.Should().HaveCount(1, "status không hợp lệ phải bị bỏ qua thay vì làm rỗng kết quả hoặc lỗi 500");
+        }
+
         // L1-REG-03 | EP-Invalid | IDOR StockTransferService: nhận hàng ở kho không phải kho đích được gán.
         // ĐÃ SỬA: ReceiveAsync giờ nhận staffId, đối chiếu AssignedWarehouseId với DestinationWarehouseId
         // (cùng cơ chế với L1-REG-01/InventoryService.AdjustInventoryAsync).

@@ -112,7 +112,8 @@ namespace VietTien.Tests.Regression
 
             var sut = new PurchaseOrderService(_db,
                 new Mock<INotificationService>().Object,
-                new Mock<ILogger<PurchaseOrderService>>().Object);
+                new Mock<ILogger<PurchaseOrderService>>().Object,
+                new Mock<IOcrService>().Object);
 
             Func<Task> act = action switch
             {

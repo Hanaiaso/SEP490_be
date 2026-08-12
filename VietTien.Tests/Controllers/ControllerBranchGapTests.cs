@@ -144,9 +144,9 @@ namespace VietTien.Tests.Controllers
         {
             await SeedAsync(unread: 3, read: 0);
 
-            var body = ((await _sut.GetNotifications(page: 0)) as ObjectResult)!.Value!;
+            var body = ((await _sut.GetNotifications(pageNumber: 0)) as ObjectResult)!.Value!;
 
-            body.GetType().GetProperty("Page")!.GetValue(body).Should().Be(1,
+            body.GetType().GetProperty("PageNumber")!.GetValue(body).Should().Be(1,
                 "page < 1 phải kẹp về 1 chứ không được tính Skip âm");
         }
 
@@ -155,9 +155,9 @@ namespace VietTien.Tests.Controllers
         {
             await SeedAsync(unread: 1, read: 0);
 
-            var body = ((await _sut.GetNotifications(limit: 0)) as ObjectResult)!.Value!;
+            var body = ((await _sut.GetNotifications(pageSize: 0)) as ObjectResult)!.Value!;
 
-            body.GetType().GetProperty("Limit")!.GetValue(body).Should().Be(20);
+            body.GetType().GetProperty("PageSize")!.GetValue(body).Should().Be(20);
         }
 
         [Fact]
@@ -165,9 +165,9 @@ namespace VietTien.Tests.Controllers
         {
             await SeedAsync(unread: 1, read: 0);
 
-            var body = ((await _sut.GetNotifications(limit: 5000)) as ObjectResult)!.Value!;
+            var body = ((await _sut.GetNotifications(pageSize: 5000)) as ObjectResult)!.Value!;
 
-            body.GetType().GetProperty("Limit")!.GetValue(body).Should().Be(100,
+            body.GetType().GetProperty("PageSize")!.GetValue(body).Should().Be(100,
                 "chặn trần để một request không kéo về toàn bộ bảng thông báo");
         }
 
@@ -176,11 +176,48 @@ namespace VietTien.Tests.Controllers
         {
             await SeedAsync(unread: 5, read: 0);
 
-            var body = ((await _sut.GetNotifications(page: 2, limit: 2)) as ObjectResult)!.Value!;
+            var body = ((await _sut.GetNotifications(pageNumber: 2, pageSize: 2)) as ObjectResult)!.Value!;
 
             body.GetType().GetProperty("Total")!.GetValue(body).Should().Be(5);
             ((System.Collections.ICollection)body.GetType().GetProperty("Items")!.GetValue(body)!)
                 .Count.Should().Be(2, "trang 2 với limit 2 phải trả đúng 2 bản ghi");
+        }
+
+        // P1: filter isRead trước đây bị BE bỏ qua hoàn toàn (chưa từng đọc tham số) khiến tab
+        // "Chưa đọc" trên chuông thông báo hiển thị y hệt tab "Tất cả".
+        [Fact]
+        public async Task GetNotifications_FilterByIsReadFalse_OnlyReturnsUnread()
+        {
+            await SeedAsync(unread: 2, read: 3);
+
+            var body = ((await _sut.GetNotifications(isRead: false)) as ObjectResult)!.Value!;
+
+            body.GetType().GetProperty("Total")!.GetValue(body).Should().Be(2,
+                "isRead=false phải lọc chỉ còn thông báo chưa đọc, không phải toàn bộ danh sách");
+            var items = (System.Collections.IEnumerable)body.GetType().GetProperty("Items")!.GetValue(body)!;
+            foreach (Notification n in items)
+                n.IsRead.Should().BeFalse();
+        }
+
+        [Fact]
+        public async Task GetNotifications_FilterByIsReadTrue_OnlyReturnsRead()
+        {
+            await SeedAsync(unread: 2, read: 3);
+
+            var body = ((await _sut.GetNotifications(isRead: true)) as ObjectResult)!.Value!;
+
+            body.GetType().GetProperty("Total")!.GetValue(body).Should().Be(3);
+        }
+
+        [Fact]
+        public async Task GetNotifications_NoIsReadFilter_ReturnsAll()
+        {
+            await SeedAsync(unread: 2, read: 3);
+
+            var body = ((await _sut.GetNotifications()) as ObjectResult)!.Value!;
+
+            body.GetType().GetProperty("Total")!.GetValue(body).Should().Be(5,
+                "không truyền isRead thì phải trả về toàn bộ, không lọc gì cả");
         }
 
         // ── khuôn 3: danh sách rỗng ──────────────────────────────────────────

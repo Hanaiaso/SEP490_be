@@ -25,6 +25,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.Configure<CloudinarySettings>(builder.Configuration.GetSection("CloudinarySettings"));
+builder.Services.Configure<AzureFormRecognizerSettings>(builder.Configuration.GetSection("AzureFormRecognizer"));
 
 
 
@@ -60,6 +61,7 @@ builder.Services.AddScoped<IAddressService, AddressService>();
 builder.Services.AddScoped<ICloudinaryService, CloudinaryService>();
 builder.Services.AddScoped<ISupplierService, SupplierService>();
 builder.Services.AddScoped<IPurchaseOrderService, PurchaseOrderService>();
+builder.Services.AddScoped<IOcrService, DocumentIntelligenceOcrService>();
 builder.Services.AddScoped<IGoodsReceiptService, GoodsReceiptService>();
 builder.Services.AddScoped<ISalesAllocationService, SalesAllocationService>();
 builder.Services.AddScoped<IManualPaymentService, ManualPaymentService>(); // MGR-05
@@ -67,6 +69,7 @@ builder.Services.AddScoped<ISalesChangeRequestService, SalesChangeRequestService
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IGoodsIssueService, GoodsIssueService>();
 builder.Services.AddScoped<IMaterialService, MaterialService>();
+builder.Services.AddScoped<IStockAdjustmentService, StockAdjustmentService>(); // P0-1
 
 // AI Marketing Studio & Make.com Webhook
 builder.Services.AddHttpClient<IMakeWebhookService, MakeWebhookService>();

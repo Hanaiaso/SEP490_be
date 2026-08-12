@@ -2376,6 +2376,144 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
+        // ─── P2-6: Sales Manager xử lý đơn bị khóa & công nợ COD (UC-35) ──────
+
+        public async Task<List<BlockedOrderDto>> GetBlockedOrdersAsync()
+        {
+            var orders = await _context.Orders
+                .AsNoTracking()
+                .Include(o => o.CustomerProfile).ThenInclude(cp => cp.User)
+                .Include(o => o.CustomerProfile).ThenInclude(cp => cp.AssignedSalesStaff)
+                .Where(o => o.IsBlockedForDelivery)
+                .OrderByDescending(o => o.FailedDeliveryCount)
+                .ToListAsync();
+
+            return orders.Select(o => new BlockedOrderDto
+            {
+                OrderId = o.Id,
+                OrderCode = o.OrderCode,
+                CustomerName = o.CustomerProfile?.Representative ?? o.CustomerProfile?.CompanyName ?? "Khách hàng",
+                CustomerPhone = o.CustomerProfile?.User?.PhoneNumber ?? o.CustomerProfile?.CompanyPhone ?? string.Empty,
+                FailedDeliveryCount = o.FailedDeliveryCount,
+                DeliveryRejectionReasonCode = o.DeliveryRejectionReasonCode,
+                AssignedSalesStaffName = o.CustomerProfile?.AssignedSalesStaff?.FullName,
+                FinalPayment = o.FinalPayment
+            }).ToList();
+        }
+
+        public async Task UnblockOrderForRedeliveryAsync(Guid orderId, Guid managerId, string reason)
+        {
+            var order = await _context.Orders
+                .Include(o => o.CustomerProfile)
+                .FirstOrDefaultAsync(o => o.Id == orderId)
+                ?? throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+
+            if (!order.IsBlockedForDelivery)
+                throw new InvalidOperationException("Đơn hàng hiện không bị khóa.");
+
+            order.IsBlockedForDelivery = false;
+            order.FailedDeliveryCount = 0;
+            order.DeliveryStatus = DeliveryStatus.Rescheduled;
+            order.UnblockedAt = DateTime.UtcNow;
+            order.UnblockedByUserId = managerId;
+            order.UnblockReason = reason.Trim();
+
+            await _context.SaveChangesAsync();
+
+            if (order.CustomerProfile?.AssignedSalesStaffId != null)
+            {
+                try
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_36_OrderUnblockedForRedelivery,
+                        order.CustomerProfile.AssignedSalesStaffId.Value,
+                        "Đơn hàng đã được mở khóa",
+                        $"Đơn hàng {order.OrderCode} đã được Sales Manager mở khóa, có thể lên lịch giao lại.",
+                        order.Id,
+                        "Order"
+                    );
+                }
+                catch (Exception notifyEx)
+                {
+                    Console.WriteLine($"[OrderService] Error sending order unblocked notification: {notifyEx.Message}");
+                }
+            }
+        }
+
+        public async Task<List<CustomerDebtManagementDto>> GetDebtsAsync(string? status = null)
+        {
+            var query = _context.CustomerDebts
+                .AsNoTracking()
+                .Include(d => d.CustomerProfile)
+                .Include(d => d.Order)
+                .Include(d => d.SettledByUser)
+                .AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<DebtStatus>(status, true, out var parsedStatus))
+            {
+                query = query.Where(d => d.Status == parsedStatus);
+            }
+
+            var debts = await query.OrderByDescending(d => d.CreatedAt).ToListAsync();
+
+            return debts.Select(d => new CustomerDebtManagementDto
+            {
+                Id = d.Id,
+                CustomerProfileId = d.CustomerProfileId,
+                CustomerName = d.CustomerProfile?.Representative ?? d.CustomerProfile?.CompanyName ?? "Khách hàng",
+                OrderId = d.OrderId,
+                OrderCode = d.Order?.OrderCode ?? string.Empty,
+                DebtAmount = d.DebtAmount,
+                Status = d.Status.ToString(),
+                OverdueDays = d.Status == DebtStatus.InDebt ? Math.Max(0, (int)(DateTime.UtcNow - d.CreatedAt).TotalDays) : d.OverdueDays,
+                CreatedAt = d.CreatedAt,
+                SettledAt = d.SettledAt,
+                SettledByName = d.SettledByUser?.FullName,
+                SettlementNote = d.SettlementNote
+            }).ToList();
+        }
+
+        public async Task SettleDebtAsync(Guid debtId, Guid managerId, string? note)
+        {
+            var debt = await _context.CustomerDebts
+                .FirstOrDefaultAsync(d => d.Id == debtId)
+                ?? throw new KeyNotFoundException("Không tìm thấy công nợ.");
+
+            if (debt.Status != DebtStatus.InDebt)
+                throw new InvalidOperationException("Công nợ này đã được xử lý.");
+
+            debt.Status = DebtStatus.Settled;
+            debt.DebtAmount = 0;
+            debt.SettledAt = DateTime.UtcNow;
+            debt.SettledByUserId = managerId;
+            debt.SettlementNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+
+            await _context.SaveChangesAsync();
+
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.CustomerProfile)
+                    .FirstOrDefaultAsync(o => o.Id == debt.OrderId);
+
+                if (order?.CustomerProfile?.AssignedSalesStaffId != null)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_37_DebtSettled,
+                        order.CustomerProfile.AssignedSalesStaffId.Value,
+                        "Công nợ đã được tất toán",
+                        $"Công nợ đơn hàng {order.OrderCode} đã được Sales Manager đánh dấu tất toán.",
+                        debt.OrderId,
+                        "Order"
+                    );
+                }
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending debt settled notification: {notifyEx.Message}");
+            }
+        }
+
         public async Task CreateReturnExchangeRequestAsync(Guid orderId, Guid requestedByUserId, CreateReturnExchangeRequestDto dto)
         {
             var order = await _context.Orders

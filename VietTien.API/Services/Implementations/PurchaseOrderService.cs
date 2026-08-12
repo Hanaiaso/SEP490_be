@@ -12,12 +12,27 @@ namespace VietTien.API.Services.Implementations
         private readonly ApplicationDbContext _context;
         private readonly INotificationService _notificationService;
         private readonly ILogger<PurchaseOrderService> _logger;
+        private readonly IOcrService _ocrService;
 
-        public PurchaseOrderService(ApplicationDbContext context, INotificationService notificationService, ILogger<PurchaseOrderService> logger)
+        public PurchaseOrderService(ApplicationDbContext context, INotificationService notificationService, ILogger<PurchaseOrderService> logger, IOcrService ocrService)
         {
             _context = context;
             _notificationService = notificationService;
             _logger = logger;
+            _ocrService = ocrService;
+        }
+
+        // So khớp gần đúng theo tên (không hoa-thường, chứa lẫn nhau 2 chiều) — dữ liệu OCR từ hóa đơn giấy
+        // hiếm khi khớp tuyệt đối với tên trong catalogue hệ thống.
+        private static T? FuzzyMatchByName<T>(IEnumerable<T> candidates, string? name, Func<T, string> nameSelector) where T : class
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            var normalized = name.Trim().ToLowerInvariant();
+            return candidates.FirstOrDefault(c =>
+            {
+                var cName = nameSelector(c).Trim().ToLowerInvariant();
+                return cName == normalized || cName.Contains(normalized) || normalized.Contains(cName);
+            });
         }
 
         public async Task<PurchaseOrderDto> CreateAsync(Guid ceoId, CreatePurchaseOrderRequest request)
@@ -99,37 +114,48 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<PurchaseOrderDto> ImportFromExcelAsync(Microsoft.AspNetCore.Http.IFormFile file, Guid ceoId)
         {
-            // GH-10/BR-015: đọc thật nội dung file thay vì tạo PO rỗng. Hỗ trợ định dạng CSV
-            // (header: ProductSku,Quantity,UnitPrice) — đủ cho export/import phổ biến từ Excel.
-            // TODO: parse file .xlsx nhị phân thật (ClosedXML) khi cần nhận trực tiếp file Excel gốc
-            // chưa qua "Save As CSV" — hiện tại nội dung không phải CSV/không đọc được sẽ tạo PO
-            // rỗng kèm ImportRowError cho từng dòng lỗi thay vì báo sai là đã nhập thành công.
+            // GH-10/BR-015: đọc thật nội dung file .xlsx bằng ClosedXML (header dòng 1:
+            // ProductSku,Quantity,UnitPrice) thay vì giả định CSV — file Excel thật là nhị phân,
+            // không đọc được bằng StreamReader text thuần.
             var rows = new List<(string Sku, int Quantity, decimal UnitPrice)>();
             var rowErrors = new List<string>();
-            using (var reader = new StreamReader(file.OpenReadStream(), Encoding.UTF8))
+
+            ClosedXML.Excel.IXLWorksheet worksheet;
+            using (var stream = file.OpenReadStream())
             {
-                var text = await reader.ReadToEndAsync();
-                var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                for (int lineIdx = 1; lineIdx < lines.Length; lineIdx++) // dòng 0 là header
+                try
                 {
-                    var cols = lines[lineIdx].Split(',');
-                    if (cols.Length < 3)
+                    using var workbook = new ClosedXML.Excel.XLWorkbook(stream);
+                    worksheet = workbook.Worksheets.First();
+
+                    var lastRow = worksheet.LastRowUsed()?.RowNumber() ?? 1;
+                    for (int rowIdx = 2; rowIdx <= lastRow; rowIdx++) // dòng 1 là header
                     {
-                        rowErrors.Add($"Dòng {lineIdx + 1}: thiếu cột (cần ProductSku,Quantity,UnitPrice).");
-                        continue;
+                        var row = worksheet.Row(rowIdx);
+                        if (row.IsEmpty()) continue;
+
+                        var sku = row.Cell(1).GetString().Trim();
+                        if (string.IsNullOrWhiteSpace(sku))
+                        {
+                            rowErrors.Add($"Dòng {rowIdx}: thiếu SKU sản phẩm.");
+                            continue;
+                        }
+                        if (!row.Cell(2).TryGetValue<int>(out var qty) || qty <= 0)
+                        {
+                            rowErrors.Add($"Dòng {rowIdx}: số lượng không hợp lệ ('{row.Cell(2).GetString()}').");
+                            continue;
+                        }
+                        if (!row.Cell(3).TryGetValue<decimal>(out var price) || price < 0)
+                        {
+                            rowErrors.Add($"Dòng {rowIdx}: đơn giá không hợp lệ ('{row.Cell(3).GetString()}').");
+                            continue;
+                        }
+                        rows.Add((sku, qty, price));
                     }
-                    var sku = cols[0].Trim();
-                    if (!int.TryParse(cols[1].Trim(), out var qty) || qty <= 0)
-                    {
-                        rowErrors.Add($"Dòng {lineIdx + 1}: số lượng không hợp lệ ('{cols[1].Trim()}').");
-                        continue;
-                    }
-                    if (!decimal.TryParse(cols[2].Trim(), out var price) || price < 0)
-                    {
-                        rowErrors.Add($"Dòng {lineIdx + 1}: đơn giá không hợp lệ ('{cols[2].Trim()}').");
-                        continue;
-                    }
-                    rows.Add((sku, qty, price));
+                }
+                catch (Exception)
+                {
+                    throw new Exception("Không đọc được file Excel. Vui lòng đảm bảo file đúng định dạng .xlsx.");
                 }
             }
 
@@ -171,18 +197,65 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<PurchaseOrderDto> ImportFromImageAsync(Microsoft.AspNetCore.Http.IFormFile file, Guid ceoId)
         {
-            // TODO: Call Azure Form Recognizer or local AI OCR to extract data.
-            // Returning a mock draft PO created from "Image OCR"
+            if (file.Length <= 0)
+                throw new ArgumentException("File ảnh rỗng.");
+
+            InvoiceOcrResult ocr;
+            await using (var stream = file.OpenReadStream())
+            {
+                ocr = await _ocrService.ExtractInvoiceAsync(stream, file.ContentType);
+            }
+
+            if (ocr.Items.Count == 0)
+                throw new InvalidOperationException("Không đọc được dòng hàng nào từ ảnh. Vui lòng thử ảnh rõ nét hơn hoặc nhập thủ công.");
+
+            var suppliers = await _context.Suppliers.ToListAsync();
+            var products = await _context.Products.Where(p => !p.IsDiscontinued).ToListAsync();
+            var materials = await _context.Materials.ToListAsync();
+
+            var matchedSupplier = FuzzyMatchByName(suppliers, ocr.VendorName, s => s.Name);
+            var supplier = matchedSupplier ?? suppliers.FirstOrDefault();
+            if (supplier == null)
+                throw new InvalidOperationException("Hệ thống chưa có Nhà cung cấp nào, vui lòng tạo NCC trước khi import.");
+
+            var warehouse = await _context.Warehouses.FirstOrDefaultAsync();
+            if (warehouse == null)
+                throw new InvalidOperationException("Hệ thống chưa có Kho nào, vui lòng tạo kho trước khi import.");
+
+            var items = new List<PurchaseOrderItem>();
+            foreach (var line in ocr.Items)
+            {
+                var product = FuzzyMatchByName(products, line.Description, p => p.Name);
+                var material = product == null ? FuzzyMatchByName(materials, line.Description, m => m.Name) : null;
+
+                items.Add(new PurchaseOrderItem
+                {
+                    ProductId = product?.Id,
+                    MaterialId = material?.Id,
+                    ExpectedQuantity = Math.Max(1, (int)Math.Round(line.Quantity ?? 1)),
+                    UnitPrice = line.UnitPrice ?? product?.StandardListedPrice ?? 0,
+                    Unit = product?.Unit ?? material?.Unit ?? "Cái",
+                    Note = (product == null && material == null) ? $"OCR: {line.Description}" : null
+                });
+            }
+
+            var unmatchedCount = items.Count(i => i.ProductId == null && i.MaterialId == null);
+            var noteBuilder = new StringBuilder($"Imported from OCR Image: {file.FileName}.");
+            if (matchedSupplier == null)
+                noteBuilder.Append($" NCC chưa xác định (OCR đọc được: \"{ocr.VendorName}\") — vui lòng kiểm tra lại.");
+            if (unmatchedCount > 0)
+                noteBuilder.Append($" Có {unmatchedCount} dòng hàng chưa khớp được sản phẩm/nguyên liệu trong hệ thống — vui lòng sửa PO Draft trước khi phát hành.");
 
             var po = new PurchaseOrder
             {
                 Code = "PO-OCR-" + DateTime.Now.Ticks.ToString().Substring(10),
                 CreatedById = ceoId,
-                SupplierId = _context.Suppliers.Select(s => s.Id).FirstOrDefault(), // Mock
-                WarehouseId = _context.Warehouses.Select(w => w.Id).FirstOrDefault(), // Mock
+                SupplierId = supplier.Id,
+                WarehouseId = warehouse.Id,
                 Status = PurchaseOrderStatus.Draft,
-                ExpectedDeliveryDate = DateTime.UtcNow.AddDays(7),
-                Note = "Imported from OCR Image: " + file.FileName
+                ExpectedDeliveryDate = ocr.DueDate ?? DateTime.UtcNow.AddDays(7),
+                Note = noteBuilder.ToString(),
+                Items = items
             };
 
             _context.PurchaseOrders.Add(po);
@@ -361,19 +434,86 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<PurchaseOrderDto> ResolveDiscrepancyAsync(Guid id, Guid ceoId, DiscrepancyResolutionRequest request)
         {
-            var po = await _context.PurchaseOrders.FindAsync(id);
+            var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == id);
             if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status != PurchaseOrderStatus.DiscrepancyReview)
                 throw new InvalidOperationException("PO is not in DiscrepancyReview status");
 
-            // Logic to resolve: Add note and close it or keep it open.
-            // Simplified: Add note to PO and close it.
             po.Note = (po.Note ?? "") + $"\n[Resolution: {request.ResolutionType}] {request.Reason}";
-            po.Status = PurchaseOrderStatus.Closed;
+
+            switch (request.ResolutionType)
+            {
+                case "ReturnExcess":
+                    await ReturnExcessToSupplierAsync(po, ceoId);
+                    po.Status = PurchaseOrderStatus.Closed;
+                    break;
+
+                case "RequestSupplemental":
+                    if (!po.Items.Any(i => i.ReceivedQuantity < i.ExpectedQuantity))
+                        throw new InvalidOperationException("PO này không còn hàng thiếu cần giao bổ sung.");
+                    // Giữ PO mở (không Closed) để Kho vẫn tạo được Goods Receipt mới cho phần còn thiếu —
+                    // GoodsReceiptService.CreateFromPOAsync chấp nhận PO ở SentToWarehouse hoặc PartiallyReceived.
+                    po.Status = PurchaseOrderStatus.PartiallyReceived;
+                    break;
+
+                case "AcceptExcess":
+                case "CloseShort":
+                default:
+                    po.Status = PurchaseOrderStatus.Closed;
+                    break;
+            }
 
             await _context.SaveChangesAsync();
             return await GetByIdAsync(po.Id);
+        }
+
+        // Trừ phần hàng thừa (ReturnExcess) khỏi Inventory.QuarantineQuantity và ghi log audit —
+        // không đụng tới QuarantineLog/luồng dispatch cách ly của Kho vì 1 QuarantineLog gộp chung
+        // Damaged+WrongItem+Excess vào 1 con số duy nhất, không tách được riêng phần thừa từ đó.
+        private async Task ReturnExcessToSupplierAsync(PurchaseOrder po, Guid ceoId)
+        {
+            var excessLines = await _context.GoodsReceiptItems
+                .Include(i => i.GoodsReceipt)
+                .Include(i => i.PurchaseOrderItem)
+                .Where(i => i.GoodsReceipt.PurchaseOrderId == po.Id
+                    && i.GoodsReceipt.Status == GoodsReceiptStatus.Posted
+                    && i.ExcessQuantity > 0)
+                .ToListAsync();
+
+            if (excessLines.Count == 0)
+                throw new InvalidOperationException("Không có hàng thừa nào cần trả lại NCC trên PO này.");
+
+            var defaultLocation = await _context.WarehouseLocations
+                .FirstOrDefaultAsync(l => l.WarehouseId == po.WarehouseId && l.Type == "Normal");
+            if (defaultLocation == null)
+                throw new Exception("Kho hàng của PO này chưa có vị trí lưu kho loại 'Normal'.");
+
+            foreach (var line in excessLines)
+            {
+                var poItem = line.PurchaseOrderItem;
+                Inventory? inventory = poItem.ProductId != null
+                    ? await _context.Inventories.FirstOrDefaultAsync(inv => inv.ProductId == poItem.ProductId && inv.WarehouseLocationId == defaultLocation.Id)
+                    : await _context.Inventories.FirstOrDefaultAsync(inv => inv.MaterialId == poItem.MaterialId && inv.WarehouseLocationId == defaultLocation.Id);
+
+                if (inventory == null) continue;
+
+                inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - line.ExcessQuantity);
+
+                _context.StockTransactions.Add(new StockTransaction
+                {
+                    InventoryId = inventory.Id,
+                    ProductId = poItem.ProductId,
+                    MaterialId = poItem.MaterialId,
+                    WarehouseLocationId = defaultLocation.Id,
+                    QuantityChange = -line.ExcessQuantity,
+                    TransactionType = TransactionType.ReturnToSupplier,
+                    ReferenceId = po.Id,
+                    Note = $"Trả hàng thừa NCC cho PO {po.Code}",
+                    CreatedByUserId = ceoId,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
         }
 
         public async Task<PurchaseOrderDto> ClosePurchaseOrderAsync(Guid id, Guid ceoId)

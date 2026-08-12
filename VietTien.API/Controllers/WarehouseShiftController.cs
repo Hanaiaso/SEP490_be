@@ -1,8 +1,10 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
+using VietTien.API.Models;
 
 namespace VietTien.API.Controllers
 {
@@ -22,16 +24,101 @@ namespace VietTien.API.Controllers
         public async Task<ActionResult<List<WarehouseShiftDto>>> GetShifts()
         {
             var shifts = await _context.WarehouseShifts.ToListAsync();
-            var dtoList = shifts.Select(s => new WarehouseShiftDto
-            {
-                Id = s.Id,
-                Name = s.Name,
-                StartTime = s.StartTime.ToString(@"hh\:mm"),
-                EndTime = s.EndTime.ToString(@"hh\:mm"),
-                Description = s.Description
-            }).ToList();
-
-            return Ok(dtoList);
+            return Ok(shifts.Select(ToDto).ToList());
         }
+
+        [HttpPost]
+        [Authorize(Roles = "CEO,Admin")]
+        public async Task<ActionResult<WarehouseShiftDto>> CreateShift([FromBody] CreateWarehouseShiftRequest request)
+        {
+            try
+            {
+                if (!TimeSpan.TryParseExact(request.StartTime, @"hh\:mm", CultureInfo.InvariantCulture, out var start) ||
+                    !TimeSpan.TryParseExact(request.EndTime, @"hh\:mm", CultureInfo.InvariantCulture, out var end))
+                {
+                    return BadRequest(new { message = "Định dạng giờ không hợp lệ (HH:mm)." });
+                }
+
+                var nameExists = await _context.WarehouseShifts.AnyAsync(s => s.Name == request.Name.Trim());
+                if (nameExists) throw new InvalidOperationException("Tên ca làm việc đã tồn tại.");
+
+                var shift = new WarehouseShift
+                {
+                    Name = request.Name.Trim(),
+                    StartTime = start,
+                    EndTime = end,
+                    Description = request.Description
+                };
+                _context.WarehouseShifts.Add(shift);
+                await _context.SaveChangesAsync();
+
+                return Ok(ToDto(shift));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPut("{id:guid}")]
+        [Authorize(Roles = "CEO,Admin")]
+        public async Task<ActionResult<WarehouseShiftDto>> UpdateShift(Guid id, [FromBody] UpdateWarehouseShiftRequest request)
+        {
+            try
+            {
+                var shift = await _context.WarehouseShifts.FindAsync(id);
+                if (shift == null) return NotFound(new { message = "Không tìm thấy ca làm việc." });
+
+                if (!TimeSpan.TryParseExact(request.StartTime, @"hh\:mm", CultureInfo.InvariantCulture, out var start) ||
+                    !TimeSpan.TryParseExact(request.EndTime, @"hh\:mm", CultureInfo.InvariantCulture, out var end))
+                {
+                    return BadRequest(new { message = "Định dạng giờ không hợp lệ (HH:mm)." });
+                }
+
+                var nameExists = await _context.WarehouseShifts.AnyAsync(s => s.Id != id && s.Name == request.Name.Trim());
+                if (nameExists) throw new InvalidOperationException("Tên ca làm việc đã tồn tại.");
+
+                shift.Name = request.Name.Trim();
+                shift.StartTime = start;
+                shift.EndTime = end;
+                shift.Description = request.Description;
+                await _context.SaveChangesAsync();
+
+                return Ok(ToDto(shift));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpDelete("{id:guid}")]
+        [Authorize(Roles = "CEO,Admin")]
+        public async Task<IActionResult> DeleteShift(Guid id)
+        {
+            var shift = await _context.WarehouseShifts.FindAsync(id);
+            if (shift == null) return NotFound(new { message = "Không tìm thấy ca làm việc." });
+
+            _context.WarehouseShifts.Remove(shift);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        private static WarehouseShiftDto ToDto(WarehouseShift s) => new WarehouseShiftDto
+        {
+            Id = s.Id,
+            Name = s.Name,
+            StartTime = s.StartTime.ToString(@"hh\:mm"),
+            EndTime = s.EndTime.ToString(@"hh\:mm"),
+            Description = s.Description
+        };
     }
 }

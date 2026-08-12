@@ -123,5 +123,28 @@ namespace VietTien.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        /// <summary>Admin đăng xuất từ xa (thu hồi refresh token hiện tại của user)</summary>
+        [HttpPost("{id}/revoke-session")]
+        public async Task<IActionResult> RevokeSession(Guid id, [FromBody] RevokeSessionRequest request)
+        {
+            try
+            {
+                var result = await _adminUserService.RevokeSessionAsync(id, request, GetUserId(), GetUserEmail(), GetIp());
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
     }
 }

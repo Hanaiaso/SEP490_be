@@ -265,37 +265,6 @@ namespace VietTien.API.Services.Implementations
             return await GetPostByIdAsync(post.Id);
         }
 
-        public async Task<MarketingPostDto> PublishNowAsync(Guid id, Guid managerId)
-        {
-            var post = await _context.MarketingPosts
-                .Include(p => p.Product)
-                .FirstOrDefaultAsync(p => p.Id == id);
-
-            if (post == null) throw new Exception("Bài viết không tồn tại.");
-
-            if (post.Status != MarketingPostStatus.Approved)
-                throw new InvalidOperationException("Chỉ được đăng bài đã được duyệt (Approved).");
-
-            post.ApprovedByUserId = managerId;
-            post.ScheduledTime = DateTime.UtcNow;
-            // Chỉ chuyển Posting (chờ xác nhận thật từ Make.com qua HandleMakeWebhookCallbackAsync),
-            // không set Success ngay -> tránh hiển thị "đã đăng" trong khi webhook chưa chắc đã chạy xong.
-            post.Status = MarketingPostStatus.Posting;
-            post.UpdatedAt = DateTime.UtcNow;
-
-            await _context.SaveChangesAsync();
-
-            var triggered = await _makeWebhookService.TriggerPostToMakeAsync(post);
-            if (!triggered)
-            {
-                post.Status = MarketingPostStatus.PublishFailed;
-                post.PublishErrorMessage = "Không thể gửi yêu cầu đăng bài tới Make.com. Vui lòng thử lại.";
-                await _context.SaveChangesAsync();
-            }
-
-            return await GetPostByIdAsync(post.Id);
-        }
-
         public async Task<MarketingPostDto> HandleMakeWebhookCallbackAsync(Guid id, MakeWebhookCallbackDto dto)
         {
             var post = await _context.MarketingPosts.FirstOrDefaultAsync(p => p.Id == id);

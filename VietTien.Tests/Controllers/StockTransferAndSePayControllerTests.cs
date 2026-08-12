@@ -30,7 +30,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetAll_ReturnsOk()
         {
-            _service.Setup(s => s.GetAllAsync())
+            _service.Setup(s => s.GetAllAsync(null))
                 .ReturnsAsync(new List<StockTransferDto> { new() { Code = "TR-1" } });
 
             (await _sut.GetAll()).StatusOf().Should().Be(200);
@@ -39,9 +39,20 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetAll_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.GetAllAsync()).ThrowsAsync(new Exception("db loi"));
+            _service.Setup(s => s.GetAllAsync(null)).ThrowsAsync(new Exception("db loi"));
 
             (await _sut.GetAll()).StatusOf().Should().Be(400);
+        }
+
+        // P1: GetAll giờ truyền tiếp query "status" xuống service thay vì bỏ qua hoàn toàn.
+        [Fact]
+        public async Task GetAll_WithStatusQuery_PassesStatusToService()
+        {
+            _service.Setup(s => s.GetAllAsync("Dispatched"))
+                .ReturnsAsync(new List<StockTransferDto> { new() { Code = "TR-2" } });
+
+            (await _sut.GetAll("Dispatched")).StatusOf().Should().Be(200);
+            _service.Verify(s => s.GetAllAsync("Dispatched"), Times.Once);
         }
 
         [Theory]

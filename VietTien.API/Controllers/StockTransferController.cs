@@ -31,11 +31,11 @@ namespace VietTien.API.Controllers
 
         [HttpGet]
         [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll([FromQuery] string? status = null)
         {
             try
             {
-                var transfers = await _stockTransferService.GetAllAsync();
+                var transfers = await _stockTransferService.GetAllAsync(status);
                 return Ok(transfers);
             }
             catch (Exception ex)

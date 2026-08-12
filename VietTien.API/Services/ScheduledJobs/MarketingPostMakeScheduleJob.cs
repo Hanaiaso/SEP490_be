@@ -33,8 +33,7 @@ namespace VietTien.API.Services.ScheduledJobs
         {
             var duePosts = await _context.MarketingPosts
                 .Include(p => p.Product)
-                .Where(p => (p.Status == MarketingPostStatus.Scheduled || p.Status == MarketingPostStatus.Approved) 
-                            && p.ScheduledTime <= DateTime.UtcNow)
+                .Where(p => p.Status == MarketingPostStatus.Scheduled && p.ScheduledTime <= DateTime.UtcNow)
                 .ToListAsync(ct);
 
             if (duePosts.Count == 0) return 0;

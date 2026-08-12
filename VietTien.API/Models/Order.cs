@@ -90,6 +90,13 @@ namespace VietTien.API.Models
         /// <summary>Thời điểm hoàn thành chuẩn bị/đóng gói hàng</summary>
         public DateTime? PickingCompletedAt { get; set; }
 
+        // ─── P2-6: Sales Manager mở khóa giao lại (UC-35) ───
+        /// <summary>Thời điểm Sales Manager mở khóa cho đơn giao lại</summary>
+        public DateTime? UnblockedAt { get; set; }
+        public Guid? UnblockedByUserId { get; set; }
+        public string? UnblockReason { get; set; }
+        public User? UnblockedByUser { get; set; }
+
         // ─── LUỒNG 5: Hủy đơn PAID (CR-06) ───
         /// <summary>Lý do hủy đơn hàng</summary>
         public string? CancelReason { get; set; }

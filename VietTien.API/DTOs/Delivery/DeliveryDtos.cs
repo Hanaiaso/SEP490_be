@@ -234,4 +234,46 @@ namespace VietTien.API.DTOs.Delivery
         public int Quantity { get; set; }
         public string Reason { get; set; } = string.Empty;
     }
+
+    // ─── P2-6: Sales Manager xử lý đơn bị khóa & công nợ COD (UC-35) ──────────
+    public class BlockedOrderDto
+    {
+        public Guid OrderId { get; set; }
+        public string OrderCode { get; set; } = string.Empty;
+        public string CustomerName { get; set; } = string.Empty;
+        public string CustomerPhone { get; set; } = string.Empty;
+        public int FailedDeliveryCount { get; set; }
+        public string? DeliveryRejectionReasonCode { get; set; }
+        public string? AssignedSalesStaffName { get; set; }
+        public decimal FinalPayment { get; set; }
+    }
+
+    public class UnblockOrderRequest
+    {
+        [Required(ErrorMessage = "Lý do mở khóa là bắt buộc.")]
+        [MaxLength(1000)]
+        public string Reason { get; set; } = string.Empty;
+    }
+
+    public class CustomerDebtManagementDto
+    {
+        public Guid Id { get; set; }
+        public Guid CustomerProfileId { get; set; }
+        public string CustomerName { get; set; } = string.Empty;
+        public Guid OrderId { get; set; }
+        public string OrderCode { get; set; } = string.Empty;
+        public decimal DebtAmount { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public int OverdueDays { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? SettledAt { get; set; }
+        public string? SettledByName { get; set; }
+        public string? SettlementNote { get; set; }
+    }
+
+    public class SettleDebtRequest
+    {
+        [MaxLength(1000)]
+        public string? Note { get; set; }
+    }
 }

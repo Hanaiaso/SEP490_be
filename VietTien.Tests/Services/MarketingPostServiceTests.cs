@@ -89,21 +89,6 @@ namespace VietTien.Tests.Services
             dto.Status.Should().Be(nameof(MarketingPostStatus.Submitted));
         }
 
-        // L1-MKT-04 | State-Invalid | Đăng bài CHƯA được duyệt -> phải chặn, KHÔNG gọi webhook
-        // 🔴 SPEC GAP v2.2: PublishNowAsync KHÔNG có state guard — bài Draft vẫn được đẩy thẳng
-        // sang Posting và gọi Make.com. Test ĐỎ cho tới khi bổ sung guard (4.4.4 invalid row 1; BR-046).
-        [Fact]
-        public async Task L1_MKT_04_PublishNow_UnapprovedPost_IsBlocked()
-        {
-            var post = SeedPost(MarketingPostStatus.Draft);
-
-            var act = () => _sut.PublishNowAsync(post.Id, _salesManager.Id);
-
-            await act.Should().ThrowAsync<Exception>("bài chưa duyệt không được phép đăng");
-            _makeWebhook.Verify(m => m.TriggerPostToMakeAsync(It.IsAny<MarketingPost>()), Times.Never);
-            Reload(post.Id).Status.Should().Be(MarketingPostStatus.Draft);
-        }
-
         // L1-MKT-05 | State-Valid | Sales Manager duyệt -> chuyển sang lịch đăng, lưu người duyệt
         // Lưu ý: code chuyển thẳng Submitted -> Scheduled (5) chứ không dừng ở Approved (2).
         [Fact]
@@ -151,18 +136,6 @@ namespace VietTien.Tests.Services
         }
 
         // ── Block: Đăng bài & callback ──────────────────────────────────────
-
-        // L1-MKT-08 | EP-Valid | Publish -> gọi webhook đúng 1 lần, Status = Posting (6), không chờ đồng bộ
-        [Fact]
-        public async Task L1_MKT_08_PublishNow_TriggersWebhookOnceAndSetsPosting()
-        {
-            var post = SeedPost(MarketingPostStatus.Approved);
-
-            var dto = await _sut.PublishNowAsync(post.Id, _salesManager.Id);
-
-            _makeWebhook.Verify(m => m.TriggerPostToMakeAsync(It.Is<MarketingPost>(p => p.Id == post.Id)), Times.Once);
-            dto.Status.Should().Be(nameof(MarketingPostStatus.Posting));
-        }
 
         // L1-MKT-09 | EP-Valid | Callback thành công -> Status = Success (7), lưu id bài ngoài + thời điểm đăng
         [Fact]

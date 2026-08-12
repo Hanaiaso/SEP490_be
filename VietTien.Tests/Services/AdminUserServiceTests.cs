@@ -206,5 +206,74 @@ namespace VietTien.Tests.Services
 
             await act.Should().ThrowAsync<KeyNotFoundException>();
         }
+
+        // ── Block: RevokeSessionAsync() / ToDto() session mapping (P2-7, UC-55) ──
+
+        // L1-ADM-10 | EP-Valid | User có refresh token hợp lệ -> thu hồi, có audit
+        [Fact]
+        public async Task L1_ADM_10_RevokeSession_ActiveSession_RevokesAndAudits()
+        {
+            var user = SeedStaff(SystemRole.SalesStaff); // đã có RefreshToken theo mặc định của SeedStaff
+
+            var dto = await _sut.RevokeSessionAsync(user.Id,
+                new RevokeSessionRequest { Reason = "Nghi ngờ tài khoản bị lộ mật khẩu" },
+                ActorId, ActorEmail, ActorIp);
+
+            dto.HasActiveSession.Should().BeFalse();
+            var saved = _db.Users.Single(u => u.Id == user.Id);
+            saved.RefreshToken.Should().BeNull();
+            saved.RefreshTokenExpiryTime.Should().BeNull();
+
+            _audit.Verify(a => a.LogAsync("User", user.Id.ToString(), "SESSION_REVOKE",
+                ActorId, ActorEmail, It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), "Nghi ngờ tài khoản bị lộ mật khẩu", ActorIp), Times.Once);
+        }
+
+        // L1-ADM-11 | EP-Invalid | User không có phiên hoạt động -> no-op, không ghi audit
+        [Fact]
+        public async Task L1_ADM_11_RevokeSession_NoActiveSession_IsNoOpWithoutAudit()
+        {
+            var user = SeedStaff(SystemRole.SalesStaff, u =>
+            {
+                u.RefreshToken = null;
+                u.RefreshTokenExpiryTime = null;
+            });
+
+            var dto = await _sut.RevokeSessionAsync(user.Id,
+                new RevokeSessionRequest { Reason = "Kiểm tra không có phiên" },
+                ActorId, ActorEmail, ActorIp);
+
+            dto.HasActiveSession.Should().BeFalse();
+            _audit.Verify(a => a.LogAsync(It.IsAny<string>(), It.IsAny<string>(), "SESSION_REVOKE",
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        }
+
+        // L1-ADM-12 | EP-Invalid | Thiếu lý do -> từ chối, không đổi gì
+        [Fact]
+        public async Task L1_ADM_12_RevokeSession_MissingReason_IsRejected()
+        {
+            var user = SeedStaff(SystemRole.SalesStaff);
+
+            var act = () => _sut.RevokeSessionAsync(user.Id,
+                new RevokeSessionRequest { Reason = "  " },
+                ActorId, ActorEmail, ActorIp);
+
+            await act.Should().ThrowAsync<Exception>();
+            _db.Users.Single(u => u.Id == user.Id).RefreshToken.Should().NotBeNull();
+        }
+
+        // L1-ADM-13 | EP-Valid | ToDto tính HasActiveSession theo hạn refresh token (còn hạn/hết hạn)
+        [Fact]
+        public async Task L1_ADM_13_Search_MapsHasActiveSessionFromExpiry()
+        {
+            SeedStaff(SystemRole.SalesStaff, u => u.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(7)); // còn hạn
+            SeedStaff(SystemRole.SalesStaff, u => u.RefreshTokenExpiryTime = DateTime.UtcNow.AddDays(-1)); // đã hết hạn
+
+            var result = await _sut.SearchAsync(new AdminUserQueryDto { Role = "SalesStaff" });
+
+            result.Items.Should().ContainSingle(i => i.HasActiveSession);
+            result.Items.Should().ContainSingle(i => !i.HasActiveSession);
+        }
     }
 }
