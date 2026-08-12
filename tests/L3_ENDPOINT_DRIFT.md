@@ -77,10 +77,10 @@ Doi chieu tu dong: **139 tham chieu endpoint** trong workbook, **93** khong ton 
 | L3-TRF-05 | `POST /api/stock-transfers/{id}/post + /receive` | `POST /api/stock-transfers/{id}/dispatch + /receive` | Khác tên |
 | L3-TRF-06 | `POST /api/stock-transfers/{id}/post` | `POST /api/stock-transfers/{id}/dispatch` | Khác tên |
 | L3-TRF-07 | `POST /api/stock-transfers` | `POST /api/stock-transfers` | Trùng khớp |
-| L3-INV-02 | `POST /api/inventory/count-sessions/{id}/lines` | `PUT /api/inventory/{inventoryId}/adjust` | Khong co count-session; kiem bien so luong qua lenh dieu chinh ton |
+| L3-INV-02 | `POST /api/inventory/count-sessions/{id}/lines` | `PUT /api/inventory/{inventoryId}/adjust` | Không có count-session; kiểm biên số lượng qua lệnh điều chỉnh tồn |
 | L3-INV-03 | `POST /api/inventory/adjustments/{id}/post` | `PUT /api/inventory/{inventoryId}/adjust` | Khác tên |
 | L3-INV-04 | `PUT /api/inventory/{id}` | `PUT /api/inventory/{inventoryId}/adjust` | Khác tên |
-| L3-INV-07 | `POST /api/materials/production-issues` | `POST /api/goods-issues/{id}/post` | Kiem xuat vuot ton kha dung qua phieu xuat kho |
+| L3-INV-07 | `POST /api/materials/production-issues` | `POST /api/goods-issues/{id}/post` | Kiểm xuất vượt tồn khả dụng qua phiếu xuất kho |
 | L3-SA-01 | `POST /api/auth/register` | `POST /api/auth/register` | Round-robin chạy sau verify-otp |
 | L3-SA-02 | `POST /api/auth/register` | `POST /api/auth/register` | Trùng khớp |
 | L3-SA-03 | `POST /api/sales-change-requests` | `POST /api/sales-change-requests` | Trùng khớp |
@@ -91,7 +91,7 @@ Doi chieu tu dong: **139 tham chieu endpoint** trong workbook, **93** khong ton 
 | L3-AS-04 | `POST /api/orders (dùng credit)` | `POST /api/orders/place-order` | Khác tên |
 | L3-AS-05 | `POST /api/warehouse/orders/quality-returns/{id}/release` | `POST /api/warehouse-management/quarantine/{id}/dispatch` | Khác tên |
 | L3-AS-06 | `POST /api/orders (dùng credit)` | `POST /api/orders/place-order` | Khác tên |
-| L3-AS-07 | `POST /api/payment-reallocations` | `POST /api/delivery/{id}/approve-cancel-replacement` | Khac ten - kiem phan quyen duyet huy/thay the |
+| L3-AS-07 | `POST /api/payment-reallocations` | `POST /api/delivery/{id}/approve-cancel-replacement` | Khác tên - kiểm phân quyền duyệt huỷ/thay thế |
 | L3-AS-08 | `POST /api/orders/{id}/replacement` | `POST /api/delivery/exchange/{requestId}/replacement` | Khác tên |
 | L3-ADM-01 | `GET /api/dashboards/sales-manager` | `GET /api/dashboards/sales-manager` | Trùng khớp |
 | L3-ADM-02 | `POST /api/Quotation/{id}/ceo-review` | `POST /api/Quotation/{id}/ceo-decision` | Khác tên |

@@ -1,139 +1,138 @@
-Column1,Column2,Column3,Column4,Column5
 TestID,Group,WorkbookEndpoint,RealEndpoint,Note
-L3-AUTH-01,A,POST /api/auth/register,POST /api/auth/register,Tr�ng kh?p
-L3-AUTH-02,A,POST /api/auth/register,POST /api/auth/register,Workbook ch? 409 DUPLICATE_IDENTITY; code tr? 400 {message}
-L3-AUTH-03,A,POST /api/auth/verify-email?token=,POST /api/auth/verify-otp,Kh�ng c� lu?ng verify-email b?ng token; h? th?ng d�ng OTP 6 s? qua email
-L3-AUTH-04,A,POST /api/auth/verify-otp,POST /api/auth/verify-otp,"BVA 5/6/7 k� t? ch?n b?i [StringLength(6,6)] tr�n VerifyOtpDto"
-L3-AUTH-05,A,POST /api/auth/verify-otp,POST /api/auth/verify-otp,H?n OTP 5 ph�t (AuthService.cs:85)
-L3-AUTH-06,A,POST /api/auth/verify-otp,POST /api/auth/verify-phone-otp,Ch? lu?ng OTP ?i?n tho?i c� b? ??m sai (PhoneOtpMaxFailedAttempts=5); lu?ng email KH�NG c�
-L3-AUTH-07,A,POST /api/auth/resend-otp,POST /api/auth/resend-otp,Cooldown 60s c� th?t; tr? 400 ch? kh�ng ph?i 429
-L3-AUTH-08,A,POST /api/auth/login,POST /api/auth/login,Tr�ng kh?p
-L3-AUTH-09,A,POST /api/auth/login,POST /api/auth/login,Tr�ng kh?p - tr? 401 th�ng ?i?p chung
-L3-AUTH-10,A,POST /api/auth/refresh,POST /api/auth/refresh-token,Kh�c t�n
-L3-AUTH-11,A,POST /api/auth/refresh,POST /api/auth/refresh-token,Kh�c t�n
-L3-AUTH-12,A,GET /api/orders,GET /api/orders/my-history,/api/orders tr?n kh�ng t?n t?i; d�ng endpoint ?� [Authorize] b?t k?
-L3-AUTH-13,A,GET /api/orders,GET /api/orders/my-history,Nh? tr�n
-L3-ORD-01,A,POST /api/orders,POST /api/orders/place-order,Kh�c t�n
-L3-ORD-02,A,POST /api/orders,POST /api/orders/place-order,Kh�c t�n
-L3-ORD-03,A,POST /api/orders,POST /api/orders/place-order,Kh�c t�n
-L3-ORD-04,A,POST /api/Cart/items,POST /api/Cart/items,Tr�ng kh?p
-L3-ORD-05,A,POST /api/orders,POST /api/orders/place-order,Kh�c t�n
-L3-ORD-06,A,GET /api/orders/checkout-summary,GET /api/orders/checkout-summary,Tr�ng kh?p; response KH�NG c� tr??ng pricingSource
-L3-ORD-07,A,POST /api/Quotation,POST /api/Quotation/from-cart,Kh�c t�n
-L3-ORD-08,A,GET /api/orders/{id},GET /api/orders/my-history/{orderId},Kh�c t�n
-L3-PAY-01,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Kh�c t�n; x�c th?c b?ng header x-sepay-token ch? kh�ng ph?i HMAC
-L3-PAY-02,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Kh�c t�n
-L3-PAY-03,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Kh�c t�n
-L3-PAY-04,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Kh�c t�n
-L3-PAY-05,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Kh�c t�n
-L3-PAY-06,A,POST /api/orders/{id}/manual-confirm,POST /api/orders/{orderId}/manual-confirm,Tr�ng kh?p
-L3-PAY-07,A,POST /api/orders/{id}/manual-confirm,POST /api/orders/{orderId}/manual-confirm,Tr�ng kh?p
-L3-PAY-08,A,POST /api/orders/{id}/confirm,POST /api/orders/sales/{id}/confirm,Kh�c t�n
-L3-PAY-09,A,POST /api/orders/{id}/manual-confirm,POST /api/orders/{orderId}/manual-confirm,Tr�ng kh?p
-L3-CUS-01,A,PUT /api/customers/me,PUT /api/customer-profile,Kh�c t�n
-L3-CUS-02,A,POST /api/customers/me/addresses,POST /api/user/addresses,Kh�c t�n
-L3-CUS-03,A,DELETE /api/customers/me/addresses/{id},DELETE /api/user/addresses/{id},Kh�c t�n
-L3-CUS-04,A,POST /api/orders (??n t?o tay),POST /api/orders/place-direct-order,Kh�c t�n
-L3-CUS-05,A,POST /api/orders (??n t?o tay),POST /api/orders/place-direct-order,Kh�c t�n
-L3-QUO-01,A,POST /api/Quotation,POST /api/Quotation/from-cart,Kh�c t�n
-L3-QUO-02,A,POST /api/Quotation/{id}/versions,POST /api/Quotation/{id}/versions,Tr�ng kh?p
-L3-QUO-03,A,POST /api/Quotation/{id}/ceo-review,POST /api/Quotation/{id}/ceo-decision,Kh�c t�n
-L3-QUO-04,A,POST /api/Quotation/{id}/customer-decision,POST /api/Quotation/{id}/customer-decision,Tr�ng kh?p
-L3-QUO-05,A,POST /api/orders,POST /api/orders/place-order,Kh�c t�n
-L3-QUO-06,B,PUT /api/Quotation/{id}/messages/{msgId},(kh�ng t?n t?i),B?t bi?n b?o ??m b?ng vi?c KH�NG m? route s?a tin nh?n - ?�ng BR-020
-L3-QUO-07,A,GET /api/Quotation/{id}/messages,GET /api/Quotation/{id}/messages,Tr�ng kh?p
-L3-QUO-08,A,POST /api/Quotation/{id}/customer-decision,POST /api/Quotation/{id}/customer-decision,Tr�ng kh?p
-L3-FUL-01,A,GET /api/warehouse/orders/fulfillment-orders,GET /api/warehouse/orders,Kh�c t�n
-L3-FUL-02,A,POST /api/goods-issues/{id}/post,POST /api/goods-issues/{id}/post,Tr�ng kh?p
-L3-FUL-03,A,POST /api/warehouse/orders/pick-tasks/{id}/complete,POST /api/warehouse/orders/pick-tasks/{pickTaskId}/complete,Tr�ng kh?p
-L3-FUL-04,A,POST /api/handover-records/{id}/confirm,POST /api/handover-records/{id}/warehouse-confirm + /sales-confirm,T�ch th�nh 2 endpoint dual-confirm
-L3-FUL-05,A,POST /api/goods-issues/{id}/post,POST /api/goods-issues/{id}/post,Tr�ng kh?p
-L3-FUL-06,A,POST /api/goods-issues/{id}/post,POST /api/goods-issues/{id}/post,Tr�ng kh?p
-L3-FUL-07,A,POST /api/warehouse/orders/pick-tasks/{id}/complete,POST /api/warehouse/orders/pick-tasks/{pickTaskId}/complete,Tr�ng kh?p
-L3-FUL-08,C,POST /api/warehouse/orders/multi-pick,(kh�ng t?n t?i),Ch?a tri?n khai multi-pick
-L3-FUL-09,A,POST /api/orders/{id}/confirm,POST /api/orders/sales/{id}/confirm,Kh�c t�n
-L3-DEL-01,C,POST /api/delivery/trips,(kh�ng t?n t?i),Module Delivery Trip ch?a tri?n khai - g?n nh?t l� POST /api/delivery/schedule
-L3-DEL-02,C,POST /api/delivery/trips,(kh�ng t?n t?i),Nh? tr�n
-L3-DEL-03,C,POST /api/delivery/trips/{id}/start,(kh�ng t?n t?i),Nh? tr�n
-L3-DEL-04,C,POST /api/delivery/attempts,(kh�ng t?n t?i),POD ch?a c� endpoint ri�ng - g?n nh?t POST /api/delivery/{orderId}/complete
-L3-DEL-05,C,POST /api/delivery/collections,(kh�ng t?n t?i),Thu COD ch?a c� endpoint ri�ng
-L3-DEL-06,C,POST /api/delivery/collections,(kh�ng t?n t?i),Nh? tr�n
-L3-DEL-07,C,POST /api/delivery/attempts,(kh�ng t?n t?i),Nh? tr�n
+L3-AUTH-01,A,POST /api/auth/register,POST /api/auth/register,Trùng khớp
+L3-AUTH-02,A,POST /api/auth/register,POST /api/auth/register,Workbook chờ 409 DUPLICATE_IDENTITY; code trả 400 {message}
+L3-AUTH-03,A,POST /api/auth/verify-email?token=,POST /api/auth/verify-otp,Không có luồng verify-email bằng token; hệ thống dùng OTP 6 số qua email
+L3-AUTH-04,A,POST /api/auth/verify-otp,POST /api/auth/verify-otp,"BVA 5/6/7 ký tự chặn bởi [StringLength(6,6)] trên VerifyOtpDto"
+L3-AUTH-05,A,POST /api/auth/verify-otp,POST /api/auth/verify-otp,Hạn OTP 5 phút (AuthService.cs:85)
+L3-AUTH-06,A,POST /api/auth/verify-otp,POST /api/auth/verify-phone-otp,Chỉ luồng OTP điện thoại có bộ đếm sai (PhoneOtpMaxFailedAttempts=5); luồng email KHÔNG có
+L3-AUTH-07,A,POST /api/auth/resend-otp,POST /api/auth/resend-otp,Cooldown 60s có thật; trả 400 chứ không phải 429
+L3-AUTH-08,A,POST /api/auth/login,POST /api/auth/login,Trùng khớp
+L3-AUTH-09,A,POST /api/auth/login,POST /api/auth/login,Trùng khớp - trả 401 thông điệp chung
+L3-AUTH-10,A,POST /api/auth/refresh,POST /api/auth/refresh-token,Khác tên
+L3-AUTH-11,A,POST /api/auth/refresh,POST /api/auth/refresh-token,Khác tên
+L3-AUTH-12,A,GET /api/orders,GET /api/orders/my-history,/api/orders trần không tồn tại; dùng endpoint đã [Authorize] bất kỳ
+L3-AUTH-13,A,GET /api/orders,GET /api/orders/my-history,Như trên
+L3-ORD-01,A,POST /api/orders,POST /api/orders/place-order,Khác tên
+L3-ORD-02,A,POST /api/orders,POST /api/orders/place-order,Khác tên
+L3-ORD-03,A,POST /api/orders,POST /api/orders/place-order,Khác tên
+L3-ORD-04,A,POST /api/Cart/items,POST /api/Cart/items,Trùng khớp
+L3-ORD-05,A,POST /api/orders,POST /api/orders/place-order,Khác tên
+L3-ORD-06,A,GET /api/orders/checkout-summary,GET /api/orders/checkout-summary,Trùng khớp; response KHÔNG có trường pricingSource
+L3-ORD-07,A,POST /api/Quotation,POST /api/Quotation/from-cart,Khác tên
+L3-ORD-08,A,GET /api/orders/{id},GET /api/orders/my-history/{orderId},Khác tên
+L3-PAY-01,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Khác tên; xác thực bằng header x-sepay-token chứ không phải HMAC
+L3-PAY-02,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Khác tên
+L3-PAY-03,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Khác tên
+L3-PAY-04,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Khác tên
+L3-PAY-05,A,POST /api/webhooks/sepay,POST /api/webhooks/sepay-callback,Khác tên
+L3-PAY-06,A,POST /api/orders/{id}/manual-confirm,POST /api/orders/{orderId}/manual-confirm,Trùng khớp
+L3-PAY-07,A,POST /api/orders/{id}/manual-confirm,POST /api/orders/{orderId}/manual-confirm,Trùng khớp
+L3-PAY-08,A,POST /api/orders/{id}/confirm,POST /api/orders/sales/{id}/confirm,Khác tên
+L3-PAY-09,A,POST /api/orders/{id}/manual-confirm,POST /api/orders/{orderId}/manual-confirm,Trùng khớp
+L3-CUS-01,A,PUT /api/customers/me,PUT /api/customer-profile,Khác tên
+L3-CUS-02,A,POST /api/customers/me/addresses,POST /api/user/addresses,Khác tên
+L3-CUS-03,A,DELETE /api/customers/me/addresses/{id},DELETE /api/user/addresses/{id},Khác tên
+L3-CUS-04,A,POST /api/orders (đơn tạo tay),POST /api/orders/place-direct-order,Khác tên
+L3-CUS-05,A,POST /api/orders (đơn tạo tay),POST /api/orders/place-direct-order,Khác tên
+L3-QUO-01,A,POST /api/Quotation,POST /api/Quotation/from-cart,Khác tên
+L3-QUO-02,A,POST /api/Quotation/{id}/versions,POST /api/Quotation/{id}/versions,Trùng khớp
+L3-QUO-03,A,POST /api/Quotation/{id}/ceo-review,POST /api/Quotation/{id}/ceo-decision,Khác tên
+L3-QUO-04,A,POST /api/Quotation/{id}/customer-decision,POST /api/Quotation/{id}/customer-decision,Trùng khớp
+L3-QUO-05,A,POST /api/orders,POST /api/orders/place-order,Khác tên
+L3-QUO-06,B,PUT /api/Quotation/{id}/messages/{msgId},(không tồn tại),Bất biến bảo đảm bằng việc KHÔNG mở route sửa tin nhắn - đúng BR-020
+L3-QUO-07,A,GET /api/Quotation/{id}/messages,GET /api/Quotation/{id}/messages,Trùng khớp
+L3-QUO-08,A,POST /api/Quotation/{id}/customer-decision,POST /api/Quotation/{id}/customer-decision,Trùng khớp
+L3-FUL-01,A,GET /api/warehouse/orders/fulfillment-orders,GET /api/warehouse/orders,Khác tên
+L3-FUL-02,A,POST /api/goods-issues/{id}/post,POST /api/goods-issues/{id}/post,Trùng khớp
+L3-FUL-03,A,POST /api/warehouse/orders/pick-tasks/{id}/complete,POST /api/warehouse/orders/pick-tasks/{pickTaskId}/complete,Trùng khớp
+L3-FUL-04,A,POST /api/handover-records/{id}/confirm,POST /api/handover-records/{id}/warehouse-confirm + /sales-confirm,Tách thành 2 endpoint dual-confirm
+L3-FUL-05,A,POST /api/goods-issues/{id}/post,POST /api/goods-issues/{id}/post,Trùng khớp
+L3-FUL-06,A,POST /api/goods-issues/{id}/post,POST /api/goods-issues/{id}/post,Trùng khớp
+L3-FUL-07,A,POST /api/warehouse/orders/pick-tasks/{id}/complete,POST /api/warehouse/orders/pick-tasks/{pickTaskId}/complete,Trùng khớp
+L3-FUL-08,C,POST /api/warehouse/orders/multi-pick,(không tồn tại),Chưa triển khai multi-pick
+L3-FUL-09,A,POST /api/orders/{id}/confirm,POST /api/orders/sales/{id}/confirm,Khác tên
+L3-DEL-01,C,POST /api/delivery/trips,(không tồn tại),Module Delivery Trip chưa triển khai - gần nhất là POST /api/delivery/schedule
+L3-DEL-02,C,POST /api/delivery/trips,(không tồn tại),Như trên
+L3-DEL-03,C,POST /api/delivery/trips/{id}/start,(không tồn tại),Như trên
+L3-DEL-04,C,POST /api/delivery/attempts,(không tồn tại),POD chưa có endpoint riêng - gần nhất POST /api/delivery/{orderId}/complete
+L3-DEL-05,C,POST /api/delivery/collections,(không tồn tại),Thu COD chưa có endpoint riêng
+L3-DEL-06,C,POST /api/delivery/collections,(không tồn tại),Như trên
+L3-DEL-07,C,POST /api/delivery/attempts,(không tồn tại),Như trên
 L3-DEL-08,A,POST /api/handover-records/{id}/confirm,POST /api/handover-records/{id}/warehouse-confirm + /sales-confirm,Dual confirm
-L3-DEL-09,A,GET /api/delivery/trips/{id},GET /api/delivery/orders,Kh�c t�n - ki?m scope theo Sales
-L3-PUR-01,A,POST /api/purchase-orders + /{id}/issue,POST /api/purchase-orders + POST /{id}/issue,Tr�ng kh?p
-L3-PUR-02,A,POST /api/purchase-orders/{id}/issue,POST /api/purchase-orders/{id}/issue,Tr�ng kh?p
-L3-PUR-03,B,POST /api/inventory/post-from-po,(kh�ng t?n t?i),?�ng BR-014: kh�ng c� ???ng t?ng t?n th?ng t? PO
-L3-PUR-04,A,POST /api/purchase-orders/import-excel,POST /api/purchase-orders/import/excel,Kh�c t�n
-L3-PUR-05,A,POST /api/goods-receipts/{id}/post,POST /api/purchase-orders/{id}/receipts/{rId}/post,Kh�c t�n
-L3-PUR-06,B,PUT /api/goods-receipts/{id},(kh�ng t?n t?i),?�ng BR-021: kh�ng m? route s?a receipt
-L3-PUR-07,A,POST /api/goods-receipts/{id}/post,POST /api/purchase-orders/{id}/receipts/{rId}/post,Kh�c t�n
-L3-PUR-08,A,POST /api/goods-receipts/{id}/post,POST /api/purchase-orders/{id}/receipts/{rId}/post,Kh�c t�n
-L3-TRF-01,A,POST /api/stock-transfers,POST /api/stock-transfers,Tr�ng kh?p
-L3-TRF-02,A,POST /api/stock-transfers/{id}/post,POST /api/stock-transfers/{id}/dispatch,Kh�c t�n
-L3-TRF-03,A,POST /api/stock-transfers/{id}/receive,POST /api/stock-transfers/{id}/receive,Tr�ng kh?p
-L3-TRF-04,A,POST /api/stock-transfers/{id}/receive,POST /api/stock-transfers/{id}/receive,Tr�ng kh?p
-L3-TRF-05,A,POST /api/stock-transfers/{id}/post + /receive,POST /api/stock-transfers/{id}/dispatch + /receive,Kh�c t�n
-L3-TRF-06,A,POST /api/stock-transfers/{id}/post,POST /api/stock-transfers/{id}/dispatch,Kh�c t�n
-L3-TRF-07,A,POST /api/stock-transfers,POST /api/stock-transfers,Tr�ng kh?p
-L3-INV-01,C,PUT /api/inventory/count-sessions/{id}/theoretical,(kh�ng t?n t?i),Phi�n ki?m k� ch?a c�; g?n nh?t POST /api/inventory/shift-count
-L3-INV-02,A,POST /api/inventory/count-sessions/{id}/lines,PUT /api/inventory/{inventoryId}/adjust,Khong co count-session; kiem bien so luong qua lenh dieu chinh ton
-L3-INV-03,A,POST /api/inventory/adjustments/{id}/post,PUT /api/inventory/{inventoryId}/adjust,Kh�c t�n
-L3-INV-04,A,PUT /api/inventory/{id},PUT /api/inventory/{inventoryId}/adjust,Kh�c t�n
-L3-INV-05,C,POST /api/materials/production-issues,(kh�ng t?n t?i),Xu?t v?t t? s?n xu?t ch?a tri?n khai
-L3-INV-06,C,GET /api/inventory/low-stock-alerts,(kh�ng t?n t?i),C?nh b�o t?n th?p kh�ng c� endpoint ri�ng; ?i qua Notifications
-L3-INV-07,A,POST /api/materials/production-issues,POST /api/goods-issues/{id}/post,Kiem xuat vuot ton kha dung qua phieu xuat kho
-L3-SA-01,A,POST /api/auth/register,POST /api/auth/register,Round-robin ch?y sau verify-otp
-L3-SA-02,A,POST /api/auth/register,POST /api/auth/register,Tr�ng kh?p
-L3-SA-03,A,POST /api/sales-change-requests,POST /api/sales-change-requests,Tr�ng kh?p
-L3-SA-04,A,POST /api/sales-change-requests/{id}/approve,PUT /api/sales-change-requests/{id}/approve,Kh�c method (POST vs PUT)
-L3-SA-05,A,POST /api/sales-change-requests/{id}/approve,PUT /api/sales-change-requests/{id}/approve,Kh�c method
-L3-SA-06,A,POST /api/sales-change-requests/{id}/approve,PUT /api/sales-change-requests/{id}/approve,Kh�c method
-L3-SA-07,B,PUT /api/orders/{id}/assigned-sales,(kh�ng t?n t?i),?�ng BR-031: kh�ng m? route ghi ?� snapshot Sales tr�n ??n
-L3-AS-01,B,POST /api/orders/{id}/refund,(kh�ng t?n t?i),?�ng BR-017: h? th?ng kh�ng h? tr? ho�n ti?n
-L3-AS-02,C,POST /api/payment-reallocations,(kh�ng t?n t?i),Ph�n b? l?i ti?n ch?a c� API ri�ng; g?n nh?t POST /api/delivery/{id}/approve-cancel-replacement
-L3-AS-03,A,POST /api/orders (d�ng credit),POST /api/orders/place-order,Kh�c t�n
-L3-AS-04,A,POST /api/orders (d�ng credit),POST /api/orders/place-order,Kh�c t�n
-L3-AS-05,A,POST /api/warehouse/orders/quality-returns/{id}/release,POST /api/warehouse-management/quarantine/{id}/dispatch,Kh�c t�n
-L3-AS-06,A,POST /api/orders (d�ng credit),POST /api/orders/place-order,Kh�c t�n
-L3-AS-07,A,POST /api/payment-reallocations,POST /api/delivery/{id}/approve-cancel-replacement,Khac ten - kiem phan quyen duyet huy/thay the
-L3-AS-08,A,POST /api/orders/{id}/replacement,POST /api/delivery/exchange/{requestId}/replacement,Kh�c t�n
-L3-ADM-01,A,GET /api/dashboards/sales-manager,GET /api/dashboards/sales-manager,Tr�ng kh?p
-L3-ADM-02,A,POST /api/Quotation/{id}/ceo-review,POST /api/Quotation/{id}/ceo-decision,Kh�c t�n
-L3-ADM-03,B,DELETE /api/admin/audit-logs/{id},(kh�ng t?n t?i),?�ng BR-048: AuditLogController ch? c� GET
-L3-ADM-04,A,PUT /api/admin/configurations/discount-tier,PUT /api/admin/discount-tiers/{id},Kh�c t�n
-L3-ADM-05,A,GET /api/Notifications,GET /api/Notifications,Tr�ng kh?p
-L3-ADMC-01,A,POST /api/admin/users,POST /api/admin/users,Tr�ng kh?p
-L3-ADMC-02,A,POST /api/admin/users,POST /api/admin/users,Tr�ng kh?p
-L3-ADMC-03,A,PUT /api/admin/users/{id}/role,PUT /api/admin/users/{id}/role,Tr�ng kh?p
-L3-ADMC-04,A,PUT /api/admin/system-configs/{key},PUT /api/admin/system-configs/{key},Tr�ng kh?p
-L3-ADMC-05,A,GET /api/admin/system-configs/{key}/effective?at=,GET /api/admin/system-configs/{key}/history,Kh�ng c� tra c?u theo m?c th?i gian; ch? c� l?ch s? phi�n b?n
-L3-ADMC-06,A,PUT /api/admin/system-configs/{key},PUT /api/admin/system-configs/{key},Tr�ng kh?p
-L3-ADMC-07,B,DELETE /api/admin/audit-logs/{id},(kh�ng t?n t?i),Nh? ADM-03
-L3-ADMC-08,A,GET /api/admin/audit-logs/export,GET /api/admin/audit-logs/export,Tr�ng kh?p
-L3-ADMC-09,A,GET /api/vehicles?active=true,GET /api/vehicles,Tr�ng kh?p
-L3-ADMC-10,A,POST /api/vehicles,POST /api/vehicles,Tr�ng kh?p
-L3-ADMC-11,A,GET /api/admin/discount-tiers/applicable?subtotal=,GET /api/admin/discount-tiers,Kh�ng c� endpoint applicable; b?c �p d?ng t�nh trong checkout-summary
-L3-ADMC-12,A,POST /api/admin/discount-tiers,POST /api/admin/discount-tiers,Tr�ng kh?p
-L3-ADMC-13,A,GET /api/dashboards/sales-staff?staffId=,GET /api/dashboards/sales-staff,Kh�ng nh?n tham s? staffId - ph?m vi lu�n l?y t? JWT
-L3-ADMC-14,A,GET /api/admin/system-health/jobs,GET /api/admin/system-health/job-runs,Kh�c t�n
-L3-ADMC-15,A,POST /api/admin/system-health/webhook-logs/{id}/retry,POST /api/admin/system-health/webhook-logs/{id}/retry,Tr�ng kh?p
-L3-ADMC-16,A,GET /api/admin/system-health/jobs,GET /api/admin/system-health/job-runs,Kh�c t�n
-L3-ADMC-17,A,GET /swagger/v1/swagger.json,GET /swagger/v1/swagger.json,Ch? b?t khi ASPNETCORE_ENVIRONMENT=Development (Program.cs:293)
-L3-MKT-01,A,POST /api/marketing-posts,POST /api/marketing-posts,Tr�ng kh?p
-L3-MKT-02,A,POST /api/marketing-posts/{id}/approve,POST /api/marketing-posts/{id}/decision,Kh�c t�n
-L3-MKT-03,A,POST /api/marketing-posts/{id}/publish,POST /api/marketing-posts/{id}/publish-now,Kh�c t�n
-L3-MKT-04,A,POST /api/marketing-posts/{id}/publish,POST /api/marketing-posts/{id}/publish-now,Kh�c t�n
-L3-MKT-05,A,POST /api/marketing-posts/{id}/make-callback,POST /api/marketing-posts/{id}/webhook-callback,Kh�c t�n
-L3-MKT-06,A,POST /api/marketing-posts/{id}/make-callback,POST /api/marketing-posts/{id}/webhook-callback,Kh�c t�n
-L3-MKT-07,A,POST /api/marketing-posts/{id}/approve,POST /api/marketing-posts/{id}/decision,Kh�c t�n
-L3-MKT-08,A,POST /api/marketing-posts/{id}/approve,POST /api/marketing-posts/{id}/decision,Kh�c t�n
-L3-MKT-09,C,POST /api/marketing-posts/{id}/media,(kh�ng t?n t?i),Upload media ri�ng ch?a c�
-L3-MKT-10,C,POST /api/marketing-posts/{id}/media,(kh�ng t?n t?i),Nh? MKT-09
-L3-MKT-11,C,GET /api/marketing-posts/{id}/metrics,(kh�ng t?n t?i),Ch? s? reach/reaction ch?a tri?n khai
-L3-RET-01,A,POST /api/orders/{id}/return-exchange,POST /api/orders/{id}/exchange-request,Kh�c t�n
-L3-RET-02,A,POST /api/orders/{id}/return-exchange,POST /api/orders/{id}/exchange-request,Kh�c t�n
-L3-RET-03,A,POST /api/orders/return-exchanges/{id}/process,POST /api/orders/exchange-request/{requestId}/process,Kh�c t�n
-L3-RET-04,A,POST /api/orders/{id}/cancel-paid,POST /api/delivery/{orderId}/request-cancel,Kh�c t�n
-L3-RET-05,A,POST /api/orders/return-exchanges/{id}/confirm-pickup,POST /api/delivery/pickups/{requestId}/confirm,Kh�c t�n
-L3-RET-06,A,POST /api/orders/return-exchanges/{id}/confirm-pickup,POST /api/delivery/pickups/{requestId}/confirm,Kh�c t�n
+L3-DEL-09,A,GET /api/delivery/trips/{id},GET /api/delivery/orders,Khác tên - kiểm scope theo Sales
+L3-PUR-01,A,POST /api/purchase-orders + /{id}/issue,POST /api/purchase-orders + POST /{id}/issue,Trùng khớp
+L3-PUR-02,A,POST /api/purchase-orders/{id}/issue,POST /api/purchase-orders/{id}/issue,Trùng khớp
+L3-PUR-03,B,POST /api/inventory/post-from-po,(không tồn tại),Đúng BR-014: không có đường tăng tồn thẳng từ PO
+L3-PUR-04,A,POST /api/purchase-orders/import-excel,POST /api/purchase-orders/import/excel,Khác tên
+L3-PUR-05,A,POST /api/goods-receipts/{id}/post,POST /api/purchase-orders/{id}/receipts/{rId}/post,Khác tên
+L3-PUR-06,B,PUT /api/goods-receipts/{id},(không tồn tại),Đúng BR-021: không mở route sửa receipt
+L3-PUR-07,A,POST /api/goods-receipts/{id}/post,POST /api/purchase-orders/{id}/receipts/{rId}/post,Khác tên
+L3-PUR-08,A,POST /api/goods-receipts/{id}/post,POST /api/purchase-orders/{id}/receipts/{rId}/post,Khác tên
+L3-TRF-01,A,POST /api/stock-transfers,POST /api/stock-transfers,Trùng khớp
+L3-TRF-02,A,POST /api/stock-transfers/{id}/post,POST /api/stock-transfers/{id}/dispatch,Khác tên
+L3-TRF-03,A,POST /api/stock-transfers/{id}/receive,POST /api/stock-transfers/{id}/receive,Trùng khớp
+L3-TRF-04,A,POST /api/stock-transfers/{id}/receive,POST /api/stock-transfers/{id}/receive,Trùng khớp
+L3-TRF-05,A,POST /api/stock-transfers/{id}/post + /receive,POST /api/stock-transfers/{id}/dispatch + /receive,Khác tên
+L3-TRF-06,A,POST /api/stock-transfers/{id}/post,POST /api/stock-transfers/{id}/dispatch,Khác tên
+L3-TRF-07,A,POST /api/stock-transfers,POST /api/stock-transfers,Trùng khớp
+L3-INV-01,C,PUT /api/inventory/count-sessions/{id}/theoretical,(không tồn tại),Phiên kiểm kê chưa có; gần nhất POST /api/inventory/shift-count
+L3-INV-02,A,POST /api/inventory/count-sessions/{id}/lines,PUT /api/inventory/{inventoryId}/adjust,Không có count-session; kiểm biên số lượng qua lệnh điều chỉnh tồn
+L3-INV-03,A,POST /api/inventory/adjustments/{id}/post,PUT /api/inventory/{inventoryId}/adjust,Khác tên
+L3-INV-04,A,PUT /api/inventory/{id},PUT /api/inventory/{inventoryId}/adjust,Khác tên
+L3-INV-05,C,POST /api/materials/production-issues,(không tồn tại),Xuất vật tư sản xuất chưa triển khai
+L3-INV-06,C,GET /api/inventory/low-stock-alerts,(không tồn tại),Cảnh báo tồn thấp không có endpoint riêng; đi qua Notifications
+L3-INV-07,A,POST /api/materials/production-issues,POST /api/goods-issues/{id}/post,Kiểm xuất vượt tồn khả dụng qua phiếu xuất kho
+L3-SA-01,A,POST /api/auth/register,POST /api/auth/register,Round-robin chạy sau verify-otp
+L3-SA-02,A,POST /api/auth/register,POST /api/auth/register,Trùng khớp
+L3-SA-03,A,POST /api/sales-change-requests,POST /api/sales-change-requests,Trùng khớp
+L3-SA-04,A,POST /api/sales-change-requests/{id}/approve,PUT /api/sales-change-requests/{id}/approve,Khác method (POST vs PUT)
+L3-SA-05,A,POST /api/sales-change-requests/{id}/approve,PUT /api/sales-change-requests/{id}/approve,Khác method
+L3-SA-06,A,POST /api/sales-change-requests/{id}/approve,PUT /api/sales-change-requests/{id}/approve,Khác method
+L3-SA-07,B,PUT /api/orders/{id}/assigned-sales,(không tồn tại),Đúng BR-031: không mở route ghi đè snapshot Sales trên đơn
+L3-AS-01,B,POST /api/orders/{id}/refund,(không tồn tại),Đúng BR-017: hệ thống không hỗ trợ hoàn tiền
+L3-AS-02,C,POST /api/payment-reallocations,(không tồn tại),Phân bổ lại tiền chưa có API riêng; gần nhất POST /api/delivery/{id}/approve-cancel-replacement
+L3-AS-03,A,POST /api/orders (dùng credit),POST /api/orders/place-order,Khác tên
+L3-AS-04,A,POST /api/orders (dùng credit),POST /api/orders/place-order,Khác tên
+L3-AS-05,A,POST /api/warehouse/orders/quality-returns/{id}/release,POST /api/warehouse-management/quarantine/{id}/dispatch,Khác tên
+L3-AS-06,A,POST /api/orders (dùng credit),POST /api/orders/place-order,Khác tên
+L3-AS-07,A,POST /api/payment-reallocations,POST /api/delivery/{id}/approve-cancel-replacement,Khác tên - kiểm phân quyền duyệt huỷ/thay thế
+L3-AS-08,A,POST /api/orders/{id}/replacement,POST /api/delivery/exchange/{requestId}/replacement,Khác tên
+L3-ADM-01,A,GET /api/dashboards/sales-manager,GET /api/dashboards/sales-manager,Trùng khớp
+L3-ADM-02,A,POST /api/Quotation/{id}/ceo-review,POST /api/Quotation/{id}/ceo-decision,Khác tên
+L3-ADM-03,B,DELETE /api/admin/audit-logs/{id},(không tồn tại),Đúng BR-048: AuditLogController chỉ có GET
+L3-ADM-04,A,PUT /api/admin/configurations/discount-tier,PUT /api/admin/discount-tiers/{id},Khác tên
+L3-ADM-05,A,GET /api/Notifications,GET /api/Notifications,Trùng khớp
+L3-ADMC-01,A,POST /api/admin/users,POST /api/admin/users,Trùng khớp
+L3-ADMC-02,A,POST /api/admin/users,POST /api/admin/users,Trùng khớp
+L3-ADMC-03,A,PUT /api/admin/users/{id}/role,PUT /api/admin/users/{id}/role,Trùng khớp
+L3-ADMC-04,A,PUT /api/admin/system-configs/{key},PUT /api/admin/system-configs/{key},Trùng khớp
+L3-ADMC-05,A,GET /api/admin/system-configs/{key}/effective?at=,GET /api/admin/system-configs/{key}/history,Không có tra cứu theo mốc thời gian; chỉ có lịch sử phiên bản
+L3-ADMC-06,A,PUT /api/admin/system-configs/{key},PUT /api/admin/system-configs/{key},Trùng khớp
+L3-ADMC-07,B,DELETE /api/admin/audit-logs/{id},(không tồn tại),Như ADM-03
+L3-ADMC-08,A,GET /api/admin/audit-logs/export,GET /api/admin/audit-logs/export,Trùng khớp
+L3-ADMC-09,A,GET /api/vehicles?active=true,GET /api/vehicles,Trùng khớp
+L3-ADMC-10,A,POST /api/vehicles,POST /api/vehicles,Trùng khớp
+L3-ADMC-11,A,GET /api/admin/discount-tiers/applicable?subtotal=,GET /api/admin/discount-tiers,Không có endpoint applicable; bậc áp dụng tính trong checkout-summary
+L3-ADMC-12,A,POST /api/admin/discount-tiers,POST /api/admin/discount-tiers,Trùng khớp
+L3-ADMC-13,A,GET /api/dashboards/sales-staff?staffId=,GET /api/dashboards/sales-staff,Không nhận tham số staffId - phạm vi luôn lấy từ JWT
+L3-ADMC-14,A,GET /api/admin/system-health/jobs,GET /api/admin/system-health/job-runs,Khác tên
+L3-ADMC-15,A,POST /api/admin/system-health/webhook-logs/{id}/retry,POST /api/admin/system-health/webhook-logs/{id}/retry,Trùng khớp
+L3-ADMC-16,A,GET /api/admin/system-health/jobs,GET /api/admin/system-health/job-runs,Khác tên
+L3-ADMC-17,A,GET /swagger/v1/swagger.json,GET /swagger/v1/swagger.json,Chỉ bật khi ASPNETCORE_ENVIRONMENT=Development (Program.cs:293)
+L3-MKT-01,A,POST /api/marketing-posts,POST /api/marketing-posts,Trùng khớp
+L3-MKT-02,A,POST /api/marketing-posts/{id}/approve,POST /api/marketing-posts/{id}/decision,Khác tên
+L3-MKT-03,A,POST /api/marketing-posts/{id}/publish,POST /api/marketing-posts/{id}/publish-now,Khác tên
+L3-MKT-04,A,POST /api/marketing-posts/{id}/publish,POST /api/marketing-posts/{id}/publish-now,Khác tên
+L3-MKT-05,A,POST /api/marketing-posts/{id}/make-callback,POST /api/marketing-posts/{id}/webhook-callback,Khác tên
+L3-MKT-06,A,POST /api/marketing-posts/{id}/make-callback,POST /api/marketing-posts/{id}/webhook-callback,Khác tên
+L3-MKT-07,A,POST /api/marketing-posts/{id}/approve,POST /api/marketing-posts/{id}/decision,Khác tên
+L3-MKT-08,A,POST /api/marketing-posts/{id}/approve,POST /api/marketing-posts/{id}/decision,Khác tên
+L3-MKT-09,C,POST /api/marketing-posts/{id}/media,(không tồn tại),Upload media riêng chưa có
+L3-MKT-10,C,POST /api/marketing-posts/{id}/media,(không tồn tại),Như MKT-09
+L3-MKT-11,C,GET /api/marketing-posts/{id}/metrics,(không tồn tại),Chỉ số reach/reaction chưa triển khai
+L3-RET-01,A,POST /api/orders/{id}/return-exchange,POST /api/orders/{id}/exchange-request,Khác tên
+L3-RET-02,A,POST /api/orders/{id}/return-exchange,POST /api/orders/{id}/exchange-request,Khác tên
+L3-RET-03,A,POST /api/orders/return-exchanges/{id}/process,POST /api/orders/exchange-request/{requestId}/process,Khác tên
+L3-RET-04,A,POST /api/orders/{id}/cancel-paid,POST /api/delivery/{orderId}/request-cancel,Khác tên
+L3-RET-05,A,POST /api/orders/return-exchanges/{id}/confirm-pickup,POST /api/delivery/pickups/{requestId}/confirm,Khác tên
+L3-RET-06,A,POST /api/orders/return-exchanges/{id}/confirm-pickup,POST /api/delivery/pickups/{requestId}/confirm,Khác tên

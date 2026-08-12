@@ -39,6 +39,12 @@ JTL_FILES = [
     os.path.join(ROOT, "tests", "reports", "jmeter-L3-perf03.jtl"),
 ]
 MAP_CSV = os.path.join(ROOT, "tests", "l3_endpoint_map.csv")
+
+# L3-PERF-04 (SignalR ChatHub) do bang xUnit + Microsoft.AspNetCore.SignalR.Client chu khong bang
+# JMeter — JMeter khong noi duoc WebSocket/SignalR neu khong cai plugin ngoai. Test tu ghi so lieu
+# ra file nay (xem L3PerformanceSignalRTests.WriteStats).
+SIGNALR_JSON = os.path.join(ROOT, "tests", "reports", "l3_perf_signalr.json")
+
 RUN_DATE = "2026-08-12"
 
 # So lieu chay that cua xUnit, duoc main() gan lai tu .trx (khong ghi tay).
@@ -62,10 +68,8 @@ MANUAL = {
     "L3-SEC-13":  ("Fail", "DEF-L3-010",
                    "SQL: tai khoan ung dung UPDATE va DELETE duoc ban ghi AuditLogs (moi lenh doi 1 dong). "
                    "Bang khong phai INSERT-only."),
-    # JMeter khong noi duoc SignalR/WebSocket neu khong cai plugin ngoai
-    "L3-PERF-04": ("Blocked", "",
-                   "SignalR ChatHub: JMeter khong ho tro WebSocket/SignalR san. Can plugin ngoai "
-                   "hoac test rieng bang Microsoft.AspNetCore.SignalR.Client."),
+    # L3-PERF-04 KHONG con ghi tay: da do that bang xUnit + SignalR.Client, so lieu doc tu
+    # tests/reports/l3_perf_signalr.json — xem parse_perf().
 }
 
 # Mo ta ngan gon cho 4 case xUnit do CO CHU DICH (assert theo SRS, se tu xanh khi code duoc sua).
@@ -85,12 +89,48 @@ FAIL_NOTES = {
                  "thu do chinh nguoi gui dat - khong kiem magic byte.",
 }
 
-# PERF: ngưỡng workbook (ms) để đối chiếu với p95 đo được từ .jtl
+# PERF: ngưỡng workbook (ms) để đối chiếu với p95 đo được
 PERF_THRESHOLDS = {
     "L3-PERF-01": 500, "L3-PERF-02": 800, "L3-PERF-03": 1000,
+    "L3-PERF-04": 2000,  # NFR-P04 — do bang SignalR.Client, khong phai JMeter
     "L3-PERF-05": 3000, "L3-PERF-06": 3000, "L3-PERF-07": 1000,
     "L3-PERF-08": 5000, "L3-PERF-09": 3000,
 }
+
+
+def read_map_csv():
+    """
+    Đọc tests/l3_endpoint_map.csv, CHỊU ĐƯỢC việc file đã bị Excel mở rồi lưu đè.
+
+    Excel trên máy Windows tiếng Việt làm 2 việc phá file:
+      1. Lưu lại theo ANSI codepage (cp1252) -> tiếng Việt trong cột Note thành mojibake, và
+         file không còn decode được bằng UTF-8 (script sẽ ném UnicodeDecodeError).
+      2. Đôi khi chèn thêm một dòng tiêu đề giả `Column1,Column2,...` lên trước dòng tiêu đề thật.
+
+    Đây là file người dùng ĐƯỢC KHUYẾN KHÍCH mở bằng Excel để tra cứu, nên script phải tự chịu
+    được, không được bắt người dùng nhớ "đừng lưu file". Cột dữ liệu (TestID/Group/endpoint) đều là
+    ASCII nên vẫn đọc đúng kể cả khi cột Note bị vỡ dấu.
+    """
+    raw = None
+    for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            raw = io.open(MAP_CSV, encoding=encoding).read()
+            break
+        except UnicodeDecodeError:
+            continue
+    if raw is None:
+        raise RuntimeError(f"Khong doc duoc {MAP_CSV} voi bat ky encoding nao da thu.")
+
+    rows = list(csv.DictReader(io.StringIO(raw)))
+
+    # Bỏ dòng tiêu đề giả của Excel: khi đó fieldnames là Column1..N và dòng ĐẦU TIÊN mới là
+    # tiêu đề thật -> đọc lại, bỏ qua dòng rác đó.
+    if rows and "TestID" not in (rows[0].keys() if rows else {}):
+        lines = raw.splitlines(keepends=True)
+        if lines and lines[0].lower().startswith("column1"):
+            rows = list(csv.DictReader(io.StringIO("".join(lines[1:]))))
+
+    return [r for r in rows if (r.get("TestID") or "").startswith("L3-")]
 
 
 def read_workbook_index():
@@ -167,12 +207,29 @@ def parse_jtl():
                 continue
             idx = min(len(e) - 1, int(round(0.95 * (len(e) - 1))))
             out[label] = {  # file sau ghi de file truoc
+                "tool": "JMeter",
                 "count": len(e),
                 "p95": e[idx],
                 "avg": round(sum(e) / len(e), 1),
                 "errors": data["errors"],
                 "error_rate": round(100.0 * data["errors"] / len(e), 2),
             }
+
+    # L3-PERF-04 do bang xUnit + SignalR.Client (JMeter khong lam duoc WebSocket) -> gop vao cung
+    # cau truc de di chung mot duong tinh Pass/Fail va cung mot bang bao cao.
+    if os.path.exists(SIGNALR_JSON):
+        s = json.load(io.open(SIGNALR_JSON, encoding="utf-8"))
+        out[s["testId"]] = {
+            "tool": "SignalR.Client",
+            "count": s["samples"],
+            "p95": s["p95Ms"],
+            "avg": s["avgMs"],
+            "max": s["maxMs"],
+            "errors": 0,
+            "error_rate": 0.0,
+            "note_extra": f"max={s['maxMs']}ms, {s['clients']} client, {s['transport']}",
+        }
+
     return out
 
 
@@ -210,8 +267,10 @@ def build_status(trx, jtl):
         acceptable_errors = stats["error_rate"] < 1.0
         ok = within_threshold and acceptable_errors
 
-        note = (f"JMeter: {stats['count']} mau, p95={stats['p95']}ms (nguong {threshold}ms), "
-                f"avg={stats['avg']}ms, loi HTTP={stats['error_rate']}%.")
+        note = (f"{stats.get('tool', 'JMeter')}: {stats['count']} mau, p95={stats['p95']}ms "
+                f"(nguong {threshold}ms), avg={stats['avg']}ms, loi HTTP={stats['error_rate']}%.")
+        if stats.get("note_extra"):
+            note += f" {stats['note_extra']}."
         if not within_threshold:
             note += " VUOT NGUONG."
         if not acceptable_errors:
@@ -231,7 +290,7 @@ def build_status(trx, jtl):
     module_defect = {
         "L3-DEL": ("DEF-L3-004", "Module Delivery Trip / POD / thu COD chua trien khai"),
     }
-    for row in csv.DictReader(io.open(MAP_CSV, encoding="utf-8")):
+    for row in read_map_csv():
         if row["Group"] != "C":
             continue
         tid = row["TestID"]
@@ -256,7 +315,7 @@ def write_status_csv(index, status):
 
 
 def write_drift_md(status):
-    rows = list(csv.DictReader(io.open(MAP_CSV, encoding="utf-8")))
+    rows = read_map_csv()
     out = os.path.join(ROOT, "tests", "L3_ENDPOINT_DRIFT.md")
 
     group_names = {
@@ -393,19 +452,26 @@ def write_summary_md(index, status, jtl, xunit_rows, xunit_red, xunit_cases):
                 f"{XUNIT_ROWS} dong chay, {XUNIT_ROWS - XUNIT_RED} xanh, {XUNIT_RED} do co chu dich |\n")
         f.write("| Newman (Postman CLI) | Security header, SQLi, 401/403, Swagger | "
                 "13 request / 25 assertion (3 do: SEC-15) + 1 request / 4 assertion cho Swagger |\n")
-        f.write(f"| Apache JMeter 5.6.3 (thay k6) | {len(PERF_THRESHOLDS)} case hieu nang | xem bang duoi |\n")
+        jmeter_cases = sum(1 for t in PERF_THRESHOLDS if jtl.get(t, {}).get("tool") == "JMeter")
+        signalr_cases = sum(1 for t in PERF_THRESHOLDS if jtl.get(t, {}).get("tool") == "SignalR.Client")
+        f.write(f"| Apache JMeter 5.6.3 (thay k6) | {jmeter_cases} case hieu nang HTTP | xem bang duoi |\n")
+        if signalr_cases:
+            f.write(f"| Microsoft.AspNetCore.SignalR.Client | {signalr_cases} case hieu nang WebSocket "
+                    "(JMeter khong lam duoc) | xem bang duoi |\n")
         f.write("| SQL truc tiep | SEC-06, SEC-13 | 1 Pass, 1 Fail |\n")
 
         if jtl:
             f.write("\n## So lieu hieu nang do duoc\n\n")
-            f.write("| Test ID | So mau | p95 (ms) | Nguong (ms) | Ket qua | Loi HTTP |\n|---|---:|---:|---:|---|---:|\n")
+            f.write("| Test ID | Cong cu | So mau | p95 (ms) | Nguong (ms) | Ket qua | Loi HTTP |\n"
+                    "|---|---|---:|---:|---:|---|---:|\n")
             for tid in sorted(PERF_THRESHOLDS):
                 s = jtl.get(tid)
                 if not s:
                     continue
                 th = PERF_THRESHOLDS[tid]
-                verdict = "PASS" if s["p95"] <= th else "FAIL"
-                f.write(f"| {tid} | {s['count']} | {s['p95']} | {th} | {verdict} | {s['error_rate']}% |\n")
+                verdict = "PASS" if s["p95"] <= th and s["error_rate"] < 1.0 else "FAIL"
+                f.write(f"| {tid} | {s.get('tool', 'JMeter')} | {s['count']} | {s['p95']} | {th} | "
+                        f"{verdict} | {s['error_rate']}% |\n")
 
         f.write("\n## Defect\n\n")
         f.write("| Defect ID | Muc | Tom tat |\n|---|---|---|\n")
