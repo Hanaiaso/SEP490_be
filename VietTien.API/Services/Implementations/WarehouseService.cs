@@ -458,8 +458,10 @@ namespace VietTien.API.Services.Implementations
             var order = await _context.Orders.Include(o => o.OrderItems).ThenInclude(i => i.Product).FirstOrDefaultAsync(o => o.Id == orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
-            if (order.WarehouseStaffId != staffId)
+            if (order.WarehouseStaffId.HasValue && order.WarehouseStaffId.Value != staffId)
                 throw new UnauthorizedAccessException("Bạn không có quyền báo cáo cho đơn hàng này.");
+
+            order.WarehouseStaffId ??= staffId;
 
             order.OrderStatus = OrderStatus.PendingConfirmation; // Revert to confirmation phase
             order.FulfillmentStatus = FulfillmentStatus.Unallocated;
@@ -623,8 +625,10 @@ namespace VietTien.API.Services.Implementations
             var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
             
-            if (order.WarehouseStaffId != staffId)
+            if (order.WarehouseStaffId.HasValue && order.WarehouseStaffId.Value != staffId)
                 throw new UnauthorizedAccessException("Bạn không có quyền thao tác trên đơn hàng này.");
+
+            order.WarehouseStaffId ??= staffId;
 
             if (order.FulfillmentStatus != FulfillmentStatus.Ready && order.FulfillmentStatus != FulfillmentStatus.Consolidating)
                 throw new Exception("Đơn hàng chưa sẵn sàng để tập kết.");
