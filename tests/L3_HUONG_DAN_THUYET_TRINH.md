@@ -1,189 +1,160 @@
-# Hướng dẫn thuyết trình — Kiểm thử L3 (System / API Test)
+# L3 System/API Test — hướng dẫn chạy & thuyết trình
 
-> Tài liệu này là kịch bản trình bày cho đợt chạy `Report_5_3_L3-SystemAPITests_VietTien_v1_3.xlsx`
-> (172 test case), thực hiện ngày **12/08/2026** trên nhánh `main`.
->
-> Thời lượng gợi ý: **12–15 phút**. Mỗi mục dưới đây tương ứng 1–2 slide.
+Đợt chạy 12/08/2026, nhánh `main`, workbook `Report_5_3_L3-SystemAPITests_VietTien_v1_3.xlsx` (172 case).
 
 ---
 
-## Slide 1 — L3 là gì và khác gì L1/L2
+## 1. Chạy như thế nào
 
-| Cấp | Kiểm cái gì | Công cụ | Ai chạy được |
-|---|---|---|---|
-| L1 — Unit | Logic bên trong 1 hàm/service | xUnit + Moq | Không cần DB |
-| L2 — Integration | Service + DB thật, transaction, concurrency | xUnit + Testcontainers | Cần Docker |
-| **L3 — System/API** | **Toàn bộ ứng dụng qua HTTP công khai**: middleware JWT, RBAC 7 vai trò, validation, mã lỗi, mã HTTP | xUnit + WebApplicationFactory, Postman/Newman, JMeter | Cần server + DB |
+Mở PowerShell, vào thư mục dự án một lần:
 
-**Câu hỏi cốt lõi của L3**: *"Hợp đồng API có đúng như SRS quy định khi hệ thống chạy thật không?"*
+```bash
+cd D:\SEP_Deploy\SEP490_be
+```
 
----
-
-## Slide 2 — Vì sao không thể chạy workbook "as-is"
-
-Trước khi viết dòng test đầu tiên, nhóm đối chiếu tự động **139 tham chiếu endpoint** trong workbook
-với **195 route thật** trích từ 31 controller. Kết quả:
-
-> **93/139 tham chiếu endpoint trong workbook không tồn tại đúng tên trong code.**
-> **0/195 endpoint trả về trường `errorCode`** — trong khi workbook kỳ vọng ~80 mã lỗi nghiệp vụ.
-
-Ba dạng lệch:
-
-| Nhóm | Ý nghĩa | Ví dụ | Xử lý |
-|---|---|---|---|
-| **A** | Có endpoint tương đương, chỉ khác tên | `POST /api/orders` → `POST /api/orders/place-order` | Test bắn vào endpoint thật |
-| **B** | Không có endpoint, và **đó là đúng** | `DELETE /api/admin/audit-logs/{id}` không tồn tại → chính là cách BR-048 được bảo đảm | Test khẳng định 404/405 → **Pass** |
-| **C** | Thiếu chức năng thật | Module `POST /api/delivery/trips` (chuyến giao / POD / thu COD) | **Fail**, gom thành 1 defect/module |
-
-> **Điểm nhấn khi nói**: nhóm B là phát hiện đáng giá — "không có API" ở đây *là* biện pháp bảo mật,
-> không phải thiếu sót. Nếu chỉ nhìn "endpoint không tồn tại → Fail" thì sẽ báo sai 6 case.
-
----
-
-## Slide 3 — Chuẩn đánh giá đã chốt: **Hybrid**
-
-Có 3 cách chấm, nhóm chọn cách thứ nhất:
-
-1. ✅ **Hybrid** — map sang endpoint thật, assert **hành vi nghiệp vụ thật** (HTTP status + phân
-   quyền + hệ quả trong DB). Việc thiếu `errorCode` và lệch mã HTTP gom thành **2 defect hệ thống**
-   thay vì ~80 defect lẻ.
-2. ❌ Theo SPEC nghiêm ngặt — mọi case đều đỏ, ~100 defect, báo cáo mất tín hiệu.
-3. ❌ Chỉ test cái đang có — bỏ sót toàn bộ khoảng trống chức năng.
-
-**Lợi ích của Hybrid**: bảng kết quả phân biệt được *"code sai"* với *"tài liệu lệch"* — hai loại việc
-giao cho hai người khác nhau.
-
----
-
-## Slide 4 — Cách chạy (demo trực tiếp được)
-
-**Bước 0 — dựng môi trường** (một lần):
+**Bước 0 — cài công cụ (chỉ 1 lần):**
 
 ```bash
 powershell -ExecutionPolicy Bypass -File tests\install-tools.ps1
 ```
 
-Tải Apache JMeter 5.6.3 + cài Newman. *Workbook ghi k6; nhóm dùng JMeter vì máy đã có Java 21 —
-**ngưỡng NFR giữ nguyên không đổi**.*
-
-**Bước 1 — chạy 154 case hợp đồng API bằng xUnit** (nhanh nhất, ~40 giây, không cần server):
+**Bước 1 — xUnit, 158 case (không cần bật server):**
 
 ```bash
 dotnet test VietTien.IntegrationTests\VietTien.IntegrationTests.csproj --filter "FullyQualifiedName~VietTien.IntegrationTests.L3" --logger "trx;LogFileName=L3.trx"
 ```
 
-**Bước 2 — bật server thật** (cho Newman + JMeter):
+**Bước 2 — bật server (mở cửa sổ PowerShell THỨ HAI, để chạy nền):**
 
 ```bash
 powershell -ExecutionPolicy Bypass -File tests\run-local-api.ps1
 ```
 
-> **Nói rõ ở đây**: script cố ý chạy environment `L3Perf` **chứ không phải `Development`**, để
-> KHÔNG nạp `appsettings.Development.json` — file đó trỏ vào **DB thật trên Azure** và chứa API key
-> thật của eSMS/Gemini/Cloudinary. Toàn bộ đợt kiểm thử chạy trên SQL Server local (`VietTien22`).
-
-**Bước 3 — Newman** (security header, SQLi, 401/403, hợp đồng Swagger):
+**Bước 3 — Newman (quay lại cửa sổ thứ nhất):**
 
 ```bash
 newman run tests\postman\VietTien-L3.postman_collection.json -e tests\postman\VietTien-L3.local.postman_environment.json -r "cli,htmlextra" --reporter-htmlextra-export tests\reports\newman-L3.html
 ```
 
-**Bước 4 — JMeter** (9 case hiệu năng):
+**Bước 4 — JMeter:**
 
 ```bash
 tools\apache-jmeter-5.6.3\bin\jmeter.bat -n -t tests\jmeter\L3-PERF.jmx -l tests\reports\jmeter-L3.jtl -e -o tests\reports\jmeter-L3
 ```
 
-**Bước 5 — 2 case chỉ kiểm được ở mức DB**:
+Chạy lại lần 2 phải xoá kết quả cũ trước (JMeter từ chối ghi đè):
+
+```bash
+Remove-Item -Recurse -Force tests\reports\jmeter-L3, tests\reports\jmeter-L3.jtl
+```
+
+**Bước 5 — 2 case kiểm ở mức database:**
 
 ```bash
 powershell -ExecutionPolicy Bypass -File tests\sql\L3-SEC-06_13.ps1
 ```
 
-**Bước 6 — sinh bảng kết quả để dán vào Excel**:
+**Bước 6 — sinh bảng kết quả dán vào Excel:**
 
 ```bash
 python tools\l3_report.py
 ```
 
----
+| Bước | Công cụ | Cần server? | Thời gian | Kết quả xem ở |
+|---|---|---|---|---|
+| 1 | dotnet test | Không | 40 giây | console + `TestResults\L3.trx` |
+| 2 | run-local-api.ps1 | (là server) | chạy nền | `http://localhost:5080` |
+| 3 | newman | **Có** | 2 giây | `tests\reports\newman-L3.html` |
+| 4 | jmeter | **Có** | 10 phút | `tests\reports\jmeter-L3\index.html` |
+| 5 | SQL script | Không | 2 giây | console |
+| 6 | python | Không | 2 giây | `tests\L3_status_2026-08-12.csv` |
 
-## Slide 5 — Đọc bảng kết quả
-
-File `tests/L3_status_2026-08-12.csv` có đúng **172 dòng, đúng thứ tự sheet `TestCase List`** →
-mở bằng Excel, copy cột `Status` + `Defect ID` + `Ghi chú` dán thẳng sang workbook.
-
-**Hai cái bẫy khi đếm** (đã gặp ở đợt L1, ghi trong `VietTien.Tests/DOC_MISMATCHES.md`):
-
-1. Một Test ID có thể ứng với **nhiều dòng chạy** (`[Theory]` nhiều `InlineData`). Chỉ cần 1 nhánh đỏ
-   thì cả case ghi **Fail**. Ví dụ `L3-AUTH-04` có 3 dòng nhưng chỉ là 1 case.
-2. File `.trx` ghi test bị skip là **`NotExecuted`**, *không phải* `Skipped` — đếm nhầm rất dễ thành Pass.
+Xong bước 6 thì Ctrl+C tắt server ở cửa sổ thứ hai.
 
 ---
 
-## Slide 6 — 4 test đỏ là **CÓ CHỦ ĐÍCH**
+## 2. Tự kiểm chứng
 
-Đây là phần đáng nói nhất: 4 test đỏ không phải test hỏng, mà là **4 lỗi thật của hệ thống**, mỗi
-test assert đúng theo SRS và sẽ tự chuyển xanh khi code được sửa.
+**Chạy 1 case lẻ:**
 
-| Test | Defect | Điều gì đã xảy ra |
+```bash
+dotnet test VietTien.IntegrationTests\VietTien.IntegrationTests.csproj --filter "FullyQualifiedName~L3_AUTH_02" -v n
+```
+
+**Chứng minh test không "xanh giả"** — mở `VietTien.IntegrationTests/L3/L3AuthApiTests.cs`, trong `L3_AUTH_02` đổi `HttpStatusCode.BadRequest` thành `HttpStatusCode.OK`, chạy lại → phải **đỏ**. Đổi về như cũ → xanh. Test có thật sự gọi API và assert.
+
+**Tái hiện lỗi P1 DEF-L3-006 bằng 2 request Postman** (cần server ở bước 2):
+
+1. `POST http://localhost:5080/api/auth/login` — body `{"email":"customer.test@viettien.com","password":"123456"}` → lấy `data.accessToken`. Đây là tài khoản **khách hàng**.
+2. `GET http://localhost:5080/api/warehouse/orders?tabType=OnlinePending` — header `Authorization: Bearer <token>`.
+
+→ Trả **200 OK kèm danh sách đơn trong kho**. Đáng lẽ phải 403.
+
+---
+
+## 3. L3 là gì
+
+Kiểm **toàn bộ ứng dụng qua HTTP thật**: middleware JWT, RBAC 7 vai trò, validation, mã lỗi, mã HTTP.
+
+Khác L1 (logic trong 1 hàm, không cần DB) và L2 (service + DB thật, không đi qua HTTP).
+
+---
+
+## 4. Vì sao không chạy workbook as-is
+
+Đối chiếu tự động 139 tham chiếu endpoint trong workbook với 195 route thật:
+
+- **93/139 endpoint không tồn tại đúng tên** trong code.
+- **0/195 endpoint trả trường `errorCode`** — workbook kỳ vọng ~80 mã lỗi nghiệp vụ.
+
+| Nhóm | Nghĩa | Ví dụ | Xử lý |
+|---|---|---|---|
+| A (115) | Có endpoint tương đương, khác tên | `POST /api/orders` → `/api/orders/place-order` | Test bắn vào endpoint thật |
+| B (7) | Không có endpoint, **và đó là đúng** | `DELETE /api/admin/audit-logs/{id}` không tồn tại → chính là cách BR-048 được bảo đảm | Assert 404/405 → **Pass** |
+| C (15) | Thiếu chức năng thật | Module `/api/delivery/trips` | **Fail**, gom 1 defect/module |
+
+**Chuẩn đánh giá: Hybrid** — assert hành vi nghiệp vụ thật; thiếu `errorCode` và lệch mã HTTP gom thành 2 defect hệ thống thay vì ~80 defect lẻ.
+
+---
+
+## 5. Kết quả
+
+| Trạng thái | Số case |
+|---|---:|
+| Pass | 149 (86.6%) |
+| Fail | 22 (12.8%) |
+| Blocked | 1 (PERF-04 SignalR) |
+| **Not Run** | **0** |
+
+xUnit: 198 dòng chạy, 194 xanh, **4 đỏ có chủ đích** (assert theo SRS, tự xanh khi code được sửa).
+
+| Defect | Mức | Tóm tắt |
 |---|---|---|
-| `L3_QUO_05` | **DEF-L3-003 (P1)** | Khách được duyệt báo giá 110tr cho giỏ 1 món, rồi **đổi giỏ thành 2 món (240tr)** và vẫn đặt được đơn ở giá **110tr**. `CalculateDiscountAsync` chỉ tìm "báo giá đã duyệt bất kỳ còn hiệu lực của khách này" mà **không đối chiếu với giỏ hiện tại** — trường `Quotation.CartId` có trong model nhưng không được dùng. → Thiệt hại tài chính trực tiếp. |
-| `L3_FUL_01` | **DEF-L3-006 (P1)** | `WarehouseController` có `[Authorize]` ở cấp class nhưng **4 endpoint ĐỌC quên gắn role** (mọi endpoint GHI đều có). Hệ quả: **tài khoản Customer đọc được toàn bộ hàng đợi xuất kho + chi tiết đơn của khách khác**. OWASP A01. |
-| `L3_INV_04` | **DEF-L3-007 (P1)** | Điều chỉnh tồn kho về 0 trong khi đang giữ 1.000 đơn vị cho đơn khách → tồn khả dụng **thô = −2000**. Sai lệch bị che vì property `AvailableQuantity` có `Math.Max(0, …)`. *Chính workbook đã cảnh báo điều này ở L3-SEC-18: "kiểm tra biểu thức thô, không dùng thuộc tính đã floor về 0".* |
-| `L3_SEC_14` | **DEF-L3-008 (P2)** | Upload ảnh chỉ kiểm **phần mở rộng tên file** — thứ do chính người gửi đặt. File PE/EXE đổi đuôi `.png` đi lọt và được lưu trữ. |
+| DEF-L3-003 | P1 | Báo giá đã duyệt được áp cho **giỏ hàng khác**: giỏ 240tr tính thành 110tr |
+| DEF-L3-004 | P1 | Module Delivery Trip / POD / thu COD chưa triển khai |
+| DEF-L3-006 | P1 | Customer đọc được toàn bộ hàng đợi xuất kho (OWASP A01) |
+| DEF-L3-007 | P1 | Điều chỉnh tồn kho làm tồn khả dụng thô = −2000, bị che bởi `Math.Max(0,…)` |
+| DEF-L3-010 | P1 | `AuditLogs` UPDATE/DELETE được ở mức DB |
+| DEF-L3-005 | P2 | Thiếu multi-pick, kiểm kê, xuất NVL, cảnh báo tồn thấp, media/metrics marketing |
+| DEF-L3-008 | P2 | Upload chỉ kiểm phần mở rộng tên file → `.exe` đổi đuôi `.png` đi lọt |
+| DEF-L3-009 | P2 | Không ép HTTPS, thiếu 3 security header |
+| DEF-L3-001 | P2 | Không có error registry (0/195 endpoint có `errorCode`) |
+| DEF-L3-002 | P3 | Mã HTTP lệch SRS: trả 400 thay vì 409/429 |
 
-Cộng thêm 2 lỗi tìm được ngoài xUnit:
-
-| Nguồn | Defect | Nội dung |
-|---|---|---|
-| SQL trực tiếp | **DEF-L3-010 (P1)** | Bảng `AuditLogs` **không bất biến**: tài khoản ứng dụng UPDATE/DELETE được bản ghi audit. Vi phạm BR-048/NFR-SEC08. |
-| Newman | **DEF-L3-009 (P2)** | Không redirect HTTP→HTTPS và thiếu cả 3 header `HSTS` / `X-Content-Type-Options` / `X-Frame-Options`. |
-
----
-
-## Slide 7 — Câu hỏi hay gặp & cách trả lời
-
-**"Sao không dùng k6 như workbook ghi?"**
-→ Máy chạy kiểm thử có sẵn Java 21 nên JMeter chạy được ngay, không phải cài thêm runtime.
-**Ngưỡng NFR giữ nguyên 100%**, chỉ đổi công cụ đo. Đã ghi rõ ở cột Notes.
-
-**"Sao thời lượng chạy tải ngắn hơn workbook?"**
-→ Số luồng (VUs) và ngưỡng giữ **đúng** workbook; chỉ rút ngắn thời lượng để 8 case chạy gọn trong
-một cửa sổ kiểm thử. p95 vẫn tính trên hàng trăm nghìn mẫu nên có ý nghĩa thống kê.
-
-**"Vì sao dùng SQL Server local mà không phải EF InMemory cho nhanh?"**
-→ `OrderService.PlaceOrderAsync` mở transaction thật (`BeginTransactionAsync`). Provider InMemory
-không hỗ trợ transaction và sẽ ném lỗi — mọi case đặt hàng/xuất kho/chuyển kho sẽ hỏng **vì lý do hạ
-tầng chứ không phải vì nghiệp vụ sai**. L3 phải chạy trên stack thật.
-
-**"Vì sao không dùng hạ tầng L2 có sẵn (Testcontainers)?"**
-→ Máy chạy đợt này không bật Docker. Nhóm viết `L3SqlFixture` dùng SQL Server local, **tái sử dụng
-nguyên logic reseed của L2** (đã tách ra `SeedDataReplayer` để hai bên dùng chung, không chép lần hai).
-
-**"Chạy test có làm hỏng dữ liệu không?"**
-→ Không. L3 dùng DB **riêng** `VietTien22_L3`, mỗi test gọi Respawn xoá sạch rồi nạp lại seed.
-DB dev (`VietTienDB`) và DB Azure không bị đụng tới.
-
-**"Có chắc không gọi ra dịch vụ ngoài thật không?"**
-→ Có 2 lớp chặn: (1) fixture thay `IEmailService`/`ISmsService`/`IAiGeneratorService`/
-`ICloudinaryService`/`IMakeWebhookService` bằng fake; (2) `appsettings.Test.json` ép mọi API key về
-rỗng. Test `L3_FLOW_07` còn assert tường minh là không có lệnh gọi ra ngoài nào.
+Chi tiết: `L3_ENDPOINT_DRIFT.md` (bản lệch đầy đủ) · `L3_status_2026-08-12.csv` (172 dòng dán vào Excel) · `L3_KET_QUA_TOM_TAT.md` (số liệu hiệu năng).
 
 ---
 
-## Slide 8 — Kết luận & việc tiếp theo
+## 6. Hỏi đáp nhanh
 
-**Đã làm**: 172/172 case có kết quả, 0 case `Not Run`.
+**Sao dùng JMeter mà không phải k6?** Máy có sẵn Java 21, JMeter chạy ngay; ngưỡng NFR giữ nguyên 100%, chỉ đổi công cụ đo.
 
-**Ưu tiên sửa (P1, theo thứ tự tác động)**:
+**Sao thời lượng chạy ngắn hơn workbook?** Số luồng và ngưỡng đúng workbook, chỉ rút thời lượng để 8 case chạy gọn; p95 vẫn tính trên hàng trăm nghìn mẫu.
 
-1. `DEF-L3-006` — gắn role cho 4 endpoint đọc của `WarehouseController` *(sửa 4 dòng, chặn rò dữ liệu)*.
-2. `DEF-L3-003` — đối chiếu giỏ hiện tại với version báo giá đã duyệt trước khi áp giá.
-3. `DEF-L3-007` — chặn điều chỉnh tồn làm tồn khả dụng xuống âm.
-4. `DEF-L3-010` — chuyển `AuditLogs` sang INSERT-only (trigger hoặc DENY quyền).
-5. `DEF-L3-004` — quyết định: triển khai module chuyến giao/POD/COD, hay cập nhật SRS bỏ phạm vi đó.
+**Sao không dùng EF InMemory cho nhanh?** `OrderService.PlaceOrderAsync` mở transaction thật; InMemory không hỗ trợ transaction nên mọi case đặt hàng/xuất kho sẽ hỏng vì hạ tầng chứ không phải vì nghiệp vụ.
 
-**Việc cho tài liệu** (không phải việc của lập trình):
-cập nhật workbook theo `tests/L3_ENDPOINT_DRIFT.md` — sửa 93 tham chiếu endpoint và quyết định có
-làm error registry (`DEF-L3-001`) hay bỏ cột `Expected Error Code` khỏi workbook.
+**Chạy test có hỏng dữ liệu không?** Không — DB riêng `VietTien22_L3`, mỗi test Respawn xoá sạch rồi nạp lại seed. DB dev và DB Azure không bị đụng.
+
+**Có gọi ra dịch vụ ngoài thật không?** Không — fixture thay email/SMS/AI/Cloudinary/Make bằng fake, `appsettings.Test.json` ép mọi API key về rỗng; test `L3_FLOW_07` assert tường minh.
+
+**4 test đỏ là lỗi test hay lỗi code?** Lỗi code — mỗi test assert đúng theo SRS và sẽ tự chuyển xanh khi sửa.

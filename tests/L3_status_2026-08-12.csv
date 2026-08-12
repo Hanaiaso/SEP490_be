@@ -112,7 +112,7 @@ L3-FLOW-07,L3-APIFlows,Pass,,xUnit L3 xanh.
 L3-PERF-01,L3-Performance,Pass,,"JMeter: 136903 mau, p95=12ms (nguong 500ms), avg=6.6ms, loi HTTP=0.0%."
 L3-PERF-02,L3-Performance,Pass,,"JMeter: 166590 mau, p95=11ms (nguong 800ms), avg=6.3ms, loi HTTP=0.0%."
 L3-PERF-03,L3-Performance,Pass,,"JMeter: 90578 mau, p95=8ms (nguong 1000ms), avg=6.0ms, loi HTTP=0.0%."
-L3-PERF-04,L3-Performance,Blocked,,SignalR ChatHub: JMeter khong ho tro WebSocket/SignalR san. Can plugin ngoai hoac test rieng bang Microsoft.AspNetCore.SignalR.Client.
+L3-PERF-04,L3-Performance,Pass,,"SignalR.Client: 100 mau, p95=14.8ms (nguong 2000ms), avg=10.5ms, loi HTTP=0.0%. max=52.9ms, 2 client, WebSocket (SignalR client, qua TestServer in-memory)."
 L3-PERF-05,L3-Performance,Pass,,"JMeter: 100999 mau, p95=28ms (nguong 3000ms), avg=15.6ms, loi HTTP=0.0%."
 L3-PERF-06,L3-Performance,Pass,,"JMeter: 83569 mau, p95=10ms (nguong 3000ms), avg=6.6ms, loi HTTP=0.0%."
 L3-PERF-07,L3-Performance,Pass,,"JMeter: 117345 mau, p95=4ms (nguong 1000ms), avg=2.4ms, loi HTTP=0.0%."

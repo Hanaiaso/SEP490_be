@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using VietTien.API.Models;
 using VietTien.API.Services.Implementations;
+using VietTien.API.Services.Interfaces;
 using VietTien.API.Services.ScheduledJobs;
 
 namespace VietTien.IntegrationTests
@@ -105,18 +106,26 @@ namespace VietTien.IntegrationTests
         }
 
         /// <summary>
-        /// Chốt yêu cầu "với key rỗng thì nhánh mock ở eSmsService.cs:24 kích hoạt": dựng eSmsService
+        /// Chốt yêu cầu "với key rỗng thì nhánh mock ở eSmsService.cs kích hoạt": dựng eSmsService
         /// THẬT với IConfiguration của môi trường Test và một HttpMessageHandler sẽ nổ nếu bị gọi.
         /// Nếu nhánh mock không kích hoạt, handler sẽ ném và test fail.
+        ///
+        /// eSmsService nay đọc key theo thứ tự: SystemConfig (ESMS_API_KEY/ESMS_SECRET_KEY) trước,
+        /// rồi mới fallback về IConfiguration. Dùng ISystemConfigService THẬT lấy từ DI để đi đúng
+        /// đường của production: seed HasData chỉ tạo DÒNG SystemConfig cho 2 key này mà không tạo
+        /// SystemConfigVersion nào, nên GetEffectiveValueAsync trả null -> rơi về fallback rỗng của
+        /// appsettings.Test.json -> nhánh mock kích hoạt. Nếu về sau có ai seed giá trị thật cho 2 key
+        /// đó, test này sẽ đỏ — và đỏ đúng, vì lúc đó môi trường Test đã có credential thật.
         /// </summary>
         [Fact]
         public async Task RealESmsService_WithEmptyKeys_ShortCircuitsWithoutAnyHttpCall()
         {
             using var scope = Factory.Services.CreateScope();
             var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+            var systemConfigService = scope.ServiceProvider.GetRequiredService<ISystemConfigService>();
 
             var handler = new ExplodingHandler();
-            var sut = new eSmsService(new HttpClient(handler), config);
+            var sut = new eSmsService(new HttpClient(handler), config, systemConfigService);
 
             var (success, error) = await sut.SendSmsAsync("0900000000", "noi dung test");
 

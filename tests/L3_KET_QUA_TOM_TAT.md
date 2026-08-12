@@ -4,31 +4,32 @@ Tong so case trong workbook: **172**
 
 | Trang thai | So case | Ty le |
 |---|---:|---:|
-| Pass | 149 | 86.6% |
+| Pass | 150 | 87.2% |
 | Fail | 22 | 12.8% |
-| Blocked | 1 | 0.6% |
 
 ## Cong cu da dung
 
 | Cong cu | Pham vi | Ket qua |
 |---|---|---|
-| xUnit + WebApplicationFactory + SQL Server local | 158 case hop dong API | 198 dong chay, 194 xanh, 4 do co chu dich |
+| xUnit + WebApplicationFactory + SQL Server local | 159 case hop dong API | 199 dong chay, 195 xanh, 4 do co chu dich |
 | Newman (Postman CLI) | Security header, SQLi, 401/403, Swagger | 13 request / 25 assertion (3 do: SEC-15) + 1 request / 4 assertion cho Swagger |
-| Apache JMeter 5.6.3 (thay k6) | 8 case hieu nang | xem bang duoi |
+| Apache JMeter 5.6.3 (thay k6) | 8 case hieu nang HTTP | xem bang duoi |
+| Microsoft.AspNetCore.SignalR.Client | 1 case hieu nang WebSocket (JMeter khong lam duoc) | xem bang duoi |
 | SQL truc tiep | SEC-06, SEC-13 | 1 Pass, 1 Fail |
 
 ## So lieu hieu nang do duoc
 
-| Test ID | So mau | p95 (ms) | Nguong (ms) | Ket qua | Loi HTTP |
-|---|---:|---:|---:|---|---:|
-| L3-PERF-01 | 136903 | 12 | 500 | PASS | 0.0% |
-| L3-PERF-02 | 166590 | 11 | 800 | PASS | 0.0% |
-| L3-PERF-03 | 90578 | 8 | 1000 | PASS | 0.0% |
-| L3-PERF-05 | 100999 | 28 | 3000 | PASS | 0.0% |
-| L3-PERF-06 | 83569 | 10 | 3000 | PASS | 0.0% |
-| L3-PERF-07 | 117345 | 4 | 1000 | PASS | 0.0% |
-| L3-PERF-08 | 149847 | 120 | 5000 | PASS | 0.0% |
-| L3-PERF-09 | 78131 | 13 | 3000 | PASS | 0.0% |
+| Test ID | Cong cu | So mau | p95 (ms) | Nguong (ms) | Ket qua | Loi HTTP |
+|---|---|---:|---:|---:|---|---:|
+| L3-PERF-01 | JMeter | 136903 | 12 | 500 | PASS | 0.0% |
+| L3-PERF-02 | JMeter | 166590 | 11 | 800 | PASS | 0.0% |
+| L3-PERF-03 | JMeter | 90578 | 8 | 1000 | PASS | 0.0% |
+| L3-PERF-04 | SignalR.Client | 100 | 14.8 | 2000 | PASS | 0.0% |
+| L3-PERF-05 | JMeter | 100999 | 28 | 3000 | PASS | 0.0% |
+| L3-PERF-06 | JMeter | 83569 | 10 | 3000 | PASS | 0.0% |
+| L3-PERF-07 | JMeter | 117345 | 4 | 1000 | PASS | 0.0% |
+| L3-PERF-08 | JMeter | 149847 | 120 | 5000 | PASS | 0.0% |
+| L3-PERF-09 | JMeter | 78131 | 13 | 3000 | PASS | 0.0% |
 
 ## Defect
 
