@@ -164,7 +164,12 @@ namespace VietTien.API.Services.Implementations
                     (rowErrors.Count > 0 ? string.Join(" ", rowErrors) : "File trống hoặc sai định dạng."));
 
             var supplierId = await _context.Suppliers.Select(s => s.Id).FirstOrDefaultAsync();
+            if (supplierId == Guid.Empty)
+                throw new InvalidOperationException("Hệ thống chưa có Nhà cung cấp nào, vui lòng tạo NCC trước khi import.");
+
             var warehouseId = await _context.Warehouses.Select(w => w.Id).FirstOrDefaultAsync();
+            if (warehouseId == Guid.Empty)
+                throw new InvalidOperationException("Hệ thống chưa có Kho nào, vui lòng tạo kho trước khi import.");
 
             var po = new PurchaseOrder
             {
