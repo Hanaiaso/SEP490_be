@@ -53,3 +53,8 @@ ehthumbs.db
 
 # Folder View profiles
 Desktop.ini
+
+# L3 System/API test — artefact chạy sinh ra, không commit
+tests/reports/
+tools/apache-jmeter-*/
+jmeter.log

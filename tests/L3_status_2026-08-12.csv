@@ -1,0 +1,173 @@
+﻿Test ID,Sheet,Status,Defect ID,Ghi chu ngan
+L3-AUTH-01,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-02,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-03,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-04,L3-AuthAPI,Pass,,xUnit L3 xanh (3 dong [Theory]).
+L3-AUTH-05,L3-AuthAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-AUTH-06,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-07,L3-AuthAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-AUTH-08,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-09,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-10,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-11,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-12,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-AUTH-13,L3-AuthAPI,Pass,,xUnit L3 xanh.
+L3-ORD-01,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-ORD-02,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-ORD-03,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-ORD-04,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-ORD-05,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-ORD-06,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh (4 dong [Theory]).
+L3-ORD-07,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-ORD-08,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-01,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-02,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-03,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh (3 dong [Theory]).
+L3-PAY-04,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-05,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-06,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-07,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-08,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-PAY-09,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-CUS-01,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-CUS-02,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-CUS-03,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-CUS-04,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-CUS-05,L3-OrderPaymentAPI,Pass,,xUnit L3 xanh.
+L3-QUO-01,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-QUO-02,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-QUO-03,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-QUO-04,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-QUO-05,L3-QuotationAPI,Fail,DEF-L3-003,Gio 240tr bi tinh thanh 110tr theo bao gia da duyet cho MOT GIO KHAC. CalculateDiscountAsync (OrderService.cs:88-103) khong doi chieu gio hien tai voi version da duyet; Quotation.CartId co trong model nhung khong duoc dung.
+L3-QUO-06,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-QUO-07,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-QUO-08,L3-QuotationAPI,Pass,,xUnit L3 xanh.
+L3-FUL-01,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-006,"Tai khoan Customer DOC DUOC toan bo hang doi xuat kho. WarehouseController chi co [Authorize] cap class; 4 endpoint doc (dong 34, 51, 115, 132) thieu [Authorize(Roles=...)] trong khi moi endpoint ghi deu co. OWASP A01."
+L3-FUL-02,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-FUL-03,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-FUL-04,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-FUL-05,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-FUL-06,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-FUL-07,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-FUL-08,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `POST /api/warehouse/orders/multi-pick` nhung route nay khong ton tai (test da xac nhan 404/405). Chưa triển khai multi-pick
+L3-FUL-09,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-DEL-01,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/trips` nhung route nay khong ton tai (test da xac nhan 404/405). Module Delivery Trip chưa triển khai - gần nhất là POST /api/delivery/schedule
+L3-DEL-02,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/trips` nhung route nay khong ton tai (test da xac nhan 404/405). Như trên
+L3-DEL-03,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/trips/{id}/start` nhung route nay khong ton tai (test da xac nhan 404/405). Như trên
+L3-DEL-04,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/attempts` nhung route nay khong ton tai (test da xac nhan 404/405). POD chưa có endpoint riêng - gần nhất POST /api/delivery/{orderId}/complete
+L3-DEL-05,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/collections` nhung route nay khong ton tai (test da xac nhan 404/405). Thu COD chưa có endpoint riêng
+L3-DEL-06,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/collections` nhung route nay khong ton tai (test da xac nhan 404/405). Như trên
+L3-DEL-07,L3-FulfilmentDeliveryAPI,Fail,DEF-L3-004,Module Delivery Trip / POD / thu COD chua trien khai: workbook ghi `POST /api/delivery/attempts` nhung route nay khong ton tai (test da xac nhan 404/405). Như trên
+L3-DEL-08,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-DEL-09,L3-FulfilmentDeliveryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-01,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-02,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-03,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-04,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-05,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-06,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-07,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-PUR-08,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-TRF-01,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-TRF-02,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-TRF-03,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-TRF-04,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-TRF-05,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-TRF-06,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-TRF-07,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-INV-01,L3-PurchasingInventoryAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `PUT /api/inventory/count-sessions/{id}/theoretical` nhung route nay khong ton tai (test da xac nhan 404/405). Phiên kiểm kê chưa có; gần nhất POST /api/inventory/shift-count
+L3-INV-02,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-INV-03,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-INV-04,L3-PurchasingInventoryAPI,Fail,DEF-L3-007,"Dieu chinh ton ve 0 trong khi dang giu 1.000 Reserved + 1.000 Quarantine -> ton kha dung THO = -2000. AdjustInventoryAsync (InventoryService.cs:97-122) chi chan so am. Sai lech bi che boi Math.Max(0,...) trong property AvailableQuantity."
+L3-INV-05,L3-PurchasingInventoryAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `POST /api/materials/production-issues` nhung route nay khong ton tai (test da xac nhan 404/405). Xuất vật tư sản xuất chưa triển khai
+L3-INV-06,L3-PurchasingInventoryAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `GET /api/inventory/low-stock-alerts` nhung route nay khong ton tai (test da xac nhan 404/405). Cảnh báo tồn thấp không có endpoint riêng; đi qua Notifications
+L3-INV-07,L3-PurchasingInventoryAPI,Pass,,xUnit L3 xanh.
+L3-SA-01,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-SA-02,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-SA-03,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-SA-04,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-SA-05,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-SA-06,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-SA-07,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-AS-01,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-AS-02,L3-AfterSalesAdminAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `POST /api/payment-reallocations` nhung route nay khong ton tai (test da xac nhan 404/405). Phân bổ lại tiền chưa có API riêng; gần nhất POST /api/delivery/{id}/approve-cancel-replacement
+L3-AS-03,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-AS-04,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh (3 dong [Theory]).
+L3-AS-05,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-AS-06,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-AS-07,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-AS-08,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-ADM-01,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-ADM-02,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-ADM-03,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-ADM-04,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-ADM-05,L3-AfterSalesAdminAPI,Pass,,xUnit L3 xanh.
+L3-FLOW-01,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-FLOW-02,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-FLOW-03,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-FLOW-04,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-FLOW-05,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-FLOW-06,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-FLOW-07,L3-APIFlows,Pass,,xUnit L3 xanh.
+L3-PERF-01,L3-Performance,Pass,,"JMeter: 136903 mau, p95=12ms (nguong 500ms), avg=6.6ms, loi HTTP=0.0%."
+L3-PERF-02,L3-Performance,Pass,,"JMeter: 166590 mau, p95=11ms (nguong 800ms), avg=6.3ms, loi HTTP=0.0%."
+L3-PERF-03,L3-Performance,Pass,,"JMeter: 90578 mau, p95=8ms (nguong 1000ms), avg=6.0ms, loi HTTP=0.0%."
+L3-PERF-04,L3-Performance,Pass,,"SignalR.Client: 100 mau, p95=14.8ms (nguong 2000ms), avg=10.5ms, loi HTTP=0.0%. max=52.9ms, 2 client, WebSocket (SignalR client, qua TestServer in-memory)."
+L3-PERF-05,L3-Performance,Pass,,"JMeter: 100999 mau, p95=28ms (nguong 3000ms), avg=15.6ms, loi HTTP=0.0%."
+L3-PERF-06,L3-Performance,Pass,,"JMeter: 83569 mau, p95=10ms (nguong 3000ms), avg=6.6ms, loi HTTP=0.0%."
+L3-PERF-07,L3-Performance,Pass,,"JMeter: 117345 mau, p95=4ms (nguong 1000ms), avg=2.4ms, loi HTTP=0.0%."
+L3-PERF-08,L3-Performance,Pass,,"JMeter: 149847 mau, p95=120ms (nguong 5000ms), avg=49.5ms, loi HTTP=0.0%."
+L3-PERF-09,L3-Performance,Pass,,"JMeter: 78131 mau, p95=13ms (nguong 3000ms), avg=7.0ms, loi HTTP=0.0%."
+L3-SEC-01,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-02,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-03,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-04,L3-Security,Pass,,xUnit L3 xanh (18 dong [Theory]).
+L3-SEC-05,L3-Security,Fail,DEF-L3-009,"Newman: GET http://.../api/products tra 200 truc tiep, khong redirect 301/308. UseHttpsRedirection co dang ky nhung khong co cong HTTPS nen bi bo qua."
+L3-SEC-06,L3-Security,Pass,,"SQL: 11/11 tai khoan la BCrypt hash ($2...), 0 plaintext."
+L3-SEC-07,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-08,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-09,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-10,L3-Security,Pass,,xUnit L3 xanh (3 dong [Theory]).
+L3-SEC-11,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-12,L3-Security,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-SEC-13,L3-Security,Fail,DEF-L3-010,SQL: tai khoan ung dung UPDATE va DELETE duoc ban ghi AuditLogs (moi lenh doi 1 dong). Bang khong phai INSERT-only.
+L3-SEC-14,L3-Security,Fail,DEF-L3-008,File PE/EXE (header MZ) doi duoi .png duoc chap nhan va luu tru. UploadAvatarAsync (UserProfileService.cs:83-85) chi kiem PHAN MO RONG ten file - thu do chinh nguoi gui dat - khong kiem magic byte.
+L3-SEC-18,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-19,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-15,L3-Security,Fail,DEF-L3-009,Newman: thieu ca 3 header HSTS / X-Content-Type-Options / X-Frame-Options.
+L3-SEC-16,L3-Security,Pass,,xUnit L3 xanh.
+L3-SEC-17,L3-Security,Pass,,xUnit L3 xanh.
+L3-ADMC-01,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-02,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-03,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-04,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-05,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-06,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-07,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-08,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-09,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-10,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-11,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-12,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-13,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-14,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-15,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-16,L3-AdminConfigAPI,Pass,,xUnit L3 xanh.
+L3-ADMC-17,L3-AdminConfigAPI,Pass,,"Newman (mode Development): Swagger mo ta 195 route, 100% operation co response, co securityScheme Bearer."
+L3-MKT-01,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-MKT-02,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-MKT-03,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-MKT-04,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-MKT-05,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-MKT-06,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-MKT-07,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-MKT-08,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh (2 dong [Theory]).
+L3-MKT-09,L3-MarketingReturnAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `POST /api/marketing-posts/{id}/media` nhung route nay khong ton tai (test da xac nhan 404/405). Upload media riêng chưa có
+L3-MKT-10,L3-MarketingReturnAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `POST /api/marketing-posts/{id}/media` nhung route nay khong ton tai (test da xac nhan 404/405). Như MKT-09
+L3-MKT-11,L3-MarketingReturnAPI,Fail,DEF-L3-005,Chuc nang chua trien khai: workbook ghi `GET /api/marketing-posts/{id}/metrics` nhung route nay khong ton tai (test da xac nhan 404/405). Chỉ số reach/reaction chưa triển khai
+L3-RET-01,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-RET-02,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh (3 dong [Theory]).
+L3-RET-03,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-RET-04,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-RET-05,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.
+L3-RET-06,L3-MarketingReturnAPI,Pass,,xUnit L3 xanh.

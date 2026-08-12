@@ -1,0 +1,399 @@
+{
+  "info": {
+    "name": "VietTien L3 — System/API Tests (Report_5_3 v1.3)",
+    "description": "Chạy các case L3 cần MỘT SERVER THẬT (Kestrel + SQL Server), thứ mà WebApplicationFactory trong xUnit không mô phỏng được: security header, ép HTTPS, hợp đồng Swagger, và bằng chứng chạy trên môi trường triển khai.\n\nKhởi động server trước bằng: powershell -File tests\\run-local-api.ps1\n\nCase ADMC-17 cần Swagger nên phải chạy server ở mode B: tests\\run-local-api.ps1 -Env Development",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "00 - Setup: login lấy JWT theo vai trò",
+      "item": [
+        {
+          "name": "Login Customer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Đăng nhập Customer thành công (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "var body = pm.response.json();",
+                  "pm.collectionVariables.set('customerToken', body.data.accessToken);",
+                  "pm.collectionVariables.set('customerRefreshToken', body.data.refreshToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"customer.test@viettien.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Đăng nhập Admin thành công (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.collectionVariables.set('adminToken', pm.response.json().data.accessToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin.test@viettien.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        },
+        {
+          "name": "Login Sales Staff",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Đăng nhập Sales Staff thành công (200)', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.collectionVariables.set('salesToken', pm.response.json().data.accessToken);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"salesstaff.test@viettien.com\",\n  \"password\": \"123456\"\n}"
+            },
+            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "L3-SEC-15 — Security headers (A05)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// NFR-SEC01: phản hồi phải có HSTS, X-Content-Type-Options, X-Frame-Options",
+              "// và KHÔNG lộ banner phiên bản máy chủ.",
+              "pm.test('Có header X-Content-Type-Options: nosniff', function () {",
+              "    pm.expect(pm.response.headers.get('X-Content-Type-Options')).to.eql('nosniff');",
+              "});",
+              "pm.test('Có header X-Frame-Options (chống clickjacking)', function () {",
+              "    pm.expect(pm.response.headers.has('X-Frame-Options')).to.be.true;",
+              "});",
+              "pm.test('Có header Strict-Transport-Security (HSTS)', function () {",
+              "    pm.expect(pm.response.headers.has('Strict-Transport-Security')).to.be.true;",
+              "});",
+              "pm.test('Không lộ banner phiên bản máy chủ', function () {",
+              "    var server = pm.response.headers.get('Server') || '';",
+              "    pm.expect(server).to.not.match(/\\d+\\.\\d+/);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/api/products", "host": ["{{baseUrl}}"], "path": ["api", "products"] }
+      }
+    },
+    {
+      "name": "L3-SEC-10 — SQL Injection qua tham số tìm kiếm (A03)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Không trả 5xx (truy vấn được tham số hoá)', function () {",
+              "    pm.expect(pm.response.code).to.be.below(500);",
+              "});",
+              "pm.test('Không lộ chi tiết lỗi SQL', function () {",
+              "    var body = pm.response.text();",
+              "    pm.expect(body).to.not.include('SqlException');",
+              "    pm.expect(body).to.not.include('Incorrect syntax');",
+              "});",
+              "pm.test('Không trả toàn bộ bảng sản phẩm', function () {",
+              "    var body = pm.response.json();",
+              "    pm.expect(body.totalCount, 'payload OR 1=1 không được khớp mọi dòng').to.be.below(7);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/products?search=' OR 1=1--",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "products"],
+          "query": [{ "key": "search", "value": "' OR 1=1--" }]
+        }
+      }
+    },
+    {
+      "name": "L3-SEC-04 — Endpoint nhạy cảm không token phải 401 (A01)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Trả 401 khi không gửi Authorization', function () {",
+              "    pm.response.to.have.status(401);",
+              "});",
+              "pm.test('Không rò dữ liệu nghiệp vụ', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('orderCode');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/api/orders/my-history", "host": ["{{baseUrl}}"], "path": ["api", "orders", "my-history"] }
+      }
+    },
+    {
+      "name": "L3-SEC-09 — JWT chữ ký sai phải 401 (A07)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Từ chối JWT tự ký bằng khoá khác (401)', function () {",
+              "    pm.response.to.have.status(401);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdHRhY2tlciIsInJvbGUiOiJBZG1pbiIsImV4cCI6NDEwMjQ0NDgwMH0.ZmFrZS1zaWduYXR1cmUtbm90LXNpZ25lZC1ieS10aGUtc2VydmVy"
+          }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/admin/users", "host": ["{{baseUrl}}"], "path": ["api", "admin", "users"] }
+      }
+    },
+    {
+      "name": "L3-SEC-12 — Webhook SePay thiếu token phải 401 (A08)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Từ chối webhook không có token (401)', function () {",
+              "    pm.response.to.have.status(401);",
+              "});",
+              "pm.test('Không xác nhận thanh toán', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('\"success\":true');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"gateway\": \"TPBank\",\n  \"accountNumber\": \"0000000000\",\n  \"transferAmount\": 200000,\n  \"transferContent\": \"VT-FAKE-ORDER\",\n  \"content\": \"VT-FAKE-ORDER\",\n  \"referenceCode\": \"REF-NEWMAN-FORGED\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/webhooks/sepay-callback", "host": ["{{baseUrl}}"], "path": ["api", "webhooks", "sepay-callback"] }
+      }
+    },
+    {
+      "name": "L3-AUTH-08 — Đăng nhập hợp lệ trả token + role",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Trả 200', function () { pm.response.to.have.status(200); });",
+              "var d = pm.response.json().data;",
+              "pm.test('Có accessToken và refreshToken', function () {",
+              "    pm.expect(d.accessToken).to.be.a('string').and.not.empty;",
+              "    pm.expect(d.refreshToken).to.be.a('string').and.not.empty;",
+              "});",
+              "pm.test('Trả đúng vai trò', function () { pm.expect(d.user.role).to.eql('Customer'); });",
+              "pm.test('KHÔNG trả về mật khẩu/hash', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('passwordHash');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"customer.test@viettien.com\",\n  \"password\": \"123456\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+      }
+    },
+    {
+      "name": "L3-AUTH-09 — Sai mật khẩu trả thông điệp chung",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Trả 401', function () { pm.response.to.have.status(401); });",
+              "pm.test('Thông điệp KHÔNG tiết lộ trường nào sai', function () {",
+              "    var m = (pm.response.json().message || '').toLowerCase();",
+              "    pm.expect(m).to.not.include('không tồn tại');",
+              "    pm.expect(m).to.not.include('sai mật khẩu');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"customer.test@viettien.com\",\n  \"password\": \"SaiMatKhau!\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+      }
+    },
+    {
+      "name": "L3-ADM-01 — Sales Staff gọi dashboard Sales Manager phải 403",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Trả 403', function () { pm.response.to.have.status(403); });",
+              "pm.test('Không trả dòng dữ liệu nào', function () {",
+              "    pm.expect(pm.response.text()).to.not.include('totalRevenue');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{salesToken}}" }],
+        "url": { "raw": "{{baseUrl}}/api/dashboards/sales-manager", "host": ["{{baseUrl}}"], "path": ["api", "dashboards", "sales-manager"] }
+      }
+    },
+    {
+      "name": "L3-ADMC-02 — Customer tạo tài khoản admin phải 403",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Trả 403', function () { pm.response.to.have.status(403); });"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{customerToken}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fullName\": \"Leo thang quyen\",\n  \"email\": \"escalate@viettien.test\",\n  \"phoneNumber\": \"0900000001\",\n  \"password\": \"Passw0rd!\",\n  \"role\": \"Admin\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/api/admin/users", "host": ["{{baseUrl}}"], "path": ["api", "admin", "users"] }
+      }
+    },
+    {
+      "name": "L3-ADMC-17 — Swagger phủ hợp đồng API (chỉ chạy ở mode Development)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "// Case này CHỈ chạy khi server ở ASPNETCORE_ENVIRONMENT=Development",
+              "// (Program.cs:293 chỉ bật Swagger ở Development).",
+              "if (pm.response.code === 404) {",
+              "    pm.test.skip('SKIP: server không chạy ở mode Development nên không có Swagger');",
+              "} else {",
+              "    pm.test('Trả 200', function () { pm.response.to.have.status(200); });",
+              "    var doc = pm.response.json();",
+              "    var paths = Object.keys(doc.paths || {});",
+              "    pm.test('Swagger mô tả >= 100 route', function () {",
+              "        pm.expect(paths.length).to.be.at.least(100);",
+              "    });",
+              "    pm.test('Có khai báo securityScheme Bearer', function () {",
+              "        pm.expect(doc.components.securitySchemes).to.have.property('Bearer');",
+              "    });",
+              "    var missingResponses = [];",
+              "    paths.forEach(function (p) {",
+              "        Object.keys(doc.paths[p]).forEach(function (verb) {",
+              "            var op = doc.paths[p][verb];",
+              "            if (!op.responses || Object.keys(op.responses).length === 0) {",
+              "                missingResponses.push(verb.toUpperCase() + ' ' + p);",
+              "            }",
+              "        });",
+              "    });",
+              "    pm.test('Mọi operation đều mô tả response', function () {",
+              "        pm.expect(missingResponses, missingResponses.join(', ')).to.be.empty;",
+              "    });",
+              "    console.log('Tong so route trong Swagger: ' + paths.length);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{baseUrl}}/swagger/v1/swagger.json", "host": ["{{baseUrl}}"], "path": ["swagger", "v1", "swagger.json"] }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "customerToken", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "salesToken", "value": "" }
+  ]
+}

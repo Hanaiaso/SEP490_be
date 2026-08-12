@@ -33,6 +33,10 @@ namespace VietTien.API.Services.Interfaces
         // ─── LUỒNG 5: Giao hàng & Thu COD ─────────────────────────────────────
         Task<ScheduleDeliveryResponseDto> ScheduleDeliveryAsync(Guid scheduledByUserId, ScheduleDeliveryRequestDto dto);
         Task<List<DeliveryOrderListDto>> GetDeliveryOrdersAsync(Guid salesStaffId);
+
+        // UC-34: Sales Manager xử lý xung đột lịch xe/ca
+        Task<List<DeliveryScheduleConflictDto>> GetPendingDeliveryConflictsAsync();
+        Task<DeliveryScheduleConflictDto> ResolveDeliveryConflictAsync(Guid conflictId, Guid managerId, ResolveDeliveryConflictRequestDto dto);
         Task<DeliveryResultResponseDto> RecordDeliveryResultAsync(Guid orderId, Guid salesStaffId, RecordDeliveryResultDto dto);
         
         Task CreateReturnExchangeRequestAsync(Guid orderId, Guid requestedByUserId, CreateReturnExchangeRequestDto dto);

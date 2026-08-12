@@ -1,4 +1,6 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Admin;
 using VietTien.API.Models;
@@ -8,13 +10,19 @@ namespace VietTien.API.Services.Implementations
 {
     public class SystemConfigService : ISystemConfigService
     {
+        // Giá trị hiển thị thay cho secret thật (API key/password...) trong mọi response trả cho FE
+        // và trong audit log — không bao giờ trả plaintext hay bản mã hoá ra ngoài service này.
+        private const string SecretMask = "••••••••";
+
         private readonly ApplicationDbContext _context;
         private readonly IAuditLogService _auditLogService;
+        private readonly IDataProtector _protector;
 
-        public SystemConfigService(ApplicationDbContext context, IAuditLogService auditLogService)
+        public SystemConfigService(ApplicationDbContext context, IAuditLogService auditLogService, IDataProtectionProvider dataProtectionProvider)
         {
             _context = context;
             _auditLogService = auditLogService;
+            _protector = dataProtectionProvider.CreateProtector("VietTien.SystemConfig.Secrets");
         }
 
         public async Task<List<SystemConfigDto>> GetAllWithEffectiveValuesAsync()
@@ -35,7 +43,11 @@ namespace VietTien.API.Services.Implementations
                     Unit = config.Unit,
                     OwnerLevel = config.OwnerLevel,
                     IsActive = config.IsActive,
-                    EffectiveValue = effective?.Value,
+                    IsSecret = config.IsSecret,
+                    // Secret: không bao giờ giải mã trả ra API — chỉ báo "đã cấu hình" bằng mask cố định.
+                    EffectiveValue = config.IsSecret
+                        ? (string.IsNullOrEmpty(effective?.Value) ? null : SecretMask)
+                        : effective?.Value,
                     EffectiveDate = effective?.EffectiveDate,
                     VersionCount = versionCount
                 });
@@ -44,16 +56,36 @@ namespace VietTien.API.Services.Implementations
             return result.OrderBy(c => c.Key).ToList();
         }
 
+        // Dùng nội bộ bởi các service khác (OrderService, AuthService, eSmsService...) để đọc giá trị
+        // THẬT (đã giải mã nếu là secret) — không phải endpoint public, không đi qua mask.
         public async Task<string?> GetEffectiveValueAsync(string key, DateTime? asOf = null)
         {
             var version = await GetEffectiveVersionAsync(key, asOf);
-            return version?.Value;
+            if (version == null) return null;
+
+            var isSecret = await _context.SystemConfigs.AsNoTracking()
+                .Where(c => c.Key == key)
+                .Select(c => c.IsSecret)
+                .FirstOrDefaultAsync();
+
+            if (!isSecret) return version.Value;
+
+            try
+            {
+                return _protector.Unprotect(version.Value);
+            }
+            catch (CryptographicException)
+            {
+                // Giá trị lưu không giải mã được (vd đổi data-protection key, hoặc dữ liệu cũ chưa mã hoá)
+                // -> coi như chưa cấu hình, để caller tự fallback về appsettings thay vì crash.
+                return null;
+            }
         }
 
         public async Task<List<SystemConfigVersionDto>> GetHistoryAsync(string key)
         {
-            var configExists = await _context.SystemConfigs.AnyAsync(c => c.Key == key);
-            if (!configExists) throw new KeyNotFoundException($"Không tìm thấy tham số cấu hình '{key}'.");
+            var config = await _context.SystemConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Key == key);
+            if (config == null) throw new KeyNotFoundException($"Không tìm thấy tham số cấu hình '{key}'.");
 
             var now = DateTime.UtcNow;
             var currentEffective = await GetEffectiveVersionAsync(key, now);
@@ -65,11 +97,12 @@ namespace VietTien.API.Services.Implementations
                 .ThenByDescending(v => v.CreatedAt)
                 .ToListAsync();
 
+            // Lịch sử của key secret cũng phải mask từng phiên bản — không riêng gì giá trị hiệu lực hiện tại.
             return versions.Select(v => new SystemConfigVersionDto
             {
                 Id = v.Id,
                 ConfigKey = v.ConfigKey,
-                Value = v.Value,
+                Value = config.IsSecret ? SecretMask : v.Value,
                 EffectiveDate = v.EffectiveDate,
                 ActorUserId = v.ActorUserId,
                 ActorEmail = v.ActorEmail,
@@ -97,10 +130,13 @@ namespace VietTien.API.Services.Implementations
 
             var beforeVersion = await GetEffectiveVersionAsync(key, DateTime.UtcNow);
 
+            // Secret: mã hoá trước khi lưu, không bao giờ ghi plaintext xuống DB.
+            var storedValue = config.IsSecret ? _protector.Protect(request.Value.Trim()) : request.Value.Trim();
+
             var newVersion = new SystemConfigVersion
             {
                 ConfigKey = key,
-                Value = request.Value.Trim(),
+                Value = storedValue,
                 EffectiveDate = (request.EffectiveDate ?? DateTime.UtcNow).ToUniversalTime(),
                 ActorUserId = actorUserId,
                 ActorEmail = actorEmail,
@@ -118,8 +154,8 @@ namespace VietTien.API.Services.Implementations
                 actorUserId: actorUserId,
                 actorEmail: actorEmail,
                 actorRole: "Admin",
-                before: beforeVersion == null ? null : new { beforeVersion.Value, beforeVersion.EffectiveDate },
-                after: new { newVersion.Value, newVersion.EffectiveDate },
+                before: beforeVersion == null ? null : new { Value = config.IsSecret ? SecretMask : beforeVersion.Value, beforeVersion.EffectiveDate },
+                after: new { Value = config.IsSecret ? SecretMask : newVersion.Value, newVersion.EffectiveDate },
                 reason: request.Reason,
                 ipAddress: ipAddress);
 
@@ -134,7 +170,10 @@ namespace VietTien.API.Services.Implementations
                 Unit = config.Unit,
                 OwnerLevel = config.OwnerLevel,
                 IsActive = config.IsActive,
-                EffectiveValue = effective?.Value,
+                IsSecret = config.IsSecret,
+                EffectiveValue = config.IsSecret
+                    ? (string.IsNullOrEmpty(effective?.Value) ? null : SecretMask)
+                    : effective?.Value,
                 EffectiveDate = effective?.EffectiveDate,
                 VersionCount = versionCount
             };
