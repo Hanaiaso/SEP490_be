@@ -173,39 +173,9 @@ namespace VietTien.IntegrationTests
             using var scope = Services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
 
-            // KHÔNG dùng db.Model: lúc runtime đó là read-optimized model, đã lược bỏ seed data
-            // ("The requested configuration is not stored in the read-optimized model"). Seed chỉ còn
-            // trong design-time model.
-            var designTimeModel = db.GetService<IDesignTimeModel>().Model;
-
-            foreach (var entityType in designTimeModel.GetEntityTypes())
-            {
-                var seedRows = entityType.GetSeedData().ToList();
-                if (seedRows.Count == 0) continue;
-
-                // GetSeedData() trả về CẢ key của navigation (vd "Category.Products") chứ không chỉ
-                // scalar — entry.Property() sẽ ném nếu gặp. Lọc theo danh sách property thật của model.
-                var scalarProperties = entityType.GetProperties().Select(p => p.Name).ToHashSet();
-
-                foreach (var row in seedRows)
-                {
-                    var instance = Activator.CreateInstance(entityType.ClrType, nonPublic: true)!;
-                    var entry = db.Entry(instance);
-
-                    foreach (var kv in row)
-                    {
-                        if (!scalarProperties.Contains(kv.Key)) continue;
-
-                        // Đi qua ChangeTracker (không dùng reflection trực tiếp) để cover cả shadow property.
-                        entry.Property(kv.Key).CurrentValue = kv.Value;
-                    }
-
-                    entry.State = EntityState.Added;
-                }
-            }
-
-            // EF tự topological-sort các INSERT theo phụ thuộc FK.
-            await db.SaveChangesAsync();
+            // Thân hàm đã tách sang SeedDataReplayer để hạ tầng L3 (L3SqlFixture — SQL Server local,
+            // không Docker) dùng lại đúng logic này thay vì chép lần hai. Hành vi không đổi.
+            await SeedDataReplayer.ReseedAsync(db);
         }
 
         /// <summary>
