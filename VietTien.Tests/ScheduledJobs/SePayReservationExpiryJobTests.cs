@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Logging.Abstractions;
 using VietTien.API.Data;
 using VietTien.API.Models;
@@ -25,7 +26,7 @@ namespace VietTien.Tests.ScheduledJobs
         public SePayReservationExpiryJobTests()
         {
             _reservation = new FakeInventoryReservationService(_db);
-            var configService = new SystemConfigService(_db, new NoOpAuditLogService());
+            var configService = new SystemConfigService(_db, new NoOpAuditLogService(), new EphemeralDataProtectionProvider());
             _sut = new SePayReservationExpiryJob(_db, configService, _reservation, NullLogger<SePayReservationExpiryJob>.Instance);
 
             var (warehouse, location) = TestData.Warehouse();

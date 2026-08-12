@@ -2,6 +2,7 @@ using FluentAssertions;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Delivery;
+using VietTien.API.Exceptions;
 using VietTien.API.DTOs.Order;
 using VietTien.API.DTOs.SePay;
 using VietTien.API.Models;
@@ -65,7 +66,9 @@ namespace VietTien.Tests.Services
 
             _salesStaff = TestData.User(u => u.Role = SystemRole.SalesStaff);
             _db.Users.Add(_salesStaff);
-            (_customer, _profile) = TestData.SeedCustomer(_db);
+            // IsPhoneVerified=true: các test PlaceOrderAsync trong file này không nhằm kiểm tra luồng
+            // xác thực SĐT đơn đầu tiên (RequiresFirstOrderPhoneOtpAsync) — set sẵn để tránh false fail.
+            (_customer, _profile) = TestData.SeedCustomer(_db, u => u.IsPhoneVerified = true);
             _profile.AssignedSalesStaffId = _salesStaff.Id;
             _db.SaveChanges();
         }
@@ -910,12 +913,19 @@ namespace VietTien.Tests.Services
             updated.DeliveryShift.Should().Be("Sáng");
         }
 
-        // L1-ORD-39 | EP-Invalid | Xe/ca đang bận (đơn khác InDelivery) -> chặn với thông báo kín lịch
+        // L1-ORD-39 | EP-Invalid | Xe/ca đang bận (đơn khác InDelivery) -> không chặn cứng nữa (UC-34),
+        // tạo DeliveryScheduleConflict (Pending) cho Sales Manager xử lý + ném ScheduleConflictException
         [Fact]
         public async Task L1_ORD_39_ScheduleDelivery_VehicleBusy_Blocked()
         {
             SeedFleet();
-            SeedOrder(o => { o.DeliveryVehicleId = 1; o.DeliveryShift = "Sáng"; o.DeliveryStatus = DeliveryStatus.InDelivery; });
+            SeedOrder(o =>
+            {
+                o.DeliveryVehicleId = 1;
+                o.DeliveryShift = "Sáng";
+                o.DeliveryStatus = DeliveryStatus.InDelivery;
+                o.ScheduledDeliveryDate = DateTime.UtcNow.Date.AddDays(1);
+            });
             var order = SeedOrder(o => o.DeliveryStatus = DeliveryStatus.NotScheduled);
 
             var act = () => _sut.ScheduleDeliveryAsync(_salesStaff.Id, new ScheduleDeliveryRequestDto
@@ -926,9 +936,13 @@ namespace VietTien.Tests.Services
                 DeliveryDate = DateTime.UtcNow.Date.AddDays(1)
             });
 
-            await act.Should().ThrowAsync<InvalidOperationException>()
-                .WithMessage("Xe 1 đang trong ca Sáng.*");
+            var ex = await act.Should().ThrowAsync<ScheduleConflictException>()
+                .WithMessage("Xe 1 đang có lịch trùng ca Sáng*");
             _db.Orders.Single(o => o.Id == order.Id).DeliveryStatus.Should().Be(DeliveryStatus.NotScheduled);
+            var conflict = _db.DeliveryScheduleConflicts.Single();
+            conflict.VehicleId.Should().Be(1);
+            conflict.Status.Should().Be(DeliveryConflictStatus.Pending);
+            ex.Which.ConflictId.Should().Be(conflict.Id);
         }
 
         // L1-ORD-40 | BVA-Max / BVA-Max+1 | Xe 5 (cuối đội xe) hợp lệ; xe 6 (ngoài đội) bị từ chối

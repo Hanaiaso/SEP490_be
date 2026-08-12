@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.DataProtection;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Admin;
@@ -27,7 +28,7 @@ namespace VietTien.Tests.Services
 
         public SystemConfigServiceTests()
         {
-            _sut = new SystemConfigService(_db, _audit.Object);
+            _sut = new SystemConfigService(_db, _audit.Object, new EphemeralDataProtectionProvider());
         }
 
         // ── Block: GetEffectiveValueAsync() ─────────────────────────────────

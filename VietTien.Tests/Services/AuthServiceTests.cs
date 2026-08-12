@@ -27,6 +27,7 @@ namespace VietTien.Tests.Services
         private readonly Mock<ISmsService> _sms = new();
         private readonly Mock<ISalesAllocationService> _salesAlloc = new();
         private readonly Mock<IGoogleTokenValidator> _googleValidator = new();
+        private readonly Mock<ISystemConfigService> _systemConfig = new();
         private readonly AuthService _sut;
 
         public AuthServiceTests()
@@ -42,7 +43,7 @@ namespace VietTien.Tests.Services
             _sut = new AuthService(
                 _uow.Object, _jwt.Object, _email.Object, _sms.Object,
                 TestConfig.JwtOptions(), TestConfig.Create(), _salesAlloc.Object,
-                new Mock<ILogger<AuthService>>().Object, _googleValidator.Object);
+                new Mock<ILogger<AuthService>>().Object, _googleValidator.Object, _systemConfig.Object);
         }
 
         //  ▶ Block: RegisterAsync()

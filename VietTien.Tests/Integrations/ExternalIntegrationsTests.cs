@@ -9,6 +9,7 @@ using VietTien.API.Infrastructure.Security;
 using VietTien.API.Infrastructure.Validation;
 using VietTien.API.Models;
 using VietTien.API.Services.Implementations;
+using VietTien.API.Services.Interfaces;
 using VietTien.Tests.TestHelpers;
 using Xunit;
 
@@ -51,7 +52,7 @@ namespace VietTien.Tests.Integrations
                 SenderName = "VietTien",
                 SenderPassword = "x"
             });
-            var sut = new EmailService(settings);
+            var sut = new EmailService(settings, new Mock<ISystemConfigService>().Object);
 
             var act = () => sut.SendOtpEmailAsync("khach@test.com", "Nguyễn Văn A", "123456");
 
@@ -72,7 +73,7 @@ namespace VietTien.Tests.Integrations
                 SenderName = "VietTien",
                 SenderPassword = "x"
             });
-            var sut = new EmailService(settings);
+            var sut = new EmailService(settings, new Mock<ISystemConfigService>().Object);
             var order = TestData.Order(Guid.NewGuid());
 
             var act = () => sut.SendOrderInvoiceEmailAsync("khach@test.com", "Nguyễn Văn A", order);
@@ -91,7 +92,7 @@ namespace VietTien.Tests.Integrations
                 ["eSMS:SecretKey"] = "test-secret",
                 ["eSMS:Brandname"] = "VietTien",
             });
-            var sut = new eSmsService(handler.CreateClient(), config);
+            var sut = new eSmsService(handler.CreateClient(), config, new Mock<ISystemConfigService>().Object);
 
             var (success, error) = await sut.SendSmsAsync("0912345678", "Ma xac thuc cua ban la 123456");
 
@@ -112,7 +113,7 @@ namespace VietTien.Tests.Integrations
                 ["eSMS:ApiKey"] = "test-api-key",
                 ["eSMS:SecretKey"] = "test-secret",
             });
-            var sut = new eSmsService(handler.CreateClient(), config);
+            var sut = new eSmsService(handler.CreateClient(), config, new Mock<ISystemConfigService>().Object);
 
             var (success, error) = await sut.SendSmsAsync("0912345678", "Ma xac thuc cua ban la 123456");
 
@@ -167,7 +168,7 @@ namespace VietTien.Tests.Integrations
             {
                 ["MakeCom:WebhookUrl"] = "https://hook.make.test/viettien-marketing",
             });
-            var sut = new MakeWebhookService(handler.CreateClient(), config, NullLogger<MakeWebhookService>.Instance);
+            var sut = new MakeWebhookService(handler.CreateClient(), config, NullLogger<MakeWebhookService>.Instance, new Mock<ISystemConfigService>().Object);
 
             var post = TestData.MarketingPost(Guid.NewGuid(), Guid.NewGuid(), p => p.EditedCaption = "Ống PVC bền đẹp");
             var triggered = await sut.TriggerPostToMakeAsync(post);
@@ -188,7 +189,7 @@ namespace VietTien.Tests.Integrations
         public async Task L1_EXT_07_MakeWebhook_TimeoutReturnsFalseWithoutThrowing()
         {
             var handler = FakeHttpMessageHandler.Throwing(new TaskCanceledException("The request timed out."));
-            var sut = new MakeWebhookService(handler.CreateClient(), TestConfig.Create(), NullLogger<MakeWebhookService>.Instance);
+            var sut = new MakeWebhookService(handler.CreateClient(), TestConfig.Create(), NullLogger<MakeWebhookService>.Instance, new Mock<ISystemConfigService>().Object);
 
             var triggered = await sut.TriggerPostToMakeAsync(TestData.MarketingPost(Guid.NewGuid(), Guid.NewGuid()));
 
