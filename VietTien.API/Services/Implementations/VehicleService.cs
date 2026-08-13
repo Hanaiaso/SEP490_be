@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Admin;
@@ -55,7 +56,18 @@ namespace VietTien.API.Services.Implementations
             };
 
             _context.Vehicles.Add(vehicle);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Lưới an toàn cuối cho race check-then-insert ở 2 AnyAsync (VehicleNumber/LicensePlate)
+                // phía trên: 2 request đồng thời cùng tạo xe trùng số xe hoặc biển số đều pass check rồi
+                // mới đụng unique index lúc SaveChanges -> request thua cuộc nhận lỗi rõ ràng thay vì 500.
+                throw new InvalidOperationException($"Số xe {request.VehicleNumber} hoặc biển số xe {plate} đã tồn tại.");
+            }
 
             var dto = ToDto(vehicle);
 
@@ -108,7 +120,14 @@ namespace VietTien.API.Services.Implementations
             vehicle.IsActive = request.IsActive;
             vehicle.Note = request.Note;
 
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                throw new InvalidOperationException($"Biển số xe {updatedPlate} đã tồn tại.");
+            }
 
             var after = ToDto(vehicle);
 
@@ -126,6 +145,12 @@ namespace VietTien.API.Services.Implementations
 
             return after;
         }
+
+        // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
+        // unique index (Vehicle.VehicleNumber/LicensePlate) khỏi các lỗi DbUpdateException khác không
+        // nên bị nuốt thành 409.
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+            => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
 
         private static VehicleDto ToDto(Vehicle v) => new()
         {

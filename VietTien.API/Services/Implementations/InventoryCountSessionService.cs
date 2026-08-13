@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
@@ -156,10 +157,28 @@ namespace VietTien.API.Services.Implementations
             };
 
             _context.InventoryCountingSessions.Add(session);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Lưới an toàn cuối cho race check-then-insert ở AnyAsync(WarehouseId, Status == Open) phía
+                // trên: kho bấm "Mở phiên kiểm kê" 2 lần liên tiếp (double-tap) đều pass check rồi mới đụng
+                // unique index lọc Status = 'Open' lúc SaveChanges -> request thua cuộc nhận lỗi rõ ràng
+                // thay vì 500 chung chung, và không tạo ra 2 phiên mở song song chốt baseline khác nhau.
+                throw new InvalidOperationException("Kho này đang có một phiên kiểm kê chưa đóng. Hãy đóng phiên hiện tại trước khi mở phiên mới.");
+            }
 
             return await GetByIdAsync(session.Id);
         }
+
+        // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
+        // unique index (InventoryCountSession.WarehouseId lọc Status = 'Open') khỏi các lỗi
+        // DbUpdateException khác không nên bị nuốt thành 409.
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+            => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
 
         public async Task<InventoryCountSessionDto> RecordItemCountAsync(Guid sessionId, Guid itemId, RecordCountItemRequest request)
         {

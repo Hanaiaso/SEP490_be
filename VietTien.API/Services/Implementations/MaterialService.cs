@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Material;
@@ -59,7 +60,18 @@ namespace VietTien.API.Services.Implementations
             };
 
             _context.Materials.Add(material);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Lưới an toàn cuối cho race check-then-insert ở AnyAsync(Name) phía trên: 2 request đồng
+                // thời cùng tạo nguyên liệu trùng tên đều pass check rồi mới đụng unique index lúc
+                // SaveChanges -> request thua cuộc nhận lỗi rõ ràng thay vì 500 chung chung.
+                throw new InvalidOperationException("Tên nguyên liệu đã tồn tại.");
+            }
 
             return MapToDto(material);
         }
@@ -86,10 +98,22 @@ namespace VietTien.API.Services.Implementations
             material.Unit = dto.Unit;
             material.SafetyThreshold = dto.SafetyThreshold;
 
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                throw new InvalidOperationException("Tên nguyên liệu đã tồn tại.");
+            }
 
             return MapToDto(material);
         }
+
+        // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
+        // unique index (Material.Name) khỏi các lỗi DbUpdateException khác không nên bị nuốt thành 409.
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+            => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
 
         public async Task DeleteAsync(Guid id)
         {

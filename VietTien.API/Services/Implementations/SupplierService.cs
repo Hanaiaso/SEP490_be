@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Supplier;
@@ -46,7 +47,18 @@ namespace VietTien.API.Services.Implementations
             };
 
             _context.Suppliers.Add(supplier);
-            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Lưới an toàn cuối cho race check-then-insert ở AnyAsync(Code) phía trên: 2 request đồng
+                // thời cùng tạo nhà cung cấp trùng mã đều pass check rồi mới đụng unique index lúc
+                // SaveChanges -> request thua cuộc nhận lỗi rõ ràng thay vì 500 chung chung.
+                throw new InvalidOperationException($"Supplier with Code '{request.Code}' already exists");
+            }
 
             return MapToDto(supplier);
         }
@@ -68,10 +80,22 @@ namespace VietTien.API.Services.Implementations
             supplier.TaxCode = request.TaxCode;
             supplier.IsActive = request.IsActive;
 
-            await _context.SaveChangesAsync();
+            try
+            {
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                throw new InvalidOperationException($"Supplier with Code '{request.Code}' already exists");
+            }
 
             return MapToDto(supplier);
         }
+
+        // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
+        // unique index (Supplier.Code) khỏi các lỗi DbUpdateException khác không nên bị nuốt thành 409.
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+            => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
 
         private static SupplierDto MapToDto(Supplier s)
         {
