@@ -311,4 +311,86 @@ namespace VietTien.API.DTOs.Delivery
         [MaxLength(1000)]
         public string? Note { get; set; }
     }
+
+    // ─── NHÓM C: DeliveryTrip (luồng chuyến giao Trip-based, song song với luồng theo Order) ──
+    public class CreateDeliveryTripRequestDto
+    {
+        [Required(ErrorMessage = "Xe giao hàng là bắt buộc.")]
+        public Guid VehicleId { get; set; }
+
+        [Required(ErrorMessage = "Ca giao hàng là bắt buộc.")]
+        [RegularExpression("^(Sáng|Trưa|Chiều)$", ErrorMessage = "Ca giao hàng không hợp lệ. Chọn: Sáng / Trưa / Chiều.")]
+        public string Shift { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Ngày giao hàng là bắt buộc.")]
+        public DateTime TripDate { get; set; }
+
+        [Required]
+        [MinLength(1, ErrorMessage = "Danh sách đơn hàng không được rỗng.")]
+        public List<Guid> OrderIds { get; set; } = new();
+    }
+
+    public class DeliveryTripResponseDto
+    {
+        public Guid Id { get; set; }
+        public Guid VehicleId { get; set; }
+        public int VehicleNumber { get; set; }
+        public string Shift { get; set; } = string.Empty;
+        public DateTime TripDate { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public Guid CreatedByUserId { get; set; }
+        public DateTime CreatedAt { get; set; }
+        public DateTime? StartedAt { get; set; }
+        public DateTime? CompletedAt { get; set; }
+        public List<Guid> OrderIds { get; set; } = new();
+        public List<string> OrderCodes { get; set; } = new();
+    }
+
+    public class RecordDeliveryAttemptRequestDto
+    {
+        [Required(ErrorMessage = "Đơn hàng là bắt buộc.")]
+        public Guid OrderId { get; set; }
+
+        /// <summary>Delivered / Failed</summary>
+        [Required(ErrorMessage = "Kết quả giao hàng là bắt buộc.")]
+        [RegularExpression("^(Delivered|Failed)$", ErrorMessage = "Kết quả giao hàng không hợp lệ. Chọn: Delivered / Failed.")]
+        public string Outcome { get; set; } = string.Empty;
+
+        public string? PhotoUrl { get; set; }
+        public string? SignatureUrl { get; set; }
+
+        [MaxLength(500, ErrorMessage = "Lý do thất bại không được vượt quá 500 ký tự.")]
+        public string? FailureReason { get; set; }
+    }
+
+    public class RecordDeliveryAttemptResponseDto
+    {
+        public Guid OrderId { get; set; }
+        public int AttemptNumber { get; set; }
+        public string Outcome { get; set; } = string.Empty;
+        public string NewDeliveryStatus { get; set; } = string.Empty;
+        public int FailedDeliveryCount { get; set; }
+        public bool IsBlockedForDelivery { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
+
+    public class RecordCollectionRequestDto
+    {
+        [Required(ErrorMessage = "Đơn hàng là bắt buộc.")]
+        public Guid OrderId { get; set; }
+
+        // Không dùng [Range] ở đây: âm hay vượt quá số còn nợ đều phải trả cùng 1 mã lỗi
+        // COD_AMOUNT_INVALID (service kiểm tra cả 2 điều kiện, vì "vượt quá remaining" chỉ biết được
+        // sau khi đọc Order từ DB, không thể validate bằng DataAnnotation ở tầng DTO).
+        public decimal AmountCollected { get; set; }
+    }
+
+    public class RecordCollectionResponseDto
+    {
+        public Guid OrderId { get; set; }
+        public decimal AmountPaid { get; set; }
+        public decimal RemainingDebt { get; set; }
+        public bool DebtRecordCreated { get; set; }
+        public string Message { get; set; } = string.Empty;
+    }
 }

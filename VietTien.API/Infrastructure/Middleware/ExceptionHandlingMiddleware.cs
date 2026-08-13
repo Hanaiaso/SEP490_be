@@ -80,6 +80,24 @@ namespace VietTien.API.Infrastructure.Middleware
                     // Giữ đúng hành vi hiện tại của OrderController cho exception này.
                     return (StatusCodes.Status409Conflict, new { code = "REALLOCATION_VALUE_CONFLICT", message = reallocEx.Message });
 
+                case VehicleNotAvailableException vehicleEx:
+                    return (StatusCodes.Status409Conflict, new { code = "VEHICLE_NOT_AVAILABLE", message = vehicleEx.Message });
+
+                case VehicleShiftConflictException shiftConflictEx:
+                    return (StatusCodes.Status409Conflict, new { code = "VEHICLE_SHIFT_CONFLICT", message = shiftConflictEx.Message });
+
+                case HandoverNotReadyException handoverEx:
+                    return (StatusCodes.Status409Conflict, new { code = "HANDOVER_NOT_READY", message = handoverEx.Message });
+
+                case DeliveryEscalationRequiredException escalationEx:
+                    return (StatusCodes.Status409Conflict, new { code = "DELIVERY_ESCALATION_REQUIRED", message = escalationEx.Message });
+
+                case FulfilmentPlanConflictException fulfilmentEx:
+                    return (StatusCodes.Status409Conflict, new { code = "FULFILMENT_PLAN_CONFLICT", message = fulfilmentEx.Message });
+
+                case CountSnapshotStateInvalidException countStateEx:
+                    return (StatusCodes.Status409Conflict, new { code = "COUNT_SNAPSHOT_OR_ADJUSTMENT_STATE_INVALID", message = countStateEx.Message });
+
                 case MediaTypeUnsupportedException mediaTypeEx:
                     return (StatusCodes.Status415UnsupportedMediaType, new { code = "MEDIA_TYPE_UNSUPPORTED", message = mediaTypeEx.Message });
 

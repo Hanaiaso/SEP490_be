@@ -296,7 +296,7 @@ namespace VietTien.API.Services.Implementations
                 }
 
                 await _notificationService.CreateNotificationAsync(
-                    NotificationType.SYS_39_InventoryCountSessionClosed,
+                    NotificationType.SYS_41_InventoryCountSessionClosed,
                     staffId,
                     "Đã đóng phiên kiểm kê",
                     autoAppliedCount > 0 || pendingApprovalCount > 0

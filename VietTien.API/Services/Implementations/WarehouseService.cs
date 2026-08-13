@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
+using VietTien.API.Exceptions;
 using VietTien.API.Hubs;
 using VietTien.API.Models;
 using VietTien.API.Services.Interfaces;
@@ -451,6 +452,115 @@ namespace VietTien.API.Services.Implementations
             if (task.Order != null) _context.Orders.Update(task.Order);
             
             await _context.SaveChangesAsync();
+        }
+
+        // ─── FUL-08: Gộp pick nhiều đơn (multi-pick) — WarehouseStaff đề xuất, SalesManager duyệt ───
+
+        private static string CanonicalOrderIds(IEnumerable<Guid> orderIds) =>
+            string.Join(",", orderIds.Distinct().OrderBy(id => id));
+
+        private static MultiPickApprovalDto ToMultiPickDto(MultiPickApproval a)
+        {
+            return new MultiPickApprovalDto
+            {
+                Id = a.Id,
+                OrderIds = a.OrderIds.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(Guid.Parse).ToList(),
+                Status = a.Status.ToString(),
+                RequestedByUserId = a.RequestedByUserId,
+                RequestedAt = a.RequestedAt,
+                DecidedByUserId = a.DecidedByUserId,
+                DecidedAt = a.DecidedAt,
+                DecisionNote = a.DecisionNote
+            };
+        }
+
+        public async Task<MultiPickApprovalDto> RequestMultiPickAsync(Guid staffId, List<Guid> orderIds)
+        {
+            var distinctIds = orderIds.Distinct().ToList();
+            var existingCount = await _context.Orders.CountAsync(o => distinctIds.Contains(o.Id));
+            if (existingCount != distinctIds.Count)
+                throw new KeyNotFoundException("Một hoặc nhiều đơn hàng trong danh sách không tồn tại.");
+
+            var approval = new MultiPickApproval
+            {
+                OrderIds = CanonicalOrderIds(distinctIds),
+                Status = MultiPickApprovalStatus.Pending,
+                RequestedByUserId = staffId,
+                RequestedAt = DateTime.UtcNow
+            };
+            _context.MultiPickApprovals.Add(approval);
+            await _context.SaveChangesAsync();
+
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_40_MultiPickRequestPendingApproval,
+                    SystemRole.SalesManager,
+                    "Yêu cầu gộp pick nhiều đơn",
+                    $"Nhân viên kho đề xuất gộp pick {distinctIds.Count} đơn hàng cùng lúc. Cần Sales Manager duyệt.",
+                    approval.Id,
+                    "MultiPickApproval");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[WarehouseService] Error sending multi-pick request notification: {ex.Message}");
+            }
+
+            return ToMultiPickDto(approval);
+        }
+
+        public async Task<MultiPickApprovalDto> DecideMultiPickAsync(Guid approvalId, Guid managerId, MultiPickDecisionRequestDto dto)
+        {
+            var approval = await _context.MultiPickApprovals.FirstOrDefaultAsync(a => a.Id == approvalId)
+                ?? throw new KeyNotFoundException("Không tìm thấy đề xuất gộp pick.");
+
+            if (approval.Status != MultiPickApprovalStatus.Pending)
+                throw new InvalidOperationException("Đề xuất này đã được xử lý, không thể duyệt lại.");
+
+            approval.Status = dto.Approved ? MultiPickApprovalStatus.Approved : MultiPickApprovalStatus.Rejected;
+            approval.DecidedByUserId = managerId;
+            approval.DecidedAt = DateTime.UtcNow;
+            approval.DecisionNote = dto.Note?.Trim();
+
+            await _context.SaveChangesAsync();
+            return ToMultiPickDto(approval);
+        }
+
+        public async Task<MultiPickExecuteResultDto> ExecuteMultiPickAsync(Guid staffId, List<Guid> orderIds)
+        {
+            var requestedSet = orderIds.Distinct().ToHashSet();
+
+            var approvedPlans = await _context.MultiPickApprovals
+                .Where(a => a.Status == MultiPickApprovalStatus.Approved)
+                .ToListAsync();
+
+            var matchedPlan = approvedPlans.FirstOrDefault(a =>
+                a.OrderIds.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(Guid.Parse)
+                    .ToHashSet()
+                    .SetEquals(requestedSet));
+
+            if (matchedPlan == null)
+                throw new FulfilmentPlanConflictException(
+                    "Chưa có kế hoạch gộp pick nào được Sales Manager duyệt khớp đúng danh sách đơn hàng này.");
+
+            var pickTasks = await _context.PickTasks
+                .Where(pt => requestedSet.Contains(pt.OrderId) && pt.Status == PickTaskStatus.Pending)
+                .ToListAsync();
+
+            var accepted = 0;
+            foreach (var task in pickTasks)
+            {
+                await AcceptPickTaskAsync(task.Id, staffId);
+                accepted++;
+            }
+
+            return new MultiPickExecuteResultDto
+            {
+                ApprovalId = matchedPlan.Id,
+                PickTasksAccepted = accepted,
+                Message = $"Đã nhận gộp {accepted} lệnh xuất kho cho {requestedSet.Count} đơn hàng."
+            };
         }
 
         public async Task ReportShortageAsync(Guid orderId, Guid staffId, ShortageAlertRequestDto alert)

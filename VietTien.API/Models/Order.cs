@@ -55,6 +55,11 @@ namespace VietTien.API.Models
         public string? DeliveryShift { get; set; }   // Sáng, Trưa, Chiều
         public DateTime? ScheduledDeliveryDate { get; set; }
 
+        // ─── Nhóm C: DeliveryTrip (luồng Trip-based mới, song song với luồng theo Order ở trên) ───
+        /// <summary>Đơn thuộc tối đa 1 chuyến giao đang hoạt động. Null nếu chưa được gom vào chuyến nào.</summary>
+        public Guid? DeliveryTripId { get; set; }
+        public DeliveryTrip? DeliveryTrip { get; set; }
+
         public Guid? WarehouseStaffId { get; set; } // Nhân viên kho thực hiện đơn hàng
 
         // Snapshot Sale phụ trách đơn tại thời điểm tạo (LUỒNG 7):

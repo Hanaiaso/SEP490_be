@@ -101,6 +101,58 @@ namespace VietTien.API.Controllers
             }
         }
 
+        // ─── INV-01: KIỂM KÊ KHO 2 BƯỚC (snapshot lý thuyết -> ghi số đếm thực tế) ────────────
+
+        [HttpPost("count-sessions")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> CreateCountSession([FromBody] CreateInventoryCountSessionRequestDto dto)
+        {
+            try
+            {
+                var staffId = GetUserId();
+                var result = await _inventoryService.CreateCountSessionAsync(staffId, dto.WarehouseId);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        [HttpPut("count-sessions/{id:guid}/theoretical")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> LockTheoretical(Guid id)
+        {
+            try
+            {
+                var result = await _inventoryService.LockTheoreticalAsync(id);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("count-sessions/{id:guid}/lines")]
+        [Authorize(Roles = "WarehouseStaff,Admin")]
+        public async Task<IActionResult> RecordCountLine(Guid id, [FromBody] RecordCountLineRequestDto dto)
+        {
+            try
+            {
+                var result = await _inventoryService.RecordCountLineAsync(id, dto);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { code = "COUNT_LINE_INVALID", message = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
         [HttpGet("{warehouseId:guid}")]
         public async Task<IActionResult> GetWarehouseInventory(
             Guid warehouseId, 

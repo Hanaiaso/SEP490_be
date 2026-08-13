@@ -71,6 +71,17 @@ namespace VietTien.API.Data
         // UC-34: Sales Manager xử lý xung đột lịch xe/ca khi lập lịch giao hàng
         public DbSet<DeliveryScheduleConflict> DeliveryScheduleConflicts => Set<DeliveryScheduleConflict>();
 
+        // Nhóm C (DEL-01..07): chuyến giao hàng theo xe/ca/ngày (Trip-based), song song với luồng theo Order ở trên
+        public DbSet<DeliveryTrip> DeliveryTrips => Set<DeliveryTrip>();
+        public DbSet<DeliveryAttempt> DeliveryAttempts => Set<DeliveryAttempt>();
+
+        // Nhóm C (FUL-08): gộp pick nhiều đơn — cần Sales Manager duyệt trước khi thực thi
+        public DbSet<MultiPickApproval> MultiPickApprovals => Set<MultiPickApproval>();
+
+        // Nhóm C (INV-01): kiểm kê kho 2 bước (snapshot lý thuyết -> ghi số đếm thực tế)
+        public DbSet<StockCountSession> StockCountSessions => Set<StockCountSession>();
+        public DbSet<StockCountLine> StockCountLines => Set<StockCountLine>();
+
         // Phân bổ khách hàng cho Sale (Round-robin)
         public DbSet<RoundRobinState> RoundRobinStates => Set<RoundRobinState>();
         public DbSet<RoundRobinParticipant> RoundRobinParticipants => Set<RoundRobinParticipant>();
@@ -905,6 +916,104 @@ namespace VietTien.API.Data
                 entity.Property(c => c.ResolutionAction).HasMaxLength(20);
                 entity.Property(c => c.Status).HasConversion<string>().HasMaxLength(20);
                 entity.HasIndex(c => c.Status);
+            });
+
+            // Nhóm C (DEL-01..07): DeliveryTrip / DeliveryAttempt
+            modelBuilder.Entity<DeliveryTrip>(entity =>
+            {
+                entity.Property(t => t.Shift).HasMaxLength(20);
+                entity.Property(t => t.Status).HasConversion<string>().HasMaxLength(20);
+                entity.HasIndex(t => new { t.VehicleId, t.Shift, t.TripDate });
+
+                entity.HasOne(t => t.Vehicle)
+                    .WithMany()
+                    .HasForeignKey(t => t.VehicleId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(t => t.CreatedByUser)
+                    .WithMany()
+                    .HasForeignKey(t => t.CreatedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.DeliveryTrip)
+                .WithMany(t => t.Orders)
+                .HasForeignKey(o => o.DeliveryTripId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<DeliveryAttempt>(entity =>
+            {
+                entity.Property(a => a.Outcome).HasConversion<string>().HasMaxLength(20);
+                entity.Property(a => a.FailureReason).HasMaxLength(500);
+                entity.HasIndex(a => new { a.OrderId, a.DeliveryTripId });
+
+                entity.HasOne(a => a.Order)
+                    .WithMany()
+                    .HasForeignKey(a => a.OrderId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(a => a.DeliveryTrip)
+                    .WithMany(t => t.Attempts)
+                    .HasForeignKey(a => a.DeliveryTripId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(a => a.RecordedByUser)
+                    .WithMany()
+                    .HasForeignKey(a => a.RecordedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // Nhóm C (FUL-08): MultiPickApproval
+            modelBuilder.Entity<MultiPickApproval>(entity =>
+            {
+                entity.Property(a => a.OrderIds).HasMaxLength(2000);
+                entity.Property(a => a.Status).HasConversion<string>().HasMaxLength(20);
+                entity.Property(a => a.DecisionNote).HasMaxLength(1000);
+                entity.HasIndex(a => a.Status);
+
+                entity.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(a => a.RequestedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(a => a.DecidedByUserId)
+                    .IsRequired(false)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            // Nhóm C (INV-01): StockCountSession / StockCountLine
+            modelBuilder.Entity<StockCountSession>(entity =>
+            {
+                entity.Property(s => s.Status).HasConversion<string>().HasMaxLength(20);
+                entity.HasIndex(s => new { s.WarehouseId, s.Status });
+
+                entity.HasOne(s => s.Warehouse)
+                    .WithMany()
+                    .HasForeignKey(s => s.WarehouseId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+                entity.HasOne(s => s.CreatedByUser)
+                    .WithMany()
+                    .HasForeignKey(s => s.CreatedByUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<StockCountLine>(entity =>
+            {
+                entity.HasIndex(l => new { l.StockCountSessionId, l.InventoryId }).IsUnique();
+
+                entity.HasOne(l => l.StockCountSession)
+                    .WithMany(s => s.Lines)
+                    .HasForeignKey(l => l.StockCountSessionId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(l => l.Inventory)
+                    .WithMany()
+                    .HasForeignKey(l => l.InventoryId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // =========================================================================

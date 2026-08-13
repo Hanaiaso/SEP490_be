@@ -13,10 +13,12 @@ namespace VietTien.API.Controllers
     public class DeliveryController : ControllerBase
     {
         private readonly IOrderService _orderService;
+        private readonly IDeliveryTripService _deliveryTripService;
 
-        public DeliveryController(IOrderService orderService)
+        public DeliveryController(IOrderService orderService, IDeliveryTripService deliveryTripService)
         {
             _orderService = orderService;
+            _deliveryTripService = deliveryTripService;
         }
 
         private Guid GetUserId()
@@ -370,6 +372,79 @@ namespace VietTien.API.Controllers
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // ─── NHÓM C (DEL-01..07): DELIVERY TRIP (luồng chuyến giao, song song với luồng theo Order) ──
+
+        /// <summary>Tạo chuyến giao hàng mới cho 1 xe/ca/ngày, gom các đơn hàng đã chọn vào chuyến.</summary>
+        [HttpPost("trips")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> CreateTrip([FromBody] CreateDeliveryTripRequestDto dto)
+        {
+            var userId = GetUserId();
+            var result = await _deliveryTripService.CreateTripAsync(userId, dto);
+            return Ok(result);
+        }
+
+        /// <summary>Bắt đầu chuyến giao — yêu cầu mọi đơn trong chuyến đã có HandoverRecord Confirmed.</summary>
+        [HttpPost("trips/{id:guid}/start")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> StartTrip(Guid id)
+        {
+            var result = await _deliveryTripService.StartTripAsync(id);
+            return Ok(result);
+        }
+
+        /// <summary>Xem chi tiết 1 chuyến giao — chỉ người tạo chuyến hoặc SalesManager/Admin được xem.</summary>
+        [HttpGet("trips/{id:guid}")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> GetTrip(Guid id)
+        {
+            var result = await _deliveryTripService.GetTripByIdAsync(id);
+
+            var userId = GetUserId();
+            if (result.CreatedByUserId != userId && !User.IsInRole("SalesManager") && !User.IsInRole("Admin"))
+                return StatusCode(403, new { code = "DELIVERY_SCOPE_FORBIDDEN", message = "Bạn không có quyền xem chuyến giao này." });
+
+            return Ok(result);
+        }
+
+        /// <summary>Ghi nhận kết quả 1 lần giao (POD nếu thành công, lý do nếu thất bại) cho 1 đơn trong chuyến.</summary>
+        [HttpPost("attempts")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> RecordAttempt([FromBody] RecordDeliveryAttemptRequestDto dto)
+        {
+            try
+            {
+                var userId = GetUserId();
+                var result = await _deliveryTripService.RecordAttemptAsync(userId, dto);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                // POD (proof of delivery) thiếu/không hợp lệ -> 422, khác với 400 mặc định của middleware
+                return UnprocessableEntity(new { code = "POD_INCOMPLETE_OR_INVALID", message = ex.Message });
+            }
+        }
+
+        /// <summary>Ghi nhận thu tiền COD cho 1 đơn trong chuyến (có thể thu nhiều lần/1 phần).</summary>
+        [HttpPost("collections")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> RecordCollection([FromBody] RecordCollectionRequestDto dto)
+        {
+            try
+            {
+                var result = await _deliveryTripService.RecordCollectionAsync(dto);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { code = "COD_AMOUNT_INVALID", message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { code = "COD_NOT_ALLOWED_FOR_PAID_ORDER", message = ex.Message });
             }
         }
     }

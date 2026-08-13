@@ -11,5 +11,10 @@ namespace VietTien.API.Services.Interfaces
         Task<List<SlowMovingItemDto>> GetSlowMovingItemsAsync(Guid? warehouseId, int days);
         Task<ShiftInventoryCountResultDto> SubmitShiftInventoryCountAsync(ShiftInventoryCountRequestDto request, Guid staffId);
         Task<List<LowStockAlertDto>> GetLowStockAlertsAsync();
+
+        // INV-01: kiểm kê kho 2 bước (snapshot lý thuyết -> ghi số đếm thực tế), tách biệt với shift-count
+        Task<StockCountSessionDto> CreateCountSessionAsync(Guid staffId, Guid warehouseId);
+        Task<StockCountSessionDto> LockTheoreticalAsync(Guid sessionId);
+        Task<StockCountSessionDto> RecordCountLineAsync(Guid sessionId, RecordCountLineRequestDto dto);
     }
 }
