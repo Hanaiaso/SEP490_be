@@ -310,5 +310,51 @@ namespace VietTien.API.Controllers
                 return BadRequest(new { message = ex.Message });
             }
         }
+
+        // ─── FUL-08: GỘP PICK NHIỀU ĐƠN (multi-pick) — cần Sales Manager duyệt trước ───────────
+
+        /// <summary>Nhân viên kho đề xuất gộp pick nhiều đơn cùng lúc, chờ Sales Manager duyệt.</summary>
+        [HttpPost("multi-pick/request")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
+        public async Task<IActionResult> RequestMultiPick([FromBody] MultiPickOrderIdsRequestDto dto)
+        {
+            try
+            {
+                var staffId = GetUserId();
+                var result = await _warehouseService.RequestMultiPickAsync(staffId, dto.OrderIds);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Sales Manager duyệt/từ chối đề xuất gộp pick.</summary>
+        [HttpPost("multi-pick/{id:guid}/decision")]
+        [Authorize(Roles = "SalesManager,Admin")]
+        public async Task<IActionResult> DecideMultiPick(Guid id, [FromBody] MultiPickDecisionRequestDto dto)
+        {
+            try
+            {
+                var managerId = GetUserId();
+                var result = await _warehouseService.DecideMultiPickAsync(id, managerId, dto);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
+        /// <summary>Thực thi gộp pick — chỉ khi đã có MultiPickApproval Approved khớp đúng danh sách đơn hàng.</summary>
+        [HttpPost("multi-pick")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
+        public async Task<IActionResult> ExecuteMultiPick([FromBody] MultiPickOrderIdsRequestDto dto)
+        {
+            var staffId = GetUserId();
+            var result = await _warehouseService.ExecuteMultiPickAsync(staffId, dto.OrderIds);
+            return Ok(result);
+        }
     }
 }

@@ -19,11 +19,12 @@ namespace VietTien.Tests.Controllers
     public class DeliveryControllerTests
     {
         private readonly Mock<IOrderService> _service = new();
+        private readonly Mock<IDeliveryTripService> _tripService = new();
         private readonly DeliveryController _sut;
         private readonly Guid _userId = Guid.NewGuid();
 
         public DeliveryControllerTests()
-            => _sut = new DeliveryController(_service.Object).WithUser(_userId, "SalesStaff");
+            => _sut = new DeliveryController(_service.Object, _tripService.Object).WithUser(_userId, "SalesStaff");
 
         // ── bước 1: lập lịch xe ──────────────────────────────────────────────
 

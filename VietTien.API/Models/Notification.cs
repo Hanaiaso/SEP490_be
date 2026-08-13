@@ -59,6 +59,12 @@ namespace VietTien.API.Models
         SYS_35_StockAdjustmentDecisionResult,
         SYS_36_OrderUnblockedForRedelivery,
         SYS_37_DebtSettled,
-        SYS_38_SessionRevoked
+        SYS_38_SessionRevoked,
+
+        // Nhóm C: DeliveryTrip (luồng Trip-based) — ngưỡng escalate@3 riêng biệt với SYS_12 (block@3 của luồng theo Order cũ)
+        SYS_39_DeliveryTripAttemptEscalation,
+
+        // Nhóm C: FUL-08 — đề xuất gộp pick nhiều đơn chờ Sales Manager duyệt
+        SYS_40_MultiPickRequestPendingApproval
     }
 }

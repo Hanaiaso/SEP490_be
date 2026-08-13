@@ -79,6 +79,7 @@ builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IGoodsIssueService, GoodsIssueService>();
 builder.Services.AddScoped<IMaterialService, MaterialService>();
 builder.Services.AddScoped<IStockAdjustmentService, StockAdjustmentService>(); // P0-1
+builder.Services.AddScoped<IDeliveryTripService, DeliveryTripService>(); // Nhóm C (DEL-01..07)
 
 // AI Marketing Studio & Make.com Webhook
 builder.Services.AddHttpClient<IMakeWebhookService, MakeWebhookService>();

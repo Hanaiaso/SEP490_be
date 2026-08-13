@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VietTien.API.Data;
 
@@ -11,9 +12,11 @@ using VietTien.API.Data;
 namespace VietTien.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260813140711_AddMultiPickApproval")]
+    partial class AddMultiPickApproval
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1253,71 +1256,6 @@ namespace VietTien.API.Migrations
                             ReservedQuantity = 0,
                             WarehouseLocationId = new Guid("f0000003-0003-4003-a003-000000000002")
                         });
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.InventoryCountLine", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<int?>("ActualQuantity")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("CountedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("InventoryCountSessionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("InventoryId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("TheoreticalQuantity")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InventoryId");
-
-                    b.HasIndex("InventoryCountSessionId", "InventoryId")
-                        .IsUnique();
-
-                    b.ToTable("InventoryCountLines");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.InventoryCountSession", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime?>("TheoreticalLockedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("WarehouseId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("WarehouseId", "Status");
-
-                    b.ToTable("InventoryCountSessions");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.JobRun", b =>
@@ -4625,44 +4563,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("WarehouseLocation");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.InventoryCountLine", b =>
-                {
-                    b.HasOne("VietTien.API.Models.InventoryCountSession", "InventoryCountSession")
-                        .WithMany("Lines")
-                        .HasForeignKey("InventoryCountSessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.Inventory", "Inventory")
-                        .WithMany()
-                        .HasForeignKey("InventoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Inventory");
-
-                    b.Navigation("InventoryCountSession");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.InventoryCountSession", b =>
-                {
-                    b.HasOne("VietTien.API.Models.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.Warehouse", "Warehouse")
-                        .WithMany()
-                        .HasForeignKey("WarehouseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("CreatedByUser");
-
-                    b.Navigation("Warehouse");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.MarketingPost", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "ApprovedByUser")
@@ -5516,11 +5416,6 @@ namespace VietTien.API.Migrations
             modelBuilder.Entity("VietTien.API.Models.GoodsReceipt", b =>
                 {
                     b.Navigation("Items");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.InventoryCountSession", b =>
-                {
-                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.Material", b =>

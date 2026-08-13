@@ -19,5 +19,10 @@ namespace VietTien.API.Services.Interfaces
         Task ConsolidateOrderAsync(Guid orderId, Guid staffId);
         Task HandoverOrderAsync(Guid orderId, Guid staffId, HandoverRequestDto dto);
         Task PostGoodsIssueAsync(Guid orderId, Guid staffId);
+
+        // FUL-08: gộp pick nhiều đơn — cần Sales Manager duyệt trước (MultiPickApproval)
+        Task<MultiPickApprovalDto> RequestMultiPickAsync(Guid staffId, List<Guid> orderIds);
+        Task<MultiPickApprovalDto> DecideMultiPickAsync(Guid approvalId, Guid managerId, MultiPickDecisionRequestDto dto);
+        Task<MultiPickExecuteResultDto> ExecuteMultiPickAsync(Guid staffId, List<Guid> orderIds);
     }
 }
