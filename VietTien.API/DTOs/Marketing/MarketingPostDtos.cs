@@ -104,6 +104,38 @@ namespace VietTien.API.DTOs.Marketing
         public string? ErrorMessage { get; set; }
     }
 
+    // L3-MKT-11 (hướng Make.com): Make.com tự tra Facebook Graph API bằng kết nối riêng của nó, gửi
+    // số liệu về đây định kỳ — thay cho việc backend tự gọi Facebook trực tiếp.
+    public class MarketingMetricsCallbackDto
+    {
+        public int ReachCount { get; set; }
+        public int LikeCount { get; set; }
+        public int CommentCount { get; set; }
+        public int ShareCount { get; set; }
+    }
+
+    public class MarketingPostForSyncDto
+    {
+        public Guid Id { get; set; }
+        public string Code { get; set; } = string.Empty;
+        public string ExternalPostId { get; set; } = string.Empty;
+    }
+
+    // L3-MKT-11: dữ liệu reach/reaction/comment/share thật của bài đã publish, đọc từ chính các cột
+    // đã có sẵn trên MarketingPost (ReachCount/LikeCount/CommentCount/ShareCount) — trước đây có cột
+    // nhưng không có endpoint nào chiếu ra. Được ghi bởi Make.com qua POST .../metrics-callback.
+    public class MarketingPostMetricsDto
+    {
+        public Guid PostId { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public string? ExternalPostId { get; set; }
+        public int ReachCount { get; set; }
+        public int LikeCount { get; set; }
+        public int CommentCount { get; set; }
+        public int ShareCount { get; set; }
+        public DateTime? LastSyncedAt { get; set; }
+    }
+
     public class MarketingPostDto
     {
         public Guid Id { get; set; }

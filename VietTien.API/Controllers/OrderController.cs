@@ -135,6 +135,35 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPost("~/api/payment-reallocations")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> CreatePaymentReallocation([FromBody] CreatePaymentReallocationRequestDto request)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _orderService.CreatePaymentReallocationAsync(GetUserId(), request);
+                return Ok(result);
+            }
+            catch (ReallocationValueConflictException ex)
+            {
+                return Conflict(new { code = "REALLOCATION_VALUE_CONFLICT", message = ex.Message });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpGet("sales-dashboard")]
         [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<ActionResult<SalesDashboardStatsDto>> GetSalesDashboard()

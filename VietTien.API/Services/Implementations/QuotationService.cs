@@ -189,6 +189,15 @@ namespace VietTien.API.Services.Implementations
                 });
             }
 
+            // Manager/CEO duyệt dựa trên ProposedTotal, nhưng tiền thực tính khi đặt hàng lại dựa theo
+            // ProposedUnitPrice từng dòng (OrderService.CalculateDiscountAsync) — nếu 2 số này lệch nhau,
+            // người duyệt tưởng đang chốt 1 mức giá nhưng hệ thống lại áp dụng đơn giá khác. Bắt khớp
+            // tuyệt đối (VND không có đơn vị nhỏ hơn 1 đồng) trước khi cho tạo version.
+            var computedTotal = version.Items.Sum(i => i.ProposedUnitPrice * i.Quantity);
+            if (request.ProposedTotal != computedTotal)
+                throw new Exception(
+                    $"ProposedTotal ({request.ProposedTotal:N0}đ) không khớp tổng đơn giá từng dòng x số lượng ({computedTotal:N0}đ).");
+
             await _quotationRepo.CreateVersionAsync(version);
 
             q.Status = QuotationStatus.PendingManager;

@@ -118,6 +118,16 @@ namespace VietTien.API.Services.Implementations
                 throw new UnauthorizedAccessException("Bạn không có quyền điều chỉnh tồn kho của kho này.");
             }
 
+            // L3-INV-04: chặn điều chỉnh khiến tồn khả dụng THỰC âm — trước đây chỉ chặn newQuantity < 0,
+            // nên set OnHand về 0 trong khi Reserved/Allocated/Quarantine còn giữ hàng vẫn được chấp nhận,
+            // và mức âm thực sự bị AvailableQuantity (Models/Inventory.cs) che mất qua Math.Max(0, ...).
+            var rawAvailableAfterAdjust = newQuantity - inventory.ReservedQuantity - inventory.AllocatedQuantity
+                - inventory.DamagedQuantity - inventory.QuarantineQuantity;
+            if (rawAvailableAfterAdjust < 0)
+                throw new Exception(
+                    "Điều chỉnh làm tồn khả dụng thực âm (đang giữ Reserved/Allocated/Damaged/Quarantine vượt số lượng mới). " +
+                    "Vui lòng giải phóng/điều chỉnh các khoản đang giữ trước.");
+
             var oldQuantity = inventory.OnHandQuantity;
             inventory.OnHandQuantity = newQuantity;
             inventory.LastUpdatedByUserId = staffId;
@@ -564,6 +574,68 @@ namespace VietTien.API.Services.Implementations
 
             result.AdjustedCount = result.AdjustedItems.Count;
             return result;
+        }
+
+        // L3-INV-06: cùng phép so sánh ngưỡng với LowStockAlertJob (Inventory.ReorderThreshold cho
+        // hàng thành phẩm, Material.SafetyThreshold tính từ tổng Inventories cho nguyên vật liệu) —
+        // nhưng đọc trực tiếp, không gửi notification/không cooldown, phục vụ GET theo yêu cầu.
+        public async Task<List<LowStockAlertDto>> GetLowStockAlertsAsync()
+        {
+            var alerts = new List<LowStockAlertDto>();
+
+            // AvailableQuantity là computed property phía C# (Math.Max(0, OnHand - Reserved - ...)),
+            // KHÔNG map ra cột DB nào -> đưa thẳng vào .Where() sẽ bị EF cố dịch sang SQL và ném
+            // InvalidOperationException (route trả 409 qua ExceptionHandlingMiddleware) khi chạy với
+            // provider SQL Server thật (EF InMemory dùng trong unit test client-eval nên không phát
+            // hiện được lỗi này). Chỉ lọc ReorderThreshold != null (cột thật) ở SQL, còn so sánh với
+            // AvailableQuantity phải làm SAU khi đã ToListAsync() — đúng như LowStockAlertJob đang làm.
+            var candidateInventories = await _context.Inventories
+                .Include(i => i.Product)
+                .Include(i => i.WarehouseLocation).ThenInclude(wl => wl.Warehouse)
+                .Where(i => i.ReorderThreshold != null)
+                .ToListAsync();
+            var lowStockInventories = candidateInventories
+                .Where(i => i.AvailableQuantity <= i.ReorderThreshold!.Value)
+                .ToList();
+
+            alerts.AddRange(lowStockInventories.Select(inv => new LowStockAlertDto
+            {
+                ItemType = "Product",
+                ItemId = inv.ProductId ?? inv.Id,
+                ItemName = inv.Product?.Name ?? "(Sản phẩm không xác định)",
+                ItemSku = inv.Product?.Sku,
+                WarehouseId = inv.WarehouseLocation?.WarehouseId,
+                WarehouseName = inv.WarehouseLocation?.Warehouse?.Name,
+                AvailableQuantity = inv.AvailableQuantity,
+                Threshold = inv.ReorderThreshold!.Value,
+                SuggestedAction = "Tạo Purchase Order bổ sung hàng"
+            }));
+
+            var materials = await _context.Materials.Include(m => m.Inventories).ToListAsync();
+
+            foreach (var material in materials)
+            {
+                var calculatedStock = material.Inventories.Any()
+                    ? material.Inventories.Sum(i => i.AvailableQuantity)
+                    : material.CurrentStock;
+
+                if (calculatedStock > material.SafetyThreshold) continue;
+
+                alerts.Add(new LowStockAlertDto
+                {
+                    ItemType = "Material",
+                    ItemId = material.Id,
+                    ItemName = material.Name,
+                    ItemSku = null,
+                    WarehouseId = null,
+                    WarehouseName = null,
+                    AvailableQuantity = calculatedStock,
+                    Threshold = material.SafetyThreshold,
+                    SuggestedAction = "Đặt mua thêm nguyên vật liệu"
+                });
+            }
+
+            return alerts;
         }
     }
 }

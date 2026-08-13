@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Marketing;
+using VietTien.API.Exceptions;
 using VietTien.API.Models;
 using VietTien.API.Services.Interfaces;
 
@@ -15,13 +18,20 @@ namespace VietTien.API.Services.Implementations
         private readonly ApplicationDbContext _context;
         private readonly IMakeWebhookService _makeWebhookService;
         private readonly INotificationService _notificationService;
+        private readonly ICloudinaryService _cloudinaryService;
         private const int MAX_SCHEDULED_POSTS = 30;
+        private const long MaxMediaFileSize = 10 * 1024 * 1024; // 10MB
 
-        public MarketingPostService(ApplicationDbContext context, IMakeWebhookService makeWebhookService, INotificationService notificationService)
+        public MarketingPostService(
+            ApplicationDbContext context,
+            IMakeWebhookService makeWebhookService,
+            INotificationService notificationService,
+            ICloudinaryService cloudinaryService)
         {
             _context = context;
             _makeWebhookService = makeWebhookService;
             _notificationService = notificationService;
+            _cloudinaryService = cloudinaryService;
         }
 
         public async Task<IEnumerable<MarketingPostDto>> GetPostsAsync(string? status, Guid? productId, string? role, Guid userId)
@@ -332,6 +342,94 @@ namespace VietTien.API.Services.Implementations
                 CreatedAt = p.CreatedAt,
                 UpdatedAt = p.UpdatedAt
             };
+        }
+
+        // L3-MKT-09/MKT-10: upload ảnh/media riêng cho bài marketing — trước đây chỉ có ảnh AI-generated
+        // (URL) hoặc SelectedImageUrl gõ tay qua UpdatePostAsync, không có đường upload file thật nào.
+        // Cùng ràng buộc chỉnh sửa với UpdatePostAsync: chỉ chủ bài hoặc quản lý, chỉ khi Draft/ReworkRequired.
+        public async Task<MarketingPostDto> UploadMediaAsync(Guid id, IFormFile file, Guid userId, string userRole)
+        {
+            var post = await _context.MarketingPosts.FirstOrDefaultAsync(p => p.Id == id);
+            if (post == null) throw new Exception("Bài viết không tồn tại.");
+
+            if (post.CreatedByUserId != userId && !MarketingManagementRoles.Contains(userRole ?? string.Empty))
+                throw new UnauthorizedAccessException("Bạn không có quyền chỉnh sửa bài viết của người khác.");
+
+            if (post.Status != MarketingPostStatus.Draft && post.Status != MarketingPostStatus.ReworkRequired)
+                throw new Exception("Chỉ được đính kèm media khi bài viết đang ở trạng thái Nháp hoặc Yêu cầu sửa lại.");
+
+            if (file == null || file.Length == 0)
+                throw new ArgumentException("File không được để trống.");
+
+            if (file.Length > MaxMediaFileSize)
+                throw new MediaTooLargeException("File phải có kích thước không vượt quá 10MB.");
+
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (extension != ".jpg" && extension != ".jpeg" && extension != ".png" && extension != ".webp")
+                throw new MediaTypeUnsupportedException("File phải có định dạng JPG, PNG hoặc WEBP.");
+
+            await using (var contentStream = file.OpenReadStream())
+            {
+                if (!await FileSignatureValidator.IsAllowedImageAsync(contentStream))
+                    throw new MediaTypeUnsupportedException("Nội dung file không đúng định dạng ảnh JPG, PNG hoặc WEBP.");
+            }
+
+            post.SelectedImageUrl = await _cloudinaryService.UploadAttachmentAsync(file, "viettien/marketing-posts");
+            post.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return await GetPostByIdAsync(post.Id);
+        }
+
+        // L3-MKT-11: chiếu ReachCount/LikeCount/CommentCount/ShareCount đã có sẵn trên model ra ngoài —
+        // các cột này được Make.com cập nhật định kỳ qua POST .../metrics-callback.
+        public async Task<MarketingPostMetricsDto> GetMetricsAsync(Guid id)
+        {
+            var post = await _context.MarketingPosts.FirstOrDefaultAsync(p => p.Id == id)
+                ?? throw new Exception("Bài viết không tồn tại.");
+
+            return new MarketingPostMetricsDto
+            {
+                PostId = post.Id,
+                Status = post.Status.ToString(),
+                ExternalPostId = post.ExternalPostId,
+                ReachCount = post.ReachCount,
+                LikeCount = post.LikeCount,
+                CommentCount = post.CommentCount,
+                ShareCount = post.ShareCount,
+                LastSyncedAt = post.LastMetricsSyncedAt
+            };
+        }
+
+        // L3-MKT-11 (hướng Make.com): danh sách bài đã publish để Make.com tự tra Facebook rồi gọi
+        // ngược metrics-callback — chỉ trả field Make.com cần (Id để gọi lại, ExternalPostId để tra
+        // Facebook), không trả nguyên MarketingPostDto để tránh lộ thừa dữ liệu nội bộ.
+        public async Task<List<MarketingPostForSyncDto>> GetPostsForMetricsSyncAsync()
+        {
+            return await _context.MarketingPosts
+                .Where(p => p.Status == MarketingPostStatus.Success && p.ExternalPostId != null)
+                .Select(p => new MarketingPostForSyncDto
+                {
+                    Id = p.Id,
+                    Code = p.Code,
+                    ExternalPostId = p.ExternalPostId!
+                })
+                .ToListAsync();
+        }
+
+        public async Task<MarketingPostDto> UpdateMetricsFromCallbackAsync(Guid id, MarketingMetricsCallbackDto dto)
+        {
+            var post = await _context.MarketingPosts.FirstOrDefaultAsync(p => p.Id == id)
+                ?? throw new Exception("Bài viết không tồn tại.");
+
+            post.ReachCount = dto.ReachCount;
+            post.LikeCount = dto.LikeCount;
+            post.CommentCount = dto.CommentCount;
+            post.ShareCount = dto.ShareCount;
+            post.LastMetricsSyncedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+            return await GetPostByIdAsync(post.Id);
         }
     }
 }

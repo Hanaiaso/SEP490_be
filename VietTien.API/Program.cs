@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -24,6 +25,11 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 // Dùng để mã hoá secret Integrations (SePay/eSMS/Email...) lưu trong SystemConfigVersion — xem SystemConfigService.
 builder.Services.AddDataProtection();
+
+// L3-SEC-05: UseHttpsRedirection() mặc định không biết redirect sang cổng nào khi app chạy sau
+// reverse proxy/App Service (không tự bind cổng HTTPS riêng) — phải khai báo cổng tường minh, kết
+// hợp UseForwardedHeaders() ở dưới để nhận diện đúng request gốc là http hay https.
+builder.Services.AddHttpsRedirection(o => o.HttpsPort = 443);
 
 builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
@@ -297,6 +303,9 @@ using (var scope = app.Services.CreateScope())
 // middleware khác trong pipeline để bọc được toàn bộ downstream (static files, CORS, auth, controllers).
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+// L3-SEC-15: gắn header bảo mật cho mọi response (kể cả Development, để test/scan local phản ánh đúng).
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
@@ -309,6 +318,13 @@ if (app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
+    // L3-SEC-05: phải đứng TRƯỚC UseHttpsRedirection() để middleware sau đọc đúng scheme gốc
+    // (X-Forwarded-Proto) khi app chạy sau reverse proxy/Azure App Service — nơi TLS bị terminate
+    // ở tầng platform và request tới Kestrel luôn là HTTP thuần dù client gọi https://.
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+    });
     app.UseHttpsRedirection();
 }
 

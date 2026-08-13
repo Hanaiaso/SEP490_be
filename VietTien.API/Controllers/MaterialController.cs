@@ -1,6 +1,9 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Material;
+using VietTien.API.DTOs.Warehouse;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Controllers
@@ -12,10 +15,12 @@ namespace VietTien.API.Controllers
     public class MaterialController : ControllerBase
     {
         private readonly IMaterialService _materialService;
+        private readonly IGoodsIssueService _goodsIssueService;
 
-        public MaterialController(IMaterialService materialService)
+        public MaterialController(IMaterialService materialService, IGoodsIssueService goodsIssueService)
         {
             _materialService = materialService;
+            _goodsIssueService = goodsIssueService;
         }
 
         [HttpGet]
@@ -108,6 +113,61 @@ namespace VietTien.API.Controllers
             {
                 await _materialService.DeleteAsync(id);
                 return NoContent();
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // L3-INV-05: gộp Create -> UploadProof -> Post của GoodsIssue (Type=ProductionMaterial) thành
+        // 1 lần gọi. Toàn bộ validate bằng chứng (ảnh, người nhận, bộ phận, số biên bản) và trừ tồn
+        // kho có kiểm tra invariant đã nằm sẵn trong GoodsIssueService — endpoint này chỉ compose lại.
+        [HttpPost("production-issues")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
+        public async Task<IActionResult> CreateProductionIssue(
+            [FromForm] CreateProductionIssueRequestDto request, IFormFile? evidencePhoto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            if (evidencePhoto == null || evidencePhoto.Length == 0)
+                return UnprocessableEntity(new { message = "Bắt buộc đính kèm ảnh biên bản giấy đã có chữ ký (evidencePhoto)." });
+
+            var staffIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(staffIdStr)) return Unauthorized();
+            var staffId = Guid.Parse(staffIdStr);
+
+            try
+            {
+                var created = await _goodsIssueService.CreateGoodsIssueAsync(new CreateGoodsIssueRequestDto
+                {
+                    Type = "ProductionMaterial",
+                    WarehouseId = request.WarehouseId,
+                    ExternalRecipientName = request.ExternalRecipientName,
+                    Department = request.Department,
+                    ReceivedAt = request.ReceivedAt,
+                    PaperDocumentNumber = request.PaperDocumentNumber,
+                    UsagePurpose = request.UsagePurpose,
+                    Items = request.Items.Select(i => new CreateGoodsIssueItemRequestDto
+                    {
+                        ProductId = i.ProductId,
+                        MaterialId = i.MaterialId,
+                        Quantity = i.Quantity
+                    }).ToList()
+                }, staffId);
+
+                await _goodsIssueService.UploadProofAsync(created.Id, evidencePhoto);
+                var posted = await _goodsIssueService.PostGoodsIssueAsync(created.Id, staffId);
+
+                return Ok(posted);
             }
             catch (KeyNotFoundException ex)
             {

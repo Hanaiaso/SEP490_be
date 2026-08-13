@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VietTien.API.Data;
 
@@ -11,9 +12,11 @@ using VietTien.API.Data;
 namespace VietTien.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260813035338_AddAuditLogInsertOnlyTrigger")]
+    partial class AddAuditLogInsertOnlyTrigger
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1257,9 +1260,6 @@ namespace VietTien.API.Migrations
 
                     b.Property<string>("Hashtags")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<DateTime?>("LastMetricsSyncedAt")
-                        .HasColumnType("datetime2");
 
                     b.Property<int>("LikeCount")
                         .HasColumnType("int");
