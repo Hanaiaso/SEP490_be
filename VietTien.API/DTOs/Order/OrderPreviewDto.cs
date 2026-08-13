@@ -13,6 +13,9 @@ namespace VietTien.API.DTOs.Order
         // UC-13: true nếu đây là đơn hàng đầu tiên của khách và SĐT chưa được xác thực OTP —
         // FE phải bắt khách hoàn tất xác thực OTP trước khi cho bấm "Đặt hàng".
         public bool RequiresPhoneOtp { get; set; }
+        // BR-025: true nếu giỏ hàng đã giữ giá quá 24h — FE hiện cảnh báo và chặn nút đặt hàng
+        // cho tới khi khách bấm làm mới giá (POST /api/cart/refresh-price).
+        public bool IsPriceExpired { get; set; }
         public List<CartItemDto> Items { get; set; } = new List<CartItemDto>();
     }
 }

@@ -28,7 +28,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("generate-options")]
-        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<IActionResult> GenerateOptions([FromBody] GenerateAiContentRequestDto request)
         {
             try
@@ -43,7 +43,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("generate-image")]
-        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public IActionResult GenerateImage([FromBody] GenerateImageRequestDto request)
         {
             try
@@ -99,7 +99,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost]
-        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<IActionResult> CreatePost([FromBody] CreateMarketingPostDto dto)
         {
             try
@@ -117,7 +117,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPut("{id}")]
-        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<IActionResult> UpdatePost(Guid id, [FromBody] UpdateMarketingPostDto dto)
         {
             try
@@ -140,7 +140,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/submit")]
-        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<IActionResult> SubmitPost(Guid id)
         {
             try
@@ -163,7 +163,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/decision")]
-        [Authorize(Roles = "SalesManager,SaleManager,Admin,CEO")]
+        [Authorize(Roles = "SalesManager,Admin,CEO")]
         public async Task<IActionResult> MakeDecision(Guid id, [FromBody] MarketingPostDecisionDto dto)
         {
             try

@@ -48,27 +48,13 @@ namespace VietTien.API.Services.Implementations
                 };
             }
 
-            // Quy tắc giữ giá 24h
+            // Quy tắc giữ giá 24h (BR-025): CHỈ báo hiệu qua IsPriceExpired, KHÔNG tự sửa giá/UpdatedAt
+            // ở đây. Trước đây hàm này tự "chữa lành" giá + reset UpdatedAt ngay khi đọc giỏ, nên
+            // guard 24h ở OrderService.PlaceOrderAsync không bao giờ còn thấy giỏ hết hạn — màn Cart/
+            // Checkout luôn gọi GetCartAsync (qua checkout-summary) trước khi khách kịp bấm đặt hàng,
+            // xoá mất dấu vết hết hạn một cách âm thầm. Việc làm mới giá thật sự chỉ diễn ra khi khách
+            // bấm nút xác nhận, xem RefreshCartPricesAsync.
             var isPriceExpired = (DateTime.UtcNow - cart.UpdatedAt).TotalHours > 24;
-            bool cartUpdated = false;
-
-            if (isPriceExpired)
-            {
-                foreach (var item in cart.Items)
-                {
-                    if (item.UnitPrice != item.Product.StandardListedPrice)
-                    {
-                        item.UnitPrice = item.Product.StandardListedPrice;
-                        cartUpdated = true;
-                    }
-                }
-
-                if (cartUpdated)
-                {
-                    cart.UpdatedAt = DateTime.UtcNow;
-                    await _unitOfWork.SaveChangesAsync();
-                }
-            }
 
             // Map to DTO
             var cartDto = new CartDto
@@ -76,6 +62,7 @@ namespace VietTien.API.Services.Implementations
                 Id = cart.Id,
                 CustomerProfileId = cart.CustomerProfileId,
                 UpdatedAt = cart.UpdatedAt,
+                IsPriceExpired = isPriceExpired,
                 Items = cart.Items.Select(i => new CartItemDto
                 {
                     Id = i.Id,
@@ -109,6 +96,28 @@ namespace VietTien.API.Services.Implementations
             }
 
             return cartDto;
+        }
+
+        /// <summary>BR-025: khách xác nhận làm mới giá cho giỏ đã hết hạn giữ giá 24h — cập nhật
+        /// UnitPrice về giá niêm yết hiện hành và reset mốc 24h.</summary>
+        public async Task<CartDto> RefreshCartPricesAsync(Guid userId)
+        {
+            var profile = await GetCustomerProfileAsync(userId);
+            var cart = await _unitOfWork.Carts.GetCartByCustomerIdAsync(profile.Id);
+
+            if (cart != null)
+            {
+                foreach (var item in cart.Items)
+                {
+                    if (item.UnitPrice != item.Product.StandardListedPrice)
+                        item.UnitPrice = item.Product.StandardListedPrice;
+                }
+
+                cart.UpdatedAt = DateTime.UtcNow;
+                await _unitOfWork.SaveChangesAsync();
+            }
+
+            return await GetCartAsync(userId);
         }
 
         public async Task<CartDto> AddItemToCartAsync(Guid userId, AddToCartRequestDto request)

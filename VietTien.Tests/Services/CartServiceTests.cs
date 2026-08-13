@@ -11,9 +11,12 @@ using Xunit;
 namespace VietTien.Tests.Services
 {
     /// <summary>
-    /// Sheet: CartService — L1-CART-01..10. UnitOfWork thật + EF InMemory.
+    /// Sheet: CartService — L1-CART-01..11. UnitOfWork thật + EF InMemory.
     /// Lưu ý lệch spec (ghi vào Notes của Excel):
-    /// - Code không có cờ IsPriceExpired: khi giỏ quá 24h, giá được TỰ ĐỘNG làm mới về giá niêm yết hiện tại.
+    /// - DEF-L4-007: GetCartAsync KHÔNG còn tự làm mới giá khi giỏ hết hạn 24h — chỉ báo hiệu qua
+    ///   cờ IsPriceExpired. Việc làm mới giá thật sự chỉ diễn ra qua RefreshCartPricesAsync (khách
+    ///   bấm xác nhận), để guard 24h ở OrderService.PlaceOrderAsync không bị chính lệnh đọc giỏ
+    ///   xoá mất dấu vết hết hạn trước khi khách kịp đặt hàng.
     /// - Boundary dùng "> 24" nên đúng 24h00 CHƯA coi là hết hạn (spec nói 24h00 = expired).
     /// - Validate quantity > 0 nằm ở DataAnnotation của AddToCartRequestDto (model binding), không nằm trong service.
     /// </summary>
@@ -77,24 +80,26 @@ namespace VietTien.Tests.Services
             cart.TotalPrice.Should().Be(0);
         }
 
-        // L1-CART-03 | BVA-Max | Giỏ quá 24h (25h) -> giá tự làm mới về giá niêm yết hiện tại
-        // (Lệch spec: không có cờ IsPriceExpired; hành vi thật = auto refresh giá. Đúng 24h00 chưa expired vì code dùng "> 24".)
+        // L1-CART-03 | BVA-Max | Giỏ quá 24h (25h) -> CHỈ báo IsPriceExpired=true, giá/UpdatedAt KHÔNG đổi
+        // (DEF-L4-007: đọc giỏ không còn tự "chữa lành" giá — nếu không guard 24h ở PlaceOrderAsync sẽ vô nghĩa)
         [Fact]
-        public async Task L1_CART_03_GetCart_Idle25h_PricesRefreshedToCurrentList()
+        public async Task L1_CART_03_GetCart_Idle25h_FlagsExpired_DoesNotAutoRefresh()
         {
             var (user, profile) = SeedCustomerWithAddress();
             var p1 = TestData.SeedProduct(_db, p => p.StandardListedPrice = 60_000m); // giá hiện tại 60k
             var cart = SeedCart(profile.Id, (p1, 2, 50_000m));                        // snapshot cũ 50k
-            cart.UpdatedAt = DateTime.UtcNow.AddHours(-25);
+            var staleAt = DateTime.UtcNow.AddHours(-25);
+            cart.UpdatedAt = staleAt;
             _db.SaveChanges();
 
             var dto = await _sut.GetCartAsync(user.Id);
 
-            dto.Items.Single().UnitPrice.Should().Be(60_000m); // giá đã refresh
-            dto.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(10)); // đồng hồ giữ giá reset
+            dto.IsPriceExpired.Should().BeTrue();
+            dto.Items.Single().UnitPrice.Should().Be(50_000m); // KHÔNG tự đổi giá khi chỉ đọc
+            dto.UpdatedAt.Should().Be(staleAt); // KHÔNG tự reset đồng hồ giữ giá khi chỉ đọc
         }
 
-        // L1-CART-04 | BVA-Max-1 | Giỏ mới 23h59m -> giá snapshot GIỮ NGUYÊN dù giá niêm yết đã đổi
+        // L1-CART-04 | BVA-Max-1 | Giỏ mới 23h59m -> giá snapshot GIỮ NGUYÊN, IsPriceExpired=false
         [Fact]
         public async Task L1_CART_04_GetCart_Idle23h59_PricesStillLocked()
         {
@@ -106,7 +111,25 @@ namespace VietTien.Tests.Services
 
             var dto = await _sut.GetCartAsync(user.Id);
 
+            dto.IsPriceExpired.Should().BeFalse();
             dto.Items.Single().UnitPrice.Should().Be(50_000m); // vẫn là snapshot
+        }
+
+        // L1-CART-11 | EP-Valid | RefreshCartPricesAsync trên giỏ hết hạn -> giá cập nhật về niêm yết, đồng hồ reset
+        [Fact]
+        public async Task L1_CART_11_RefreshCartPrices_Idle25h_PricesRefreshedToCurrentList()
+        {
+            var (user, profile) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db, p => p.StandardListedPrice = 60_000m); // giá hiện tại 60k
+            var cart = SeedCart(profile.Id, (p1, 2, 50_000m));                        // snapshot cũ 50k
+            cart.UpdatedAt = DateTime.UtcNow.AddHours(-25);
+            _db.SaveChanges();
+
+            var dto = await _sut.RefreshCartPricesAsync(user.Id);
+
+            dto.IsPriceExpired.Should().BeFalse();
+            dto.Items.Single().UnitPrice.Should().Be(60_000m); // giá đã refresh
+            dto.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(10)); // đồng hồ giữ giá reset
         }
 
         //  ▶ Block: AddItemToCartAsync()
