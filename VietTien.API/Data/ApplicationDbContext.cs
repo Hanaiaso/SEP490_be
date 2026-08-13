@@ -74,8 +74,8 @@ namespace VietTien.API.Data
         public DbSet<MultiPickApproval> MultiPickApprovals => Set<MultiPickApproval>();
 
         // Nhóm C (INV-01): kiểm kê kho 2 bước (snapshot lý thuyết -> ghi số đếm thực tế)
-        public DbSet<InventoryCountSession> InventoryCountSessions => Set<InventoryCountSession>();
-        public DbSet<InventoryCountLine> InventoryCountLines => Set<InventoryCountLine>();
+        public DbSet<StockCountSession> StockCountSessions => Set<StockCountSession>();
+        public DbSet<StockCountLine> StockCountLines => Set<StockCountLine>();
 
         // Phân bổ khách hàng cho Sale (Round-robin)
         public DbSet<RoundRobinState> RoundRobinStates => Set<RoundRobinState>();
@@ -979,8 +979,8 @@ namespace VietTien.API.Data
                     .OnDelete(DeleteBehavior.Restrict);
             });
 
-            // Nhóm C (INV-01): InventoryCountSession / InventoryCountLine
-            modelBuilder.Entity<InventoryCountSession>(entity =>
+            // Nhóm C (INV-01): StockCountSession / StockCountLine
+            modelBuilder.Entity<StockCountSession>(entity =>
             {
                 entity.Property(s => s.Status).HasConversion<string>().HasMaxLength(20);
                 entity.HasIndex(s => new { s.WarehouseId, s.Status });
@@ -996,13 +996,13 @@ namespace VietTien.API.Data
                     .OnDelete(DeleteBehavior.Restrict);
             });
 
-            modelBuilder.Entity<InventoryCountLine>(entity =>
+            modelBuilder.Entity<StockCountLine>(entity =>
             {
-                entity.HasIndex(l => new { l.InventoryCountSessionId, l.InventoryId }).IsUnique();
+                entity.HasIndex(l => new { l.StockCountSessionId, l.InventoryId }).IsUnique();
 
-                entity.HasOne(l => l.InventoryCountSession)
+                entity.HasOne(l => l.StockCountSession)
                     .WithMany(s => s.Lines)
-                    .HasForeignKey(l => l.InventoryCountSessionId)
+                    .HasForeignKey(l => l.StockCountSessionId)
                     .OnDelete(DeleteBehavior.Cascade);
 
                 entity.HasOne(l => l.Inventory)

@@ -5,9 +5,13 @@ namespace VietTien.API.Models
     // InventoryBalance (Inventory.OnHandQuantity) KHÔNG bị thay đổi — đối chiếu chênh lệch để cộng
     // vào tồn kho thật là bước tiếp theo, ngoài phạm vi đóng case này (có thể tái dùng luồng duyệt
     // CEO của StockAdjustment sau này thay vì tạo thêm 1 cơ chế duyệt thứ 2).
+    //
+    // Đặt tên theo đúng entity trong SRS (RTW "3. Feature Traceability", FT-12: StockCountSession/
+    // StockCountLine) — đổi từ tên tự đặt ban đầu (InventoryCountSession) để tránh trùng class với
+    // 1 implementation độc lập khác của cùng tính năng này trên nhánh main (DEF-L4-003).
     public enum CountSessionStatus { Draft, TheoreticalLocked, Completed }
 
-    public class InventoryCountSession
+    public class StockCountSession
     {
         public Guid Id { get; set; } = Guid.NewGuid();
         public Guid WarehouseId { get; set; }
@@ -20,13 +24,13 @@ namespace VietTien.API.Models
         // Navigation Properties
         public Warehouse Warehouse { get; set; } = null!;
         public User CreatedByUser { get; set; } = null!;
-        public ICollection<InventoryCountLine> Lines { get; set; } = new List<InventoryCountLine>();
+        public ICollection<StockCountLine> Lines { get; set; } = new List<StockCountLine>();
     }
 
-    public class InventoryCountLine
+    public class StockCountLine
     {
         public Guid Id { get; set; } = Guid.NewGuid();
-        public Guid InventoryCountSessionId { get; set; }
+        public Guid StockCountSessionId { get; set; }
         public Guid InventoryId { get; set; }
 
         public int TheoreticalQuantity { get; set; }
@@ -34,7 +38,7 @@ namespace VietTien.API.Models
         public DateTime? CountedAt { get; set; }
 
         // Navigation Properties
-        public InventoryCountSession InventoryCountSession { get; set; } = null!;
+        public StockCountSession StockCountSession { get; set; } = null!;
         public Inventory Inventory { get; set; } = null!;
     }
 }

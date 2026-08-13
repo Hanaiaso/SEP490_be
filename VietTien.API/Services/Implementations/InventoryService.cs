@@ -643,7 +643,7 @@ namespace VietTien.API.Services.Implementations
         // Khác với SubmitShiftInventoryCountAsync (ghi đè OnHandQuantity ngay lập tức), luồng này
         // KHÔNG đụng tới Inventory.OnHandQuantity ở bước ghi số đếm — chỉ lưu song song để đối chiếu.
 
-        private static InventoryCountSessionDto ToSessionDto(InventoryCountSession session)
+        private static InventoryCountSessionDto ToSessionDto(StockCountSession session)
         {
             return new InventoryCountSessionDto
             {
@@ -665,9 +665,9 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
-        private async Task<InventoryCountSession> LoadSessionAsync(Guid sessionId)
+        private async Task<StockCountSession> LoadSessionAsync(Guid sessionId)
         {
-            var session = await _context.InventoryCountSessions
+            var session = await _context.StockCountSessions
                 .Include(s => s.Lines).ThenInclude(l => l.Inventory).ThenInclude(i => i.Product)
                 .Include(s => s.Lines).ThenInclude(l => l.Inventory).ThenInclude(i => i.Material)
                 .FirstOrDefaultAsync(s => s.Id == sessionId);
@@ -680,14 +680,14 @@ namespace VietTien.API.Services.Implementations
             if (!warehouseExists)
                 throw new KeyNotFoundException("Không tìm thấy kho đã chọn.");
 
-            var session = new InventoryCountSession
+            var session = new StockCountSession
             {
                 WarehouseId = warehouseId,
                 Status = CountSessionStatus.Draft,
                 CreatedByUserId = staffId,
                 CreatedAt = DateTime.UtcNow
             };
-            _context.InventoryCountSessions.Add(session);
+            _context.StockCountSessions.Add(session);
             await _context.SaveChangesAsync();
 
             return ToSessionDto(session);
@@ -706,9 +706,9 @@ namespace VietTien.API.Services.Implementations
 
             foreach (var inv in inventories)
             {
-                _context.InventoryCountLines.Add(new InventoryCountLine
+                _context.StockCountLines.Add(new StockCountLine
                 {
-                    InventoryCountSessionId = session.Id,
+                    StockCountSessionId = session.Id,
                     InventoryId = inv.Id,
                     TheoreticalQuantity = inv.OnHandQuantity
                 });
@@ -718,7 +718,7 @@ namespace VietTien.API.Services.Implementations
             session.TheoreticalLockedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            // Load lại: các InventoryCountLine vừa thêm được EF fixup vào session.Lines, nhưng
+            // Load lại: các StockCountLine vừa thêm được EF fixup vào session.Lines, nhưng
             // Inventory.Product/Material của chúng chưa Include -> ItemName sẽ rỗng nếu dùng thẳng session hiện tại.
             return ToSessionDto(await LoadSessionAsync(session.Id));
         }
