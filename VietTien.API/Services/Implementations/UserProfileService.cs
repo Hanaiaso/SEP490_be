@@ -51,9 +51,16 @@ namespace VietTien.API.Services.Implementations
             var user = await _unitOfWork.Users.GetByIdAsync(userId)
                 ?? throw new KeyNotFoundException("Không tìm thấy người dùng.");
 
+            var newPhone = dto.PhoneNumber.Trim();
+            // User.PhoneNumber duy nhất toàn hệ thống (IX_Users_PhoneNumber) — phải kiểm tra trước khi
+            // ghi, nếu không cả request cập nhật hồ sơ (kể cả đổi tên) sẽ lỗi 500 chung chung khi SĐT
+            // mới trùng với tài khoản khác, giống lỗi đã gặp ở AddressService.CreateAddressAsync.
+            if (newPhone != user.PhoneNumber && await _unitOfWork.Users.PhoneExistsAsync(newPhone))
+                throw new InvalidOperationException("Số điện thoại này đã được sử dụng bởi tài khoản khác.");
+
             // Cập nhật thông tin
             user.FullName = dto.FullName.Trim();
-            user.PhoneNumber = dto.PhoneNumber.Trim();
+            user.PhoneNumber = newPhone;
 
             _unitOfWork.Users.Update(user);
             await _unitOfWork.SaveChangesAsync();

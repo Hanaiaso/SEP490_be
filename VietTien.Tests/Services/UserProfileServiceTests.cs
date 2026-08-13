@@ -74,6 +74,7 @@ namespace VietTien.Tests.Services
             var user = TestData.User();
             var (email, role, hash) = (user.Email, user.Role, user.PasswordHash);
             _userRepo.Setup(r => r.GetByIdAsync(user.Id)).ReturnsAsync(user);
+            _userRepo.Setup(r => r.PhoneExistsAsync("0987654321")).ReturnsAsync(false);
 
             var result = await _sut.UpdateProfileAsync(user.Id, new UpdateUserProfileDto
             {
@@ -87,6 +88,45 @@ namespace VietTien.Tests.Services
             user.Role.Should().Be(role);
             user.PasswordHash.Should().Be(hash);
             result.FullName.Should().Be("Tên Mới");
+        }
+
+        // L1-UP-06 | BC-TRUE | SĐT mới trùng với tài khoản KHÁC (IX_Users_PhoneNumber duy nhất toàn hệ
+        // thống) -> InvalidOperationException, không đổi PhoneNumber (trước đây SaveChanges sẽ lỗi 500).
+        [Fact]
+        public async Task L1_UP_06_UpdateProfile_PhoneTakenByAnotherUser_Rejected()
+        {
+            var user = TestData.User(u => u.PhoneNumber = "0911111111");
+            _userRepo.Setup(r => r.GetByIdAsync(user.Id)).ReturnsAsync(user);
+            _userRepo.Setup(r => r.PhoneExistsAsync("0922222222")).ReturnsAsync(true);
+
+            var act = () => _sut.UpdateProfileAsync(user.Id, new UpdateUserProfileDto
+            {
+                FullName = "Tên Mới",
+                PhoneNumber = "0922222222"
+            });
+
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("Số điện thoại này đã được sử dụng bởi tài khoản khác.");
+            user.PhoneNumber.Should().Be("0911111111");
+            _uow.Verify(u => u.SaveChangesAsync(), Times.Never);
+        }
+
+        // L1-UP-07 | EP-Valid | Giữ nguyên SĐT cũ (không đổi) -> không cần kiểm tra trùng, vẫn lưu được
+        [Fact]
+        public async Task L1_UP_07_UpdateProfile_SamePhoneNumber_SkipsDuplicateCheck()
+        {
+            var user = TestData.User(u => u.PhoneNumber = "0911111111");
+            _userRepo.Setup(r => r.GetByIdAsync(user.Id)).ReturnsAsync(user);
+
+            await _sut.UpdateProfileAsync(user.Id, new UpdateUserProfileDto
+            {
+                FullName = "Tên Mới",
+                PhoneNumber = "0911111111"
+            });
+
+            user.PhoneNumber.Should().Be("0911111111");
+            _userRepo.Verify(r => r.PhoneExistsAsync(It.IsAny<string>()), Times.Never);
+            _uow.Verify(u => u.SaveChangesAsync(), Times.Once);
         }
 
         // L1-UP-04 | EP-Valid | Upload avatar -> Cloudinary được gọi 1 lần, AvatarUrl = URL trả về
