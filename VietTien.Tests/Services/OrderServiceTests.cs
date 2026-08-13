@@ -148,7 +148,10 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task L1_ORD_04_Checkout_100M_WithAcceptedQuotation_NegotiatedPriceApplied()
         {
-            SeedCartWithTotal(120_000_000m);
+            var cart = SeedCartWithTotal(120_000_000m);
+            // L3-QUO-05: giá đã thoả thuận chỉ áp khi nội dung giỏ (SKU + số lượng) khớp version đã
+            // duyệt — version phải mang đúng dòng hàng của giỏ đang checkout, không chỉ ProposedTotal.
+            var cartItem = _db.CartItems.Single(ci => ci.CartId == cart.Id);
 
             var quotation = new Quotation
             {
@@ -168,6 +171,14 @@ namespace VietTien.Tests.Services
                 Status = QuotationVersionStatus.CustomerAccepted,
                 CreatedByUserId = _salesStaff.Id,
             };
+            version.Items.Add(new QuotationVersionItem
+            {
+                QuotationVersionId = version.Id,
+                ProductId = cartItem.ProductId,
+                Quantity = cartItem.Quantity,
+                OriginalUnitPrice = cartItem.UnitPrice,
+                ProposedUnitPrice = 110_000_000m / cartItem.Quantity,
+            });
             quotation.AcceptedVersionId = version.Id;
             quotation.Versions.Add(version);
             _db.Quotations.Add(quotation);

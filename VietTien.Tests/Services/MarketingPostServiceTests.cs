@@ -24,6 +24,7 @@ namespace VietTien.Tests.Services
         private readonly ApplicationDbContext _db = TestDbFactory.Create();
         private readonly Mock<IMakeWebhookService> _makeWebhook = new();
         private readonly Mock<INotificationService> _notification = new();
+        private readonly Mock<ICloudinaryService> _cloudinary = new();
         private readonly MarketingPostService _sut;
         private readonly Product _product;
         private readonly User _salesStaff;
@@ -31,7 +32,7 @@ namespace VietTien.Tests.Services
 
         public MarketingPostServiceTests()
         {
-            _sut = new MarketingPostService(_db, _makeWebhook.Object, _notification.Object);
+            _sut = new MarketingPostService(_db, _makeWebhook.Object, _notification.Object, _cloudinary.Object);
             _makeWebhook.Setup(m => m.TriggerPostToMakeAsync(It.IsAny<MarketingPost>())).ReturnsAsync(true);
 
             _product = TestData.SeedProduct(_db);

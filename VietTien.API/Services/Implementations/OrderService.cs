@@ -85,7 +85,8 @@ namespace VietTien.API.Services.Implementations
                 throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
         }
 
-        private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(decimal totalAmount, Guid customerProfileId)
+        private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(
+            decimal totalAmount, Guid customerProfileId, IEnumerable<(Guid ProductId, int Quantity, decimal UnitPrice)> cartLines)
         {
             // Ngưỡng chuyển sang luồng báo giá B2B (CR-01) — đọc từ Admin System Config (Phase 1),
             // cùng key QUOTATION_MIN_VALUE đã seed sẵn 100 triệu, fallback nếu chưa cấu hình.
@@ -94,22 +95,42 @@ namespace VietTien.API.Services.Implementations
 
             if (totalAmount >= quotationMinValue)
             {
-                // GH-13/BR-026: nếu khách đã có báo giá B2B được duyệt VÀ chấp nhận, còn hiệu lực, thì áp
-                // giá đã thoả thuận thay vì chặn cứng — không phải mọi đơn >=ngưỡng đều cần báo giá mới.
-                var acceptedQuotation = await _context.Quotations
-                    .Include(q => q.Versions)
-                    .Where(q => q.CustomerProfileId == customerProfileId
-                        && q.Status == QuotationStatus.CustomerAccepted
-                        && q.AcceptedVersionId != null
-                        && (q.ValidUntil == null || q.ValidUntil >= DateTime.UtcNow))
-                    .OrderByDescending(q => q.RequestDate)
-                    .FirstOrDefaultAsync();
+                // GH-13/BR-026 (điều chỉnh theo yêu cầu 2026-08-13): đơn giá đã đàm phán & được duyệt cho
+                // MỘT SKU trở thành đơn giá riêng của khách đó cho SKU này ở MỌI đơn hàng >=ngưỡng sau này,
+                // không phụ thuộc số lượng đã đàm phán ban đầu (bảng giá riêng theo khách, không phải
+                // "chốt 1 lần cho đúng 1 giỏ" như trước 2026-08-13). Chỉ áp cho ĐÚNG khách đã đàm phán —
+                // không dùng cho khách khác dù cùng SKU. SKU nào khách CHƯA từng đàm phán vẫn giữ giá
+                // niêm yết (không giảm giá), không chặn cả đơn chỉ vì có SKU chưa đàm phán.
+                var negotiatedItems = await _context.QuotationVersionItems
+                    .Where(vi => vi.QuotationVersion.Quotation.CustomerProfileId == customerProfileId
+                        && vi.QuotationVersion.Quotation.Status == QuotationStatus.CustomerAccepted
+                        && vi.QuotationVersion.Id == vi.QuotationVersion.Quotation.AcceptedVersionId
+                        && (vi.QuotationVersion.Quotation.ValidUntil == null || vi.QuotationVersion.Quotation.ValidUntil >= DateTime.UtcNow))
+                    .OrderByDescending(vi => vi.QuotationVersion.Quotation.RequestDate)
+                    .ToListAsync();
 
-                var acceptedVersion = acceptedQuotation?.Versions.FirstOrDefault(v => v.Id == acceptedQuotation.AcceptedVersionId);
-                if (acceptedVersion == null)
+                if (negotiatedItems.Count == 0)
                     throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
 
-                var negotiatedDiscount = Math.Max(0, totalAmount - acceptedVersion.ProposedTotal);
+                // Nhiều báo giá có thể từng đàm phán cùng 1 SKU ở các thời điểm khác nhau -> ưu tiên lần
+                // đàm phán GẦN NHẤT (đã OrderByDescending theo RequestDate ở trên, giữ bản ghi đầu tiên gặp).
+                var negotiatedUnitPriceByProduct = new Dictionary<Guid, decimal>();
+                foreach (var item in negotiatedItems)
+                {
+                    if (!negotiatedUnitPriceByProduct.ContainsKey(item.ProductId))
+                        negotiatedUnitPriceByProduct[item.ProductId] = item.ProposedUnitPrice;
+                }
+
+                decimal negotiatedTotal = 0m;
+                foreach (var line in cartLines)
+                {
+                    var unitPrice = negotiatedUnitPriceByProduct.TryGetValue(line.ProductId, out var negotiatedUnitPrice)
+                        ? negotiatedUnitPrice
+                        : line.UnitPrice; // SKU chưa từng đàm phán -> giữ giá niêm yết
+                    negotiatedTotal += unitPrice * line.Quantity;
+                }
+
+                var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
                 var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
                 return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
             }
@@ -131,10 +152,11 @@ namespace VietTien.API.Services.Implementations
                 throw new Exception("Giỏ hàng trống.");
 
             var baseTotal = cart.Items.Sum(i => i.TotalPrice);
-            var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal, profile.Id);
+            var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
+                baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
 
             var totalAfterDiscount = baseTotal - discountAmount;
-            
+
             // VAT 10% sau chiết khấu nếu khách hàng có cấu hình MST trong hồ sơ
             var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
             decimal vatPercentage = requiresVat ? 0.10m : 0m;
@@ -191,7 +213,8 @@ namespace VietTien.API.Services.Implementations
                     cart.Items.Select(i => (i.ProductId, i.Quantity)));
 
                 var baseTotal = cart.Items.Sum(i => i.TotalPrice);
-                var (discountAmount, discountPercentage) = await CalculateDiscountAsync(baseTotal, profile.Id);
+                var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
+                    baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
                 var totalAfterDiscount = baseTotal - discountAmount;
                 // Cùng nguồn sự thật với GetCheckoutSummaryAsync (preview): VAT áp dụng theo hồ sơ có MST,
                 // KHÔNG theo cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác với việc tính VAT).
@@ -3216,6 +3239,82 @@ namespace VietTien.API.Services.Implementations
                 throw;
             }
         }
+        // L3-AS-02/AS-07: entry point độc lập cho payment reallocation — khác với
+        // ApproveCancelAndCreateReplacementAsync (bundle luôn việc dựng đơn thay thế từ Items), ở đây
+        // caller chỉ định thẳng SỐ TIỀN muốn phân bổ sang 1 đơn khác của CÙNG khách, hoặc để trống
+        // TargetOrderId để chuyển vào ví Credit. "remaining" tính lại từ tổng các lần đã phân bổ
+        // trước đó cho cùng OriginalOrderId, nên gọi lại với cùng số tiền (double-allocation) hoặc
+        // vượt phần còn lại đều tự động bị chặn bởi cùng một invariant.
+        public async Task<PaymentReallocationResponseDto> CreatePaymentReallocationAsync(
+            Guid callerUserId, CreatePaymentReallocationRequestDto request)
+        {
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var originalOrder = await _context.Orders
+                    .FirstOrDefaultAsync(o => o.Id == request.OriginalOrderId)
+                    ?? throw new KeyNotFoundException("Không tìm thấy đơn hàng gốc.");
+
+                if (originalOrder.OrderStatus != OrderStatus.CancelRequested)
+                    throw new InvalidOperationException(
+                        "Đơn hàng không ở trạng thái chờ duyệt hủy, không thể phân bổ lại thanh toán.");
+
+                var alreadyAllocated = await _context.PaymentReallocations
+                    .Where(r => r.OriginalOrderId == request.OriginalOrderId)
+                    .SumAsync(r => (decimal?)r.Amount) ?? 0m;
+                var remaining = originalOrder.FinalPayment - alreadyAllocated;
+
+                if (request.Amount > remaining)
+                    throw new ReallocationValueConflictException(
+                        $"Số tiền phân bổ ({request.Amount:N0}đ) vượt quá giá trị còn lại của khoản thanh toán gốc ({remaining:N0}đ).");
+
+                if (request.TargetOrderId.HasValue)
+                {
+                    var targetOrder = await _context.Orders.FirstOrDefaultAsync(o => o.Id == request.TargetOrderId.Value)
+                        ?? throw new KeyNotFoundException("Không tìm thấy đơn hàng đích.");
+
+                    if (targetOrder.CustomerProfileId != originalOrder.CustomerProfileId)
+                        throw new ReallocationValueConflictException(
+                            "Không thể phân bổ thanh toán sang đơn hàng của khách hàng khác.");
+                }
+
+                var reallocation = new PaymentReallocation
+                {
+                    OriginalOrderId = request.OriginalOrderId,
+                    ReplacementOrderId = request.TargetOrderId,
+                    Amount = request.Amount,
+                    Status = request.TargetOrderId.HasValue ? "ReallocatedToOrder" : "RefundedToCredit",
+                    Timestamp = DateTime.UtcNow
+                };
+                await _context.PaymentReallocations.AddAsync(reallocation);
+
+                if (!request.TargetOrderId.HasValue)
+                {
+                    var profile = await _context.CustomerProfiles.FindAsync(originalOrder.CustomerProfileId)
+                        ?? throw new Exception("Không tìm thấy hồ sơ khách hàng.");
+                    profile.AvailableCredit += request.Amount;
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                return new PaymentReallocationResponseDto
+                {
+                    Id = reallocation.Id,
+                    OriginalOrderId = request.OriginalOrderId,
+                    TargetOrderId = request.TargetOrderId,
+                    Amount = request.Amount,
+                    RemainingAfter = remaining - request.Amount,
+                    Status = reallocation.Status
+                };
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
         public async Task<ReplacementOrderResponseDto> CreateExchangeReplacementOrderAsync(Guid requestId, Guid userId)
         {
             using var transaction = await _context.Database.BeginTransactionAsync();

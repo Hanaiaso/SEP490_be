@@ -3,8 +3,10 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Marketing;
+using VietTien.API.Exceptions;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Controllers
@@ -180,20 +182,60 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPost("{id}/media")]
+        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        public async Task<IActionResult> UploadMedia(Guid id, IFormFile? file)
+        {
+            if (file == null || file.Length == 0)
+                return BadRequest(new { message = "Vui lòng chọn file media." });
+
+            try
+            {
+                var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+                if (string.IsNullOrEmpty(userIdStr)) return Unauthorized();
+                var role = User.FindFirstValue(ClaimTypes.Role) ?? "";
+
+                var result = await _marketingPostService.UploadMediaAsync(id, file, Guid.Parse(userIdStr), role);
+                return Ok(result);
+            }
+            catch (MediaTypeUnsupportedException ex)
+            {
+                return StatusCode(StatusCodes.Status415UnsupportedMediaType, new { code = "MEDIA_TYPE_UNSUPPORTED", message = ex.Message });
+            }
+            catch (MediaTooLargeException ex)
+            {
+                return StatusCode(StatusCodes.Status413PayloadTooLarge, new { code = "MEDIA_TOO_LARGE", message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet("{id}/metrics")]
+        [Authorize]
+        public async Task<IActionResult> GetMetrics(Guid id)
+        {
+            try
+            {
+                var result = await _marketingPostService.GetMetricsAsync(id);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("{id}/webhook-callback")]
         [AllowAnonymous]
         public async Task<IActionResult> MakeWebhookCallback(Guid id, [FromBody] MakeWebhookCallbackDto dto)
         {
-            // Chỉ Make.com (server-to-server) mới được gọi callback này — không có secret thì bất kỳ
-            // user đăng nhập nào cũng giả mạo được kết quả đăng bài (Success/Failed) cho post bất kỳ.
-            var expectedSecret = _configuration["MakeCom:CallbackSecret"];
-            var isDevelopment = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
-            if (!string.IsNullOrEmpty(expectedSecret) || !isDevelopment)
-            {
-                var providedSecret = Request.Headers["x-make-secret"].FirstOrDefault();
-                if (string.IsNullOrEmpty(providedSecret) || providedSecret != expectedSecret)
-                    return Unauthorized(new { success = false, message = "Missing or invalid callback secret." });
-            }
+            if (!IsValidMakeSecret(out var authError)) return authError!;
 
             try
             {
@@ -204,6 +246,58 @@ namespace VietTien.API.Controllers
             {
                 return BadRequest(new { message = ex.Message });
             }
+        }
+
+        // L3-MKT-11 (hướng Make.com — Business Portfolio của người vận hành bị Facebook cấm chia sẻ
+        // App nên không tự gọi Graph API trực tiếp được): Make.com giữ kết nối Facebook riêng của nó
+        // (đã dùng để publish), nên để Make.com tự tra insights rồi gửi kết quả về đây thay vì backend
+        // tự gọi Facebook. 2 endpoint dưới cùng cơ chế xác thực x-make-secret với webhook-callback.
+
+        [HttpGet("for-metrics-sync")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetPostsForMetricsSync()
+        {
+            if (!IsValidMakeSecret(out var authError)) return authError!;
+
+            var result = await _marketingPostService.GetPostsForMetricsSyncAsync();
+            return Ok(result);
+        }
+
+        [HttpPost("{id}/metrics-callback")]
+        [AllowAnonymous]
+        public async Task<IActionResult> MetricsCallback(Guid id, [FromBody] MarketingMetricsCallbackDto dto)
+        {
+            if (!IsValidMakeSecret(out var authError)) return authError!;
+
+            try
+            {
+                var result = await _marketingPostService.UpdateMetricsFromCallbackAsync(id, dto);
+                return Ok(new { success = true, post = result });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // Chỉ Make.com (server-to-server) mới được gọi các callback trên — không có secret thì bất kỳ
+        // ai cũng giả mạo được kết quả đăng bài / số liệu cho post bất kỳ.
+        private bool IsValidMakeSecret(out IActionResult? errorResult)
+        {
+            var expectedSecret = _configuration["MakeCom:CallbackSecret"];
+            var isDevelopment = string.Equals(Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"), "Development", StringComparison.OrdinalIgnoreCase);
+            if (!string.IsNullOrEmpty(expectedSecret) || !isDevelopment)
+            {
+                var providedSecret = Request.Headers["x-make-secret"].FirstOrDefault();
+                if (string.IsNullOrEmpty(providedSecret) || providedSecret != expectedSecret)
+                {
+                    errorResult = Unauthorized(new { success = false, message = "Missing or invalid callback secret." });
+                    return false;
+                }
+            }
+
+            errorResult = null;
+            return true;
         }
     }
 }

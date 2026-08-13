@@ -61,6 +61,14 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpGet("low-stock-alerts")]
+        [Authorize(Roles = "WarehouseStaff,SalesManager,CEO,Admin")]
+        public async Task<IActionResult> GetLowStockAlerts()
+        {
+            var result = await _inventoryService.GetLowStockAlertsAsync();
+            return Ok(result);
+        }
+
         [HttpPost("shift-count")]
         [Authorize(Roles = "WarehouseStaff,Admin")]
         public async Task<IActionResult> SubmitShiftCount([FromBody] ShiftInventoryCountRequestDto request)

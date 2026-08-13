@@ -10,5 +10,6 @@ namespace VietTien.API.Services.Interfaces
         Task<InventoryReportDto> GetInventoryReportAsync(Guid? warehouseId, DateTime? fromDate, DateTime? toDate);
         Task<List<SlowMovingItemDto>> GetSlowMovingItemsAsync(Guid? warehouseId, int days);
         Task<ShiftInventoryCountResultDto> SubmitShiftInventoryCountAsync(ShiftInventoryCountRequestDto request, Guid staffId);
+        Task<List<LowStockAlertDto>> GetLowStockAlertsAsync();
     }
 }

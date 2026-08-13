@@ -96,9 +96,13 @@ namespace VietTien.Tests.Services
             var user = TestData.User(u => u.AvatarUrl = null);
             _userRepo.Setup(r => r.GetByIdAsync(user.Id)).ReturnsAsync(user);
 
+            // Magic byte PNG thật (89 50 4E 47 0D 0A 1A 0A) — L3-SEC-14: UploadAvatarAsync giờ đọc
+            // header nội dung file thật, không chỉ tin vào phần mở rộng tên file.
+            var pngBytes = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00 };
             var file = new Mock<IFormFile>();
             file.SetupGet(f => f.FileName).Returns("avatar.png");
             file.SetupGet(f => f.Length).Returns(1024);
+            file.Setup(f => f.OpenReadStream()).Returns(() => new MemoryStream(pngBytes));
             _cloudinary.Setup(c => c.UploadImageAsync(file.Object, "viettien/avatars"))
                        .ReturnsAsync("https://cdn/x.png");
 

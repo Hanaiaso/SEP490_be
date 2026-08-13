@@ -4,6 +4,21 @@ using System.ComponentModel.DataAnnotations;
 
 namespace VietTien.API.DTOs.Warehouse
 {
+    // L3-INV-06: cùng phép so sánh ngưỡng mà LowStockAlertJob dùng để bắn notification định kỳ,
+    // nhưng phơi ra dạng đọc trực tiếp (không side-effect, không cooldown) cho GET /api/inventory/low-stock-alerts.
+    public class LowStockAlertDto
+    {
+        public string ItemType { get; set; } = string.Empty; // "Product" | "Material"
+        public Guid ItemId { get; set; }
+        public string ItemName { get; set; } = string.Empty;
+        public string? ItemSku { get; set; }
+        public Guid? WarehouseId { get; set; }
+        public string? WarehouseName { get; set; }
+        public double AvailableQuantity { get; set; }
+        public double Threshold { get; set; }
+        public string SuggestedAction { get; set; } = string.Empty;
+    }
+
     public class InventoryItemDto
     {
         public Guid Id { get; set; }

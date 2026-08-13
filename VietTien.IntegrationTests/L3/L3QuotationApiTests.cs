@@ -145,23 +145,23 @@ namespace VietTien.IntegrationTests.L3
                 .Status.Should().NotBe(QuotationStatus.CustomerAccepted);
         }
 
-        /// QUO-05 | BVA | FT-02 BV-03; NAC-04; BR-007  ->  <b>FAIL — defect DEF-L3-003 (P1)</b>
+        /// QUO-05 | BVA | FT-02 BV-03; NAC-04; BR-007 (đã sửa lại luật nghiệp vụ ngày 2026-08-13)
         ///
-        /// Sau khi khách chấp nhận báo giá 110 triệu cho giỏ 1 đơn vị, khách sửa giỏ thành 2 đơn vị
-        /// (240 triệu) rồi đặt đơn. Theo BR-007 giỏ đã khác version đã duyệt nên phải bị chặn
-        /// (QUOTATION_VERSION_STALE) và bắt tạo version mới + duyệt lại.
+        /// Luật CŨ (tới trước 2026-08-13): mọi báo giá đã duyệt là 1 tổng tiền cố định, chỉ áp đúng
+        /// khi giỏ khớp CHÍNH XÁC từng dòng SKU+số lượng đã đàm phán — sửa số lượng dù 1 đơn vị cũng
+        /// bị chặn, bắt xin báo giá mới (DEF-L3-003 mô tả bug KHÔNG kiểm tra khớp giỏ trước khi có luật này).
         ///
-        /// THỰC TẾ: đơn được tạo với FinalPayment = 110.000.000đ cho 240.000.000đ hàng.
-        /// Nguyên nhân: <c>OrderService.CalculateDiscountAsync</c> (OrderService.cs:88-103) chỉ tìm
-        /// "báo giá đã chấp nhận BẤT KỲ còn hiệu lực của khách này" rồi lấy
-        /// <c>negotiatedDiscount = totalAmount - acceptedVersion.ProposedTotal</c>. Nó KHÔNG hề đối
-        /// chiếu giỏ hiện tại với giỏ/danh mục hàng của version đã duyệt — trường
-        /// <c>Quotation.CartId</c> có trong model nhưng không được dùng ở đây.
-        /// Hệ quả: khách chỉ cần được duyệt MỘT báo giá là mua được giỏ hàng lớn tuỳ ý ở mức giá đó.
+        /// Luật MỚI (theo yêu cầu người vận hành 2026-08-13): đơn giá/SKU đã đàm phán & duyệt trở thành
+        /// "bảng giá riêng" của ĐÚNG khách đó cho SKU đó, áp cho MỌI số lượng ở mọi đơn hàng >=ngưỡng
+        /// sau này (không giới hạn đúng số lượng đã đàm phán ban đầu). SKU nào khách chưa từng đàm phán
+        /// vẫn tính giá niêm yết bình thường — không chặn cả đơn.
         ///
-        /// Test này CỐ Ý đỏ: nó assert theo đúng SRS, và sẽ xanh khi code được sửa.
+        /// Test này xác nhận: khách đàm phán 110tr/đơn vị cho 1 đơn vị, sau đó mua 2 đơn vị cùng SKU
+        /// (không xin báo giá lại) -> đơn PHẢI được tạo (không bị chặn), và phải trả đúng
+        /// 110.000.000đ × 2 = 220.000.000đ — không phải 110tr (giá cũ, thiếu tiền) và không phải
+        /// 240tr giá niêm yết (bỏ qua đàm phán).
         [Fact]
-        public async Task L3_QUO_05_PlaceOrder_CartChangedAfterQuotationAccepted_MustBeRejected()
+        public async Task L3_QUO_05_PlaceOrder_QuantityChangedAfterQuotationAccepted_NegotiatedUnitPriceAppliedPerUnit()
         {
             var (client, _, profile, product) = await ArrangeB2BCustomerAsync();
             var (quotationId, _) = await ArrangeCeoApprovedQuotationAsync(client, product.Id);
@@ -169,20 +169,19 @@ namespace VietTien.IntegrationTests.L3
             (await client.PostAsJsonAsync($"/api/Quotation/{quotationId}/customer-decision",
                 new { IsAccepted = true })).IsSuccessStatusCode.Should().BeTrue();
 
-            // Khách sửa giỏ SAU khi báo giá đã chốt: 1 -> 2 đơn vị (120tr -> 240tr).
+            // Khách sửa giỏ SAU khi báo giá đã chốt: 1 -> 2 đơn vị cùng SKU (giá niêm yết 120tr/đơn vị).
             await SeedCartAsync(profile.Id, null, (product.Id, 2, 120_000_000m));
 
             var res = await client.PostAsJsonAsync("/api/orders/place-order",
                 new { PaymentMethod = PaymentMethod.COD });
 
-            if (!res.IsSuccessStatusCode) return; // hành vi đúng theo SRS
+            res.IsSuccessStatusCode.Should().BeTrue("giá/SKU đã đàm phán áp cho mọi số lượng, không còn bị chặn khi đổi số lượng");
 
             var orderId = (await ReadJsonAsync(res)).GetProperty("orderId").GetGuid();
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId));
 
-            order.FinalPayment.Should().NotBe(110_000_000m,
-                "DEF-L3-003: giỏ 240.000.000đ bị áp nguyên giá 110.000.000đ của version đã duyệt cho " +
-                "một giỏ KHÁC — hệ thống phải chặn bằng QUOTATION_VERSION_STALE và bắt duyệt lại");
+            order.FinalPayment.Should().Be(220_000_000m,
+                "110.000.000đ/đơn vị (giá đã đàm phán) × 2 đơn vị — không phải 110tr (thiếu tiền) hay 240tr (bỏ qua đàm phán)");
         }
 
         /// QUO-06 | Input-Domain-Error | FT-02 NAC-05; BR-020

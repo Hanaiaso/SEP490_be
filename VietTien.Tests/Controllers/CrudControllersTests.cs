@@ -230,10 +230,11 @@ namespace VietTien.Tests.Controllers
     public class MaterialControllerTests
     {
         private readonly Mock<IMaterialService> _service = new();
+        private readonly Mock<IGoodsIssueService> _goodsIssueService = new();
         private readonly MaterialController _sut;
 
         public MaterialControllerTests()
-            => _sut = new MaterialController(_service.Object).WithUser(Guid.NewGuid(), "WarehouseStaff");
+            => _sut = new MaterialController(_service.Object, _goodsIssueService.Object).WithUser(Guid.NewGuid(), "WarehouseStaff");
 
         [Fact]
         public async Task GetAll_PassesSearchTermThrough()
