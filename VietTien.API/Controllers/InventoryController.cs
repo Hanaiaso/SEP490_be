@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Warehouse;
+using VietTien.API.Exceptions;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Controllers
@@ -12,10 +13,12 @@ namespace VietTien.API.Controllers
     public class InventoryController : ControllerBase
     {
         private readonly IInventoryService _inventoryService;
+        private readonly IInventoryCountSessionService _inventoryCountSessionService;
 
-        public InventoryController(IInventoryService inventoryService)
+        public InventoryController(IInventoryService inventoryService, IInventoryCountSessionService inventoryCountSessionService)
         {
             _inventoryService = inventoryService;
+            _inventoryCountSessionService = inventoryCountSessionService;
         }
 
         private Guid GetUserId()
@@ -101,51 +104,48 @@ namespace VietTien.API.Controllers
             }
         }
 
-        // ─── INV-01: KIỂM KÊ KHO 2 BƯỚC (snapshot lý thuyết -> ghi số đếm thực tế) ────────────
-
-        [HttpPost("count-sessions")]
-        [Authorize(Roles = "WarehouseStaff,Admin")]
-        public async Task<IActionResult> CreateCountSession([FromBody] CreateInventoryCountSessionRequestDto dto)
-        {
-            try
-            {
-                var staffId = GetUserId();
-                var result = await _inventoryService.CreateCountSessionAsync(staffId, dto.WarehouseId);
-                return Ok(result);
-            }
-            catch (KeyNotFoundException ex)
-            {
-                return NotFound(new { message = ex.Message });
-            }
-        }
+        // ─── INV-01: alias tương thích ngược cho InventoryCountSessionService (DEF-L4-003) ─────
+        // Đã hợp nhất về 1 hệ thống kiểm kê duy nhất (POST/GET /api/inventory-count-sessions...,
+        // xem InventoryCountSessionController) — bỏ StockCountSession/StockCountLine riêng của
+        // Nhóm C. 2 action dưới đây CHỈ giữ lại route/DTO cũ để không phá vỡ hợp đồng API đã publish,
+        // logic thật ủy quyền hết cho IInventoryCountSessionService.
 
         [HttpPut("count-sessions/{id:guid}/theoretical")]
         [Authorize(Roles = "WarehouseStaff,Admin")]
         public async Task<IActionResult> LockTheoretical(Guid id)
         {
+            // Hệ thống hợp nhất chốt snapshot lý thuyết NGAY lúc mở phiên (OpenAsync) — không còn
+            // bước "khóa" tách rời nữa, nên gọi lại action này trên 1 phiên đã tồn tại luôn có
+            // nghĩa "sửa snapshot đã chốt" -> luôn 409 (đúng hành vi L3-INV-01 mong đợi).
             try
             {
-                var result = await _inventoryService.LockTheoreticalAsync(id);
-                return Ok(result);
+                await _inventoryCountSessionService.GetByIdAsync(id);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
             }
+
+            throw new CountSnapshotStateInvalidException(
+                "Phiên kiểm kê đã được khóa snapshot lý thuyết ngay khi mở, không thể khóa lại.");
         }
 
         [HttpPost("count-sessions/{id:guid}/lines")]
         [Authorize(Roles = "WarehouseStaff,Admin")]
         public async Task<IActionResult> RecordCountLine(Guid id, [FromBody] RecordCountLineRequestDto dto)
         {
+            if (dto.ActualQuantity < 0)
+                return BadRequest(new { code = "COUNT_LINE_INVALID", message = "Số lượng đếm thực tế phải lớn hơn hoặc bằng 0." });
+
             try
             {
-                var result = await _inventoryService.RecordCountLineAsync(id, dto);
+                var session = await _inventoryCountSessionService.GetByIdAsync(id);
+                var item = session.Items.FirstOrDefault(i => i.InventoryId == dto.InventoryId)
+                    ?? throw new KeyNotFoundException("Dòng tồn kho này không nằm trong phiên kiểm kê.");
+
+                var result = await _inventoryCountSessionService.RecordItemCountAsync(
+                    id, item.Id, new RecordCountItemRequest { PhysicalQuantity = dto.ActualQuantity });
                 return Ok(result);
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { code = "COUNT_LINE_INVALID", message = ex.Message });
             }
             catch (KeyNotFoundException ex)
             {

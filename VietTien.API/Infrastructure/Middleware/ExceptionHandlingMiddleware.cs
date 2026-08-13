@@ -98,6 +98,9 @@ namespace VietTien.API.Infrastructure.Middleware
                 case CountSnapshotStateInvalidException countStateEx:
                     return (StatusCodes.Status409Conflict, new { code = "COUNT_SNAPSHOT_OR_ADJUSTMENT_STATE_INVALID", message = countStateEx.Message });
 
+                case QuotationVersionStaleException quoStaleEx:
+                    return (StatusCodes.Status409Conflict, new { code = "QUOTATION_VERSION_STALE", message = quoStaleEx.Message });
+
                 case MediaTypeUnsupportedException mediaTypeEx:
                     return (StatusCodes.Status415UnsupportedMediaType, new { code = "MEDIA_TYPE_UNSUPPORTED", message = mediaTypeEx.Message });
 

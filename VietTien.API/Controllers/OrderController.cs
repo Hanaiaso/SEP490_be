@@ -42,6 +42,11 @@ namespace VietTien.API.Controllers
                 var preview = await _orderService.GetCheckoutSummaryAsync(userId);
                 return Ok(preview);
             }
+            catch (QuotationVersionStaleException ex)
+            {
+                // 409: FE dựa vào code này để yêu cầu khách tạo lại báo giá thay vì báo lỗi chung (NAC-04)
+                return Conflict(new { code = "QUOTATION_VERSION_STALE", message = ex.Message });
+            }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
@@ -67,6 +72,11 @@ namespace VietTien.API.Controllers
             {
                 // 409: FE dựa vào code này để mở modal xác thực OTP thay vì báo lỗi chung
                 return Conflict(new { code = "PHONE_OTP_REQUIRED", message = ex.Message });
+            }
+            catch (QuotationVersionStaleException ex)
+            {
+                // 409: FE dựa vào code này để yêu cầu khách tạo lại báo giá thay vì báo lỗi chung (NAC-04)
+                return Conflict(new { code = "QUOTATION_VERSION_STALE", message = ex.Message });
             }
             catch (KeyNotFoundException ex)
             {
