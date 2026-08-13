@@ -62,8 +62,11 @@ namespace VietTien.API.Data
         public DbSet<QuarantineLog> QuarantineLogs => Set<QuarantineLog>();
         public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
         public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
-        public DbSet<InventoryCountSession> InventoryCountSessions => Set<InventoryCountSession>();
-        public DbSet<InventoryCountSessionItem> InventoryCountSessionItems => Set<InventoryCountSessionItem>();
+        // Đặt tên bảng lệch với tên class (InventoryCountingSessions, không phải InventoryCountSessions):
+        // production đã có sẵn 1 bảng "InventoryCountSessions" từ migration khác của đồng đội chưa
+        // commit vào git (chạy thẳng vào DB), tránh trùng tên gây lỗi migration khi deploy.
+        public DbSet<InventoryCountSession> InventoryCountingSessions => Set<InventoryCountSession>();
+        public DbSet<InventoryCountSessionItem> InventoryCountingSessionItems => Set<InventoryCountSessionItem>();
 
         // UC-34: Sales Manager xử lý xung đột lịch xe/ca khi lập lịch giao hàng
         public DbSet<DeliveryScheduleConflict> DeliveryScheduleConflicts => Set<DeliveryScheduleConflict>();

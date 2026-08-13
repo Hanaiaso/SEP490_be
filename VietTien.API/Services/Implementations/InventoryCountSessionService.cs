@@ -71,7 +71,7 @@ namespace VietTien.API.Services.Implementations
 
         private IQueryable<InventoryCountSession> BaseQuery()
         {
-            return _context.InventoryCountSessions
+            return _context.InventoryCountingSessions
                 .Include(s => s.Warehouse)
                 .Include(s => s.OpenedByUser)
                 .Include(s => s.ClosedByUser)
@@ -123,7 +123,7 @@ namespace VietTien.API.Services.Implementations
                 throw new UnauthorizedAccessException("Bạn không có quyền mở phiên kiểm kê cho kho này.");
             }
 
-            var hasOpenSession = await _context.InventoryCountSessions
+            var hasOpenSession = await _context.InventoryCountingSessions
                 .AnyAsync(s => s.WarehouseId == warehouse.Id && s.Status == InventoryCountSessionStatus.Open);
             if (hasOpenSession)
             {
@@ -155,7 +155,7 @@ namespace VietTien.API.Services.Implementations
                 }).ToList()
             };
 
-            _context.InventoryCountSessions.Add(session);
+            _context.InventoryCountingSessions.Add(session);
             await _context.SaveChangesAsync();
 
             return await GetByIdAsync(session.Id);
@@ -163,7 +163,7 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<InventoryCountSessionDto> RecordItemCountAsync(Guid sessionId, Guid itemId, RecordCountItemRequest request)
         {
-            var session = await _context.InventoryCountSessions
+            var session = await _context.InventoryCountingSessions
                 .Include(s => s.Items)
                 .FirstOrDefaultAsync(s => s.Id == sessionId)
                 ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");
@@ -194,7 +194,7 @@ namespace VietTien.API.Services.Implementations
         {
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
-            var session = await _context.InventoryCountSessions
+            var session = await _context.InventoryCountingSessions
                 .Include(s => s.Items).ThenInclude(i => i.Inventory)
                 .FirstOrDefaultAsync(s => s.Id == sessionId)
                 ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");

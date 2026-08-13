@@ -6,13 +6,13 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace VietTien.API.Migrations
 {
     /// <inheritdoc />
-    public partial class AddInventoryCountSessions : Migration
+    public partial class AddInventoryCountingSessions : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
-                name: "InventoryCountSessions",
+                name: "InventoryCountingSessions",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false, defaultValueSql: "NEWSEQUENTIALID()"),
@@ -26,21 +26,21 @@ namespace VietTien.API.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_InventoryCountSessions", x => x.Id);
+                    table.PrimaryKey("PK_InventoryCountingSessions", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_InventoryCountSessions_Users_ClosedByUserId",
+                        name: "FK_InventoryCountingSessions_Users_ClosedByUserId",
                         column: x => x.ClosedByUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_InventoryCountSessions_Users_OpenedByUserId",
+                        name: "FK_InventoryCountingSessions_Users_OpenedByUserId",
                         column: x => x.OpenedByUserId,
                         principalTable: "Users",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_InventoryCountSessions_Warehouses_WarehouseId",
+                        name: "FK_InventoryCountingSessions_Warehouses_WarehouseId",
                         column: x => x.WarehouseId,
                         principalTable: "Warehouses",
                         principalColumn: "Id",
@@ -48,7 +48,7 @@ namespace VietTien.API.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "InventoryCountSessionItems",
+                name: "InventoryCountingSessionItems",
                 columns: table => new
                 {
                     Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false, defaultValueSql: "NEWSEQUENTIALID()"),
@@ -62,21 +62,21 @@ namespace VietTien.API.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_InventoryCountSessionItems", x => x.Id);
+                    table.PrimaryKey("PK_InventoryCountingSessionItems", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_InventoryCountSessionItems_Inventories_InventoryId",
+                        name: "FK_InventoryCountingSessionItems_Inventories_InventoryId",
                         column: x => x.InventoryId,
                         principalTable: "Inventories",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
-                        name: "FK_InventoryCountSessionItems_InventoryCountSessions_SessionId",
+                        name: "FK_InventoryCountingSessionItems_InventoryCountingSessions_SessionId",
                         column: x => x.SessionId,
-                        principalTable: "InventoryCountSessions",
+                        principalTable: "InventoryCountingSessions",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_InventoryCountSessionItems_StockAdjustments_StockAdjustmentId",
+                        name: "FK_InventoryCountingSessionItems_StockAdjustments_StockAdjustmentId",
                         column: x => x.StockAdjustmentId,
                         principalTable: "StockAdjustments",
                         principalColumn: "Id",
@@ -94,33 +94,33 @@ namespace VietTien.API.Migrations
                 values: new object[] { new Guid("a0000001-0001-4001-a001-000000000013"), "system-seed", null, "Khởi tạo giá trị mặc định theo business.md §7", "INVENTORY_COUNT_VARIANCE_THRESHOLD", new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), new DateTime(2025, 1, 1, 0, 0, 0, 0, DateTimeKind.Utc), "5" });
 
             migrationBuilder.CreateIndex(
-                name: "IX_InventoryCountSessionItems_InventoryId",
-                table: "InventoryCountSessionItems",
+                name: "IX_InventoryCountingSessionItems_InventoryId",
+                table: "InventoryCountingSessionItems",
                 column: "InventoryId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_InventoryCountSessionItems_SessionId",
-                table: "InventoryCountSessionItems",
+                name: "IX_InventoryCountingSessionItems_SessionId",
+                table: "InventoryCountingSessionItems",
                 column: "SessionId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_InventoryCountSessionItems_StockAdjustmentId",
-                table: "InventoryCountSessionItems",
+                name: "IX_InventoryCountingSessionItems_StockAdjustmentId",
+                table: "InventoryCountingSessionItems",
                 column: "StockAdjustmentId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_InventoryCountSessions_ClosedByUserId",
-                table: "InventoryCountSessions",
+                name: "IX_InventoryCountingSessions_ClosedByUserId",
+                table: "InventoryCountingSessions",
                 column: "ClosedByUserId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_InventoryCountSessions_OpenedByUserId",
-                table: "InventoryCountSessions",
+                name: "IX_InventoryCountingSessions_OpenedByUserId",
+                table: "InventoryCountingSessions",
                 column: "OpenedByUserId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_InventoryCountSessions_WarehouseId",
-                table: "InventoryCountSessions",
+                name: "IX_InventoryCountingSessions_WarehouseId",
+                table: "InventoryCountingSessions",
                 column: "WarehouseId");
         }
 
@@ -128,10 +128,10 @@ namespace VietTien.API.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropTable(
-                name: "InventoryCountSessionItems");
+                name: "InventoryCountingSessionItems");
 
             migrationBuilder.DropTable(
-                name: "InventoryCountSessions");
+                name: "InventoryCountingSessions");
 
             migrationBuilder.DeleteData(
                 table: "SystemConfigVersions",

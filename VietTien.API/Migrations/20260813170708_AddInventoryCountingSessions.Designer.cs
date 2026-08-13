@@ -12,8 +12,8 @@ using VietTien.API.Data;
 namespace VietTien.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260813161858_AddInventoryCountSessions")]
-    partial class AddInventoryCountSessions
+    [Migration("20260813170708_AddInventoryCountingSessions")]
+    partial class AddInventoryCountingSessions
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -1205,7 +1205,7 @@ namespace VietTien.API.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("InventoryCountSessions");
+                    b.ToTable("InventoryCountingSessions");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.InventoryCountSessionItem", b =>
@@ -1245,7 +1245,7 @@ namespace VietTien.API.Migrations
 
                     b.HasIndex("StockAdjustmentId");
 
-                    b.ToTable("InventoryCountSessionItems");
+                    b.ToTable("InventoryCountingSessionItems");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.JobRun", b =>

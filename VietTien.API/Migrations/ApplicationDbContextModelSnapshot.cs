@@ -1202,7 +1202,7 @@ namespace VietTien.API.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("InventoryCountSessions");
+                    b.ToTable("InventoryCountingSessions");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.InventoryCountSessionItem", b =>
@@ -1242,7 +1242,7 @@ namespace VietTien.API.Migrations
 
                     b.HasIndex("StockAdjustmentId");
 
-                    b.ToTable("InventoryCountSessionItems");
+                    b.ToTable("InventoryCountingSessionItems");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.JobRun", b =>
