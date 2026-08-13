@@ -79,6 +79,7 @@ builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IGoodsIssueService, GoodsIssueService>();
 builder.Services.AddScoped<IMaterialService, MaterialService>();
 builder.Services.AddScoped<IStockAdjustmentService, StockAdjustmentService>(); // P0-1
+builder.Services.AddScoped<IInventoryCountSessionService, InventoryCountSessionService>(); // DEF-L4-003
 
 // AI Marketing Studio & Make.com Webhook
 builder.Services.AddHttpClient<IMakeWebhookService, MakeWebhookService>();

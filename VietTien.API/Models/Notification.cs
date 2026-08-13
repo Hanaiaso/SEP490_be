@@ -59,6 +59,7 @@ namespace VietTien.API.Models
         SYS_35_StockAdjustmentDecisionResult,
         SYS_36_OrderUnblockedForRedelivery,
         SYS_37_DebtSettled,
-        SYS_38_SessionRevoked
+        SYS_38_SessionRevoked,
+        SYS_39_InventoryCountSessionClosed
     }
 }
