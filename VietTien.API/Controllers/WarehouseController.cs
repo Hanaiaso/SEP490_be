@@ -32,6 +32,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet]
+        [Authorize(Roles = "WarehouseStaff,SalesStaff,CEO,Admin")]
         public async Task<ActionResult<List<WarehouseOrderListDto>>> GetOrders([FromQuery] string tabType, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
             try
@@ -49,6 +50,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet("{orderId}/detail")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<ActionResult<WarehouseOrderDetailDto>> GetOrderDetail(Guid orderId)
         {
             try
@@ -113,6 +115,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet("pick-tasks")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> GetPickTasks([FromQuery] string tabType = "InProgress", [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
             try
@@ -130,6 +133,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet("pick-tasks/{pickTaskId}/detail")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> GetPickTaskDetail(Guid pickTaskId)
         {
             try

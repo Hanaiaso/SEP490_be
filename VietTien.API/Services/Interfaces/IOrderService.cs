@@ -50,6 +50,7 @@ namespace VietTien.API.Services.Interfaces
         // ─── LUỒNG 5: Hủy đơn PAID (CR-06) ────────────────────────────────────
         Task RequestCancelPaidOrderAsync(Guid orderId, Guid requestedByUserId, string reason);
         Task<ReplacementOrderResponseDto> ApproveCancelAndCreateReplacementAsync(Guid originalOrderId, Guid managerId, CreateReplacementOrderDto dto);
+        Task<PaymentReallocationResponseDto> CreatePaymentReallocationAsync(Guid callerUserId, CreatePaymentReallocationRequestDto request);
 
         // ─── P2-6: Sales Manager xử lý đơn bị khóa & công nợ COD (UC-35) ──────
         Task<List<BlockedOrderDto>> GetBlockedOrdersAsync();

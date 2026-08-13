@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Http;
 using VietTien.API.DTOs.Marketing;
 
 namespace VietTien.API.Services.Interfaces
@@ -14,5 +15,9 @@ namespace VietTien.API.Services.Interfaces
         Task<MarketingPostDto> SubmitPostAsync(Guid id, Guid userId, string userRole);
         Task<MarketingPostDto> MakeDecisionAsync(Guid id, MarketingPostDecisionDto dto, Guid managerId);
         Task<MarketingPostDto> HandleMakeWebhookCallbackAsync(Guid id, MakeWebhookCallbackDto dto);
+        Task<MarketingPostDto> UploadMediaAsync(Guid id, IFormFile file, Guid userId, string userRole);
+        Task<MarketingPostMetricsDto> GetMetricsAsync(Guid id);
+        Task<List<MarketingPostForSyncDto>> GetPostsForMetricsSyncAsync();
+        Task<MarketingPostDto> UpdateMetricsFromCallbackAsync(Guid id, MarketingMetricsCallbackDto dto);
     }
 }

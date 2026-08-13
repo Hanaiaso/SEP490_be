@@ -54,6 +54,9 @@ namespace VietTien.API.Models
         public int CommentCount { get; set; }
         public int ShareCount { get; set; }
 
+        // L3-MKT-11: thời điểm Make.com đồng bộ 4 field trên gần nhất (POST .../metrics-callback).
+        public DateTime? LastMetricsSyncedAt { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? UpdatedAt { get; set; }
 

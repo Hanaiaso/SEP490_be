@@ -152,7 +152,8 @@ namespace VietTien.Tests.Services
 
             await _sut.CreateVersionAsync(q.Id, s1, new CreateQuotationVersionRequest
             {
-                ProposedTotal = 110_000_000m,
+                // ProposedTotal phải khớp CHÍNH XÁC Sum(ProposedUnitPrice * Quantity) — qty=3 * 36.666.667đ.
+                ProposedTotal = 110_000_001m,
                 Items = new List<QuotationVersionItemRequest>
                 {
                     new() { ProductId = productId, ProposedUnitPrice = 36_666_667m }

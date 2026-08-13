@@ -84,6 +84,14 @@ namespace VietTien.API.Services.Implementations
             if (!AllowedExtensions.Contains(extension))
                 throw new ArgumentException("File phải có định dạng JPG, PNG hoặc WEBP.");
 
+            // L3-SEC-14: đuôi file do chính người gửi đặt, không đáng tin — đọc magic byte thật của
+            // nội dung để chặn file PE/EXE (hay bất kỳ định dạng nào khác) đổi đuôi thành .png/.jpg.
+            await using (var contentStream = file.OpenReadStream())
+            {
+                if (!await FileSignatureValidator.IsAllowedImageAsync(contentStream))
+                    throw new ArgumentException("Nội dung file không đúng định dạng ảnh JPG, PNG hoặc WEBP.");
+            }
+
             // Xóa avatar cũ trên Cloudinary nếu có
             if (!string.IsNullOrEmpty(user.AvatarUrl))
             {

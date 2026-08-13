@@ -76,6 +76,16 @@ namespace VietTien.API.Infrastructure.Middleware
                     // Giữ đúng hành vi hiện tại của DeliveryController cho exception này.
                     return (StatusCodes.Status409Conflict, new { code = "SCHEDULE_CONFLICT", conflictId = conflictEx.ConflictId, message = conflictEx.Message });
 
+                case ReallocationValueConflictException reallocEx:
+                    // Giữ đúng hành vi hiện tại của OrderController cho exception này.
+                    return (StatusCodes.Status409Conflict, new { code = "REALLOCATION_VALUE_CONFLICT", message = reallocEx.Message });
+
+                case MediaTypeUnsupportedException mediaTypeEx:
+                    return (StatusCodes.Status415UnsupportedMediaType, new { code = "MEDIA_TYPE_UNSUPPORTED", message = mediaTypeEx.Message });
+
+                case MediaTooLargeException mediaSizeEx:
+                    return (StatusCodes.Status413PayloadTooLarge, new { code = "MEDIA_TOO_LARGE", message = mediaSizeEx.Message });
+
                 case KeyNotFoundException notFoundEx:
                     return (StatusCodes.Status404NotFound, new { message = Redact(notFoundEx) });
 
