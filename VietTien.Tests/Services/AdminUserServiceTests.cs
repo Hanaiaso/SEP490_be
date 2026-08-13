@@ -89,6 +89,27 @@ namespace VietTien.Tests.Services
             _db.Users.Count(u => u.Email == "sales01@viettien.com").Should().Be(1);
         }
 
+        // L1-ADM-02b | BC-TRUE | SĐT trùng nhưng request gửi kèm khoảng trắng thừa (" 0911222333")
+        // -> vẫn phải bị từ chối (so khớp trên giá trị đã trim), không được lọt qua rồi vỡ unique
+        // index lúc SaveChanges (IX_Users_PhoneNumber) như DEF vừa sửa ở AddressService.
+        [Fact]
+        public async Task L1_ADM_02b_CreateStaff_DuplicatePhoneWithWhitespace_IsRejected()
+        {
+            SeedStaff(mutate: u => u.PhoneNumber = "0911222333");
+
+            var act = () => _sut.CreateStaffAsync(new CreateStaffUserRequest
+            {
+                FullName = "Người trùng SĐT",
+                Email = "sales02@viettien.com",
+                PhoneNumber = " 0911222333 ",
+                Password = "P@ssw0rd",
+                Role = "SalesStaff"
+            }, ActorId, ActorEmail, ActorIp);
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            _db.Users.Count(u => u.PhoneNumber == "0911222333").Should().Be(1);
+        }
+
         // L1-ADM-03 | EP-Valid | Đổi vai trò -> ghi audit before/after và buộc đăng nhập lại
         [Fact]
         public async Task L1_ADM_03_ChangeRole_AuditsBeforeAfter()
