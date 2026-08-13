@@ -337,11 +337,12 @@ namespace VietTien.Tests.Controllers
     public class InventoryControllerTests
     {
         private readonly Mock<IInventoryService> _service = new();
+        private readonly Mock<IInventoryCountSessionService> _countSessionService = new();
         private readonly InventoryController _sut;
         private readonly Guid _staffId = Guid.NewGuid();
 
         public InventoryControllerTests()
-            => _sut = new InventoryController(_service.Object).WithUser(_staffId, "WarehouseStaff");
+            => _sut = new InventoryController(_service.Object, _countSessionService.Object).WithUser(_staffId, "WarehouseStaff");
 
         [Fact]
         public async Task GetInventoryReport_PassesAllFiltersThrough()

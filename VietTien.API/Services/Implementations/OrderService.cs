@@ -95,41 +95,41 @@ namespace VietTien.API.Services.Implementations
 
             if (totalAmount >= quotationMinValue)
             {
-                // GH-13/BR-026 (điều chỉnh theo yêu cầu 2026-08-13): đơn giá đã đàm phán & được duyệt cho
-                // MỘT SKU trở thành đơn giá riêng của khách đó cho SKU này ở MỌI đơn hàng >=ngưỡng sau này,
-                // không phụ thuộc số lượng đã đàm phán ban đầu (bảng giá riêng theo khách, không phải
-                // "chốt 1 lần cho đúng 1 giỏ" như trước 2026-08-13). Chỉ áp cho ĐÚNG khách đã đàm phán —
-                // không dùng cho khách khác dù cùng SKU. SKU nào khách CHƯA từng đàm phán vẫn giữ giá
-                // niêm yết (không giảm giá), không chặn cả đơn chỉ vì có SKU chưa đàm phán.
-                var negotiatedItems = await _context.QuotationVersionItems
-                    .Where(vi => vi.QuotationVersion.Quotation.CustomerProfileId == customerProfileId
-                        && vi.QuotationVersion.Quotation.Status == QuotationStatus.CustomerAccepted
-                        && vi.QuotationVersion.Id == vi.QuotationVersion.Quotation.AcceptedVersionId
-                        && (vi.QuotationVersion.Quotation.ValidUntil == null || vi.QuotationVersion.Quotation.ValidUntil >= DateTime.UtcNow))
-                    .OrderByDescending(vi => vi.QuotationVersion.Quotation.RequestDate)
-                    .ToListAsync();
+                // BR-007 (Quotation Version Immutability) + SRS FT-02 AC-05/NAC-04: báo giá đã duyệt bị
+                // khóa CỨNG vào đúng nội dung giỏ (SKU + số lượng) tại thời điểm khách chấp nhận version
+                // — không phải bảng giá riêng dùng lại cho giỏ khác/số lượng khác. Lệch bất kỳ điều kiện
+                // ảnh hưởng giá nào -> version cũ hết hiệu lực ngay, phải tạo version mới + duyệt lại từ đầu
+                // (NAC-04: HTTP 409 QUOTATION_VERSION_STALE).
+                //
+                // (Có 1 giai đoạn ngắn code đổi sang "giá đàm phán áp dụng cho mọi giỏ sau này" — đã revert
+                // vì thay đổi đó chưa từng qua Change Log/RTW chính thức và đi ngược NAC-04/AC-05/BR-007
+                // đã Approved trong SRS.)
+                var acceptedVersion = await _context.QuotationVersions
+                    .Include(v => v.Items)
+                    .Where(v => v.Quotation.CustomerProfileId == customerProfileId
+                        && v.Quotation.Status == QuotationStatus.CustomerAccepted
+                        && v.Id == v.Quotation.AcceptedVersionId
+                        && (v.Quotation.ValidUntil == null || v.Quotation.ValidUntil >= DateTime.UtcNow))
+                    .OrderByDescending(v => v.Quotation.RequestDate)
+                    .FirstOrDefaultAsync();
 
-                if (negotiatedItems.Count == 0)
+                if (acceptedVersion == null)
                     throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
 
-                // Nhiều báo giá có thể từng đàm phán cùng 1 SKU ở các thời điểm khác nhau -> ưu tiên lần
-                // đàm phán GẦN NHẤT (đã OrderByDescending theo RequestDate ở trên, giữ bản ghi đầu tiên gặp).
-                var negotiatedUnitPriceByProduct = new Dictionary<Guid, decimal>();
-                foreach (var item in negotiatedItems)
-                {
-                    if (!negotiatedUnitPriceByProduct.ContainsKey(item.ProductId))
-                        negotiatedUnitPriceByProduct[item.ProductId] = item.ProposedUnitPrice;
-                }
+                var cartLineList = cartLines.ToList();
+                var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
 
-                decimal negotiatedTotal = 0m;
-                foreach (var line in cartLines)
-                {
-                    var unitPrice = negotiatedUnitPriceByProduct.TryGetValue(line.ProductId, out var negotiatedUnitPrice)
-                        ? negotiatedUnitPrice
-                        : line.UnitPrice; // SKU chưa từng đàm phán -> giữ giá niêm yết
-                    negotiatedTotal += unitPrice * line.Quantity;
-                }
+                // Khớp tuyệt đối: đúng số dòng, đúng từng ProductId, đúng từng Quantity — không thừa,
+                // không thiếu, không lệch số lượng so với đúng nội dung đã được duyệt.
+                var isExactMatch = cartLineList.Count == negotiatedByProduct.Count
+                    && cartLineList.All(line =>
+                        negotiatedByProduct.TryGetValue(line.ProductId, out var item) && item.Quantity == line.Quantity);
 
+                if (!isExactMatch)
+                    throw new QuotationVersionStaleException(
+                        "Giỏ hàng đã thay đổi so với báo giá đã duyệt (SKU/số lượng khác). Vui lòng tạo báo giá mới và chờ duyệt lại.");
+
+                var negotiatedTotal = acceptedVersion.Items.Sum(i => i.ProposedUnitPrice * i.Quantity);
                 var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
                 var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
                 return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
