@@ -83,8 +83,17 @@ namespace VietTien.API.Services.Implementations
                 var user = await _unitOfWork.Users.GetByIdAsync(userId);
                 if (user != null && string.IsNullOrWhiteSpace(user.PhoneNumber))
                 {
-                    user.PhoneNumber = dto.Phone.Trim();
-                    _unitOfWork.Users.Update(user);
+                    var receiverPhone = dto.Phone.Trim();
+                    // SĐT người nhận trên địa chỉ KHÔNG có ràng buộc duy nhất (nhiều khách có thể
+                    // ghi cùng 1 SĐT lễ tân/người nhận hộ), nhưng User.PhoneNumber lại duy nhất
+                    // toàn hệ thống (dùng đăng nhập/OTP) — chỉ đồng bộ khi SĐT đó chưa thuộc về
+                    // tài khoản nào khác, tránh việc thêm địa chỉ (không liên quan đăng nhập) bị
+                    // lỗi 500 do đụng unique index IX_Users_PhoneNumber của một tài khoản khác.
+                    if (!await _unitOfWork.Users.PhoneExistsAsync(receiverPhone))
+                    {
+                        user.PhoneNumber = receiverPhone;
+                        _unitOfWork.Users.Update(user);
+                    }
                 }
             }
 
