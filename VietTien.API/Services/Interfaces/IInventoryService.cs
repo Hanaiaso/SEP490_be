@@ -13,8 +13,8 @@ namespace VietTien.API.Services.Interfaces
         Task<List<LowStockAlertDto>> GetLowStockAlertsAsync();
 
         // INV-01: kiểm kê kho 2 bước (snapshot lý thuyết -> ghi số đếm thực tế), tách biệt với shift-count
-        Task<InventoryCountSessionDto> CreateCountSessionAsync(Guid staffId, Guid warehouseId);
-        Task<InventoryCountSessionDto> LockTheoreticalAsync(Guid sessionId);
-        Task<InventoryCountSessionDto> RecordCountLineAsync(Guid sessionId, RecordCountLineRequestDto dto);
+        Task<StockCountSessionDto> CreateCountSessionAsync(Guid staffId, Guid warehouseId);
+        Task<StockCountSessionDto> LockTheoreticalAsync(Guid sessionId);
+        Task<StockCountSessionDto> RecordCountLineAsync(Guid sessionId, RecordCountLineRequestDto dto);
     }
 }

@@ -22,7 +22,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> GetGoodsIssues([FromQuery] string? type)
         {
             try
@@ -37,7 +37,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet("{id}")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> GetGoodsIssueById(Guid id)
         {
             try
@@ -110,7 +110,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPut("{id}/handover")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> UpdateHandoverInfo(Guid id, [FromBody] UpdateGoodsIssueHandoverDto dto)
         {
             try
@@ -137,7 +137,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/post")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> PostGoodsIssue(Guid id)
         {
             try
@@ -167,7 +167,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/reversal")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager")]
+        [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> CreateReversal(Guid id, [FromBody] CreateReversalRequestDto dto)
         {
             try

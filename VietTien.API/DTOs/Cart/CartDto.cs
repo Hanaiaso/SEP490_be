@@ -8,6 +8,9 @@ namespace VietTien.API.DTOs.Cart
         public List<CartItemDto> Items { get; set; } = new List<CartItemDto>();
         public int TotalItems { get; set; }
         public decimal TotalPrice { get; set; }
+        // BR-025: true nếu giỏ hàng giữ giá quá 24h — FE phải cảnh báo và chặn thanh toán
+        // cho tới khi khách bấm làm mới giá (xem CartService.GetCartAsync/RefreshCartPricesAsync).
+        public bool IsPriceExpired { get; set; }
     }
 
     public class CartItemDto

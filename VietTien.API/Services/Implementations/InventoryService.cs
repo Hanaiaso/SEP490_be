@@ -643,9 +643,9 @@ namespace VietTien.API.Services.Implementations
         // Khác với SubmitShiftInventoryCountAsync (ghi đè OnHandQuantity ngay lập tức), luồng này
         // KHÔNG đụng tới Inventory.OnHandQuantity ở bước ghi số đếm — chỉ lưu song song để đối chiếu.
 
-        private static InventoryCountSessionDto ToSessionDto(StockCountSession session)
+        private static StockCountSessionDto ToSessionDto(StockCountSession session)
         {
-            return new InventoryCountSessionDto
+            return new StockCountSessionDto
             {
                 Id = session.Id,
                 WarehouseId = session.WarehouseId,
@@ -674,7 +674,7 @@ namespace VietTien.API.Services.Implementations
             return session ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");
         }
 
-        public async Task<InventoryCountSessionDto> CreateCountSessionAsync(Guid staffId, Guid warehouseId)
+        public async Task<StockCountSessionDto> CreateCountSessionAsync(Guid staffId, Guid warehouseId)
         {
             var warehouseExists = await _context.Warehouses.AnyAsync(w => w.Id == warehouseId);
             if (!warehouseExists)
@@ -693,7 +693,7 @@ namespace VietTien.API.Services.Implementations
             return ToSessionDto(session);
         }
 
-        public async Task<InventoryCountSessionDto> LockTheoreticalAsync(Guid sessionId)
+        public async Task<StockCountSessionDto> LockTheoreticalAsync(Guid sessionId)
         {
             var session = await LoadSessionAsync(sessionId);
 
@@ -723,7 +723,7 @@ namespace VietTien.API.Services.Implementations
             return ToSessionDto(await LoadSessionAsync(session.Id));
         }
 
-        public async Task<InventoryCountSessionDto> RecordCountLineAsync(Guid sessionId, RecordCountLineRequestDto dto)
+        public async Task<StockCountSessionDto> RecordCountLineAsync(Guid sessionId, RecordCountLineRequestDto dto)
         {
             if (dto.ActualQuantity < 0)
                 throw new ArgumentException("Số lượng đếm thực tế phải lớn hơn hoặc bằng 0.");

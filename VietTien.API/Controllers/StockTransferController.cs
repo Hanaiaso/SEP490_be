@@ -30,7 +30,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> GetAll([FromQuery] string? status = null)
         {
             try
@@ -45,7 +45,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpGet("{id}")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> GetById(Guid id)
         {
             try
@@ -64,7 +64,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> Create([FromBody] CreateStockTransferDto dto)
         {
             var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -89,7 +89,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPut("{id}")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> Update(Guid id, [FromBody] UpdateStockTransferDto dto)
         {
             try
@@ -112,7 +112,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/dispatch")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> DispatchTransfer(Guid id)
         {
             try
@@ -135,7 +135,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/receive")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> ReceiveTransfer(Guid id, [FromForm] ReceiveStockTransferDto dto)
         {
             try
@@ -162,7 +162,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/cancel")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> CancelTransfer(Guid id)
         {
             try
@@ -185,7 +185,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/request-transport")]
-        [Authorize(Roles = "WarehouseStaff,WarehouseManager,CEO,Admin")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> RequestTransport(Guid id)
         {
             try

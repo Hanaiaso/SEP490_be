@@ -281,8 +281,7 @@ namespace VietTien.Tests.Services
         }
 
         // L1-ORD-09 | BC-TRUE | Giỏ hết hạn giữ giá (>24h từ Cart.UpdatedAt) -> chặn checkout, không tạo
-        // đơn (GH-08). PlaceOrderAsync nay check hạn giữ giá TRƯỚC khi gọi CartService.GetCartAsync —
-        // hàm đó tự làm mới giá + reset UpdatedAt ngay khi đọc, nên phải đọc Cart entity thô trước.
+        // đơn (GH-08/DEF-L4-007).
         [Fact]
         public async Task L1_ORD_09_PlaceOrder_PriceExpiredCart_Blocked()
         {

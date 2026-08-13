@@ -8,7 +8,7 @@ namespace VietTien.API.Controllers
     // Audit log chỉ hỗ trợ tìm kiếm (GET) và export — không có action Update/Delete nào được expose.
     [Route("api/admin/audit-logs")]
     [ApiController]
-    [Authorize(Roles = "Admin,CEO,WarehouseStaff,WarehouseManager")]
+    [Authorize(Roles = "Admin,CEO,WarehouseStaff")]
     public class AuditLogController : ControllerBase
     {
         private readonly IAuditLogService _auditLogService;

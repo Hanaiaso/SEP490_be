@@ -62,6 +62,11 @@ namespace VietTien.API.Data
         public DbSet<QuarantineLog> QuarantineLogs => Set<QuarantineLog>();
         public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
         public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
+        // Đặt tên bảng lệch với tên class (InventoryCountingSessions, không phải InventoryCountSessions):
+        // production đã có sẵn 1 bảng "InventoryCountSessions" từ migration khác của đồng đội chưa
+        // commit vào git (chạy thẳng vào DB), tránh trùng tên gây lỗi migration khi deploy.
+        public DbSet<InventoryCountSession> InventoryCountingSessions => Set<InventoryCountSession>();
+        public DbSet<InventoryCountSessionItem> InventoryCountingSessionItems => Set<InventoryCountSessionItem>();
 
         // UC-34: Sales Manager xử lý xung đột lịch xe/ca khi lập lịch giao hàng
         public DbSet<DeliveryScheduleConflict> DeliveryScheduleConflicts => Set<DeliveryScheduleConflict>();
@@ -1214,6 +1219,50 @@ namespace VietTien.API.Data
                 .HasConversion<string>()
                 .HasMaxLength(20);
 
+            // --- DEF-L4-003: Phiên kiểm kê tồn kho theo Warehouse ---
+            modelBuilder.Entity<InventoryCountSession>()
+                .HasOne(s => s.Warehouse)
+                .WithMany()
+                .HasForeignKey(s => s.WarehouseId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<InventoryCountSession>()
+                .HasOne(s => s.OpenedByUser)
+                .WithMany()
+                .HasForeignKey(s => s.OpenedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<InventoryCountSession>()
+                .HasOne(s => s.ClosedByUser)
+                .WithMany()
+                .HasForeignKey(s => s.ClosedByUserId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<InventoryCountSession>()
+                .Property(s => s.Status)
+                .HasConversion<string>()
+                .HasMaxLength(20);
+
+            modelBuilder.Entity<InventoryCountSessionItem>()
+                .HasOne(i => i.Session)
+                .WithMany(s => s.Items)
+                .HasForeignKey(i => i.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<InventoryCountSessionItem>()
+                .HasOne(i => i.Inventory)
+                .WithMany()
+                .HasForeignKey(i => i.InventoryId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<InventoryCountSessionItem>()
+                .HasOne(i => i.StockAdjustment)
+                .WithMany()
+                .HasForeignKey(i => i.StockAdjustmentId)
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // Seed Data: Materials (nguyên liệu thô cho WH-PE, phục vụ WF-17 xuất NVL cho sản xuất ngoài hệ thống)
             var matPeResinId = Guid.Parse("f0000005-0005-4005-a005-000000000001");
             var matPeFilmRawId = Guid.Parse("f0000005-0005-4005-a005-000000000002");
@@ -1300,6 +1349,7 @@ namespace VietTien.API.Data
                 ("LIST_PRICE_MAX_EXCLUSIVE", "10000000", SystemConfigValueType.Decimal, "VND", "Admin/CEO", "Ngưỡng áp dụng giá niêm yết (dưới ngưỡng này)", Guid.Parse("a0000001-0001-4001-a001-000000000010")),
                 ("MAX_SCHEDULED_MARKETING_POSTS", "30", SystemConfigValueType.Int, "Bài viết", "Admin", "Số bài viết marketing được lên lịch tối đa", Guid.Parse("a0000001-0001-4001-a001-000000000011")),
                 ("DELIVERY_FAILURE_MANAGER_THRESHOLD", "3", SystemConfigValueType.Int, "Lần thử giao", "Admin/Manager", "Số lần giao thất bại trước khi báo Manager", Guid.Parse("a0000001-0001-4001-a001-000000000012")),
+                ("INVENTORY_COUNT_VARIANCE_THRESHOLD", "5", SystemConfigValueType.Int, "Đơn vị", "Admin/CEO", "Chênh lệch tối đa (số lượng tuyệt đối) khi đóng phiên kiểm kê được áp dụng thẳng; vượt ngưỡng bắt buộc CEO duyệt", Guid.Parse("a0000001-0001-4001-a001-000000000013")),
             };
 
             modelBuilder.Entity<SystemConfig>().HasData(

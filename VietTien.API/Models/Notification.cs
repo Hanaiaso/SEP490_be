@@ -65,6 +65,9 @@ namespace VietTien.API.Models
         SYS_39_DeliveryTripAttemptEscalation,
 
         // Nhóm C: FUL-08 — đề xuất gộp pick nhiều đơn chờ Sales Manager duyệt
-        SYS_40_MultiPickRequestPendingApproval
+        SYS_40_MultiPickRequestPendingApproval,
+
+        // DEF-L4-003: đóng phiên kiểm kê (InventoryCountingSession bên main)
+        SYS_41_InventoryCountSessionClosed
     }
 }

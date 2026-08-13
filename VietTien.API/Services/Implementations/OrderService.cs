@@ -172,6 +172,7 @@ namespace VietTien.API.Services.Implementations
                 VatAmount = vatAmount,
                 FinalPayment = finalPayment,
                 RequiresPhoneOtp = await RequiresFirstOrderPhoneOtpAsync(profile),
+                IsPriceExpired = cart.IsPriceExpired,
                 Items = cart.Items
             };
         }
@@ -181,9 +182,9 @@ namespace VietTien.API.Services.Implementations
             var profile = await GetCustomerProfileAsync(userId);
             var cartEntity = await _unitOfWork.Carts.GetCartByCustomerIdAsync(profile.Id);
 
-            // GH-08/BR-025: phải kiểm tra hạn giữ giá 24h TRƯỚC khi gọi CartService.GetCartAsync — hàm
-            // đó tự làm mới giá + reset UpdatedAt ngay khi đọc giỏ (hành vi cố ý cho màn xem giỏ), nên
-            // nếu check SAU sẽ không bao giờ thấy hết hạn nữa (đã bị chính lệnh đọc này xoá dấu vết).
+            // GH-08/BR-025: chặn đặt hàng khi giỏ đã giữ giá quá 24h. GetCartAsync không còn tự làm mới
+            // giá/UpdatedAt khi đọc (xem CartService.GetCartAsync) — khách phải bấm làm mới giá tường
+            // minh (RefreshCartPricesAsync) trước, nên đọc cartEntity.UpdatedAt trực tiếp ở đây là đủ tin cậy.
             if (cartEntity != null && (DateTime.UtcNow - cartEntity.UpdatedAt).TotalHours > 24)
                 throw new Exception("Giá trong giỏ hàng đã hết hạn giữ (quá 24h). Vui lòng xem lại giỏ hàng để cập nhật giá mới trước khi đặt hàng.");
 

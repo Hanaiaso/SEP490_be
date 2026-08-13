@@ -44,6 +44,21 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPost("refresh-price")]
+        public async Task<ActionResult<CartDto>> RefreshCartPrices()
+        {
+            try
+            {
+                var userId = GetUserId();
+                var cart = await _cartService.RefreshCartPricesAsync(userId);
+                return Ok(cart);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("items")]
         public async Task<ActionResult<CartDto>> AddItemToCart([FromBody] AddToCartRequestDto request)
         {

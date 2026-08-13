@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VietTien.API.Data;
 
@@ -11,9 +12,11 @@ using VietTien.API.Data;
 namespace VietTien.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260813170708_AddInventoryCountingSessions")]
+    partial class AddInventoryCountingSessions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -531,54 +534,6 @@ namespace VietTien.API.Migrations
                         });
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.DeliveryAttempt", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<int>("AttemptNumber")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime>("AttemptedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("DeliveryTripId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("FailureReason")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<Guid>("OrderId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Outcome")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<string>("PhotoUrl")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<Guid>("RecordedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("SignatureUrl")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DeliveryTripId");
-
-                    b.HasIndex("RecordedByUserId");
-
-                    b.HasIndex("OrderId", "DeliveryTripId");
-
-                    b.ToTable("DeliveryAttempts");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.DeliveryScheduleConflict", b =>
                 {
                     b.Property<Guid>("Id")
@@ -631,50 +586,6 @@ namespace VietTien.API.Migrations
                     b.HasIndex("Status");
 
                     b.ToTable("DeliveryScheduleConflicts");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.DeliveryTrip", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<DateTime?>("CompletedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Shift")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime?>("StartedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime>("TripDate")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("VehicleId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("VehicleId", "Shift", "TripDate");
-
-                    b.ToTable("DeliveryTrips");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.DiscountTier", b =>
@@ -1562,50 +1473,6 @@ namespace VietTien.API.Migrations
                     b.ToTable("MonthlyPayrolls");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.MultiPickApproval", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<DateTime?>("DecidedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid?>("DecidedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("DecisionNote")
-                        .HasMaxLength(1000)
-                        .HasColumnType("nvarchar(1000)");
-
-                    b.Property<string>("OrderIds")
-                        .IsRequired()
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<DateTime>("RequestedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("RequestedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DecidedByUserId");
-
-                    b.HasIndex("RequestedByUserId");
-
-                    b.HasIndex("Status");
-
-                    b.ToTable("MultiPickApprovals");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.Notification", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1695,9 +1562,6 @@ namespace VietTien.API.Migrations
 
                     b.Property<int>("DeliveryStatus")
                         .HasColumnType("int");
-
-                    b.Property<Guid?>("DeliveryTripId")
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("DeliveryVehicleId")
                         .HasColumnType("int");
@@ -1800,8 +1664,6 @@ namespace VietTien.API.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerProfileId");
-
-                    b.HasIndex("DeliveryTripId");
 
                     b.HasIndex("ManualConfirmedByUserId");
 
@@ -3091,71 +2953,6 @@ namespace VietTien.API.Migrations
                     b.HasIndex("ProposedByUserId");
 
                     b.ToTable("StockAdjustments");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.StockCountLine", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<int?>("ActualQuantity")
-                        .HasColumnType("int");
-
-                    b.Property<DateTime?>("CountedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("InventoryId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("StockCountSessionId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<int>("TheoreticalQuantity")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InventoryId");
-
-                    b.HasIndex("StockCountSessionId", "InventoryId")
-                        .IsUnique();
-
-                    b.ToTable("StockCountLines");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.StockCountSession", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("CreatedByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("nvarchar(20)");
-
-                    b.Property<DateTime?>("TheoreticalLockedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<Guid>("WarehouseId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CreatedByUserId");
-
-                    b.HasIndex("WarehouseId", "Status");
-
-                    b.ToTable("StockCountSessions");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.StockTransaction", b =>
@@ -4531,52 +4328,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.DeliveryAttempt", b =>
-                {
-                    b.HasOne("VietTien.API.Models.DeliveryTrip", "DeliveryTrip")
-                        .WithMany("Attempts")
-                        .HasForeignKey("DeliveryTripId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.Order", "Order")
-                        .WithMany()
-                        .HasForeignKey("OrderId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.User", "RecordedByUser")
-                        .WithMany()
-                        .HasForeignKey("RecordedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("DeliveryTrip");
-
-                    b.Navigation("Order");
-
-                    b.Navigation("RecordedByUser");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.DeliveryTrip", b =>
-                {
-                    b.HasOne("VietTien.API.Models.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.Vehicle", "Vehicle")
-                        .WithMany()
-                        .HasForeignKey("VehicleId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("CreatedByUser");
-
-                    b.Navigation("Vehicle");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.EmployeeSalary", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "User")
@@ -4805,20 +4556,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("Product");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.MultiPickApproval", b =>
-                {
-                    b.HasOne("VietTien.API.Models.User", null)
-                        .WithMany()
-                        .HasForeignKey("DecidedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.HasOne("VietTien.API.Models.User", null)
-                        .WithMany()
-                        .HasForeignKey("RequestedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("VietTien.API.Models.Notification", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "RecipientUser")
@@ -4837,11 +4574,6 @@ namespace VietTien.API.Migrations
                         .HasForeignKey("CustomerProfileId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.DeliveryTrip", "DeliveryTrip")
-                        .WithMany("Orders")
-                        .HasForeignKey("DeliveryTripId")
-                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("VietTien.API.Models.User", "ManualConfirmedBy")
                         .WithMany()
@@ -4864,8 +4596,6 @@ namespace VietTien.API.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("CustomerProfile");
-
-                    b.Navigation("DeliveryTrip");
 
                     b.Navigation("ManualConfirmedBy");
 
@@ -5473,44 +5203,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("ProposedByUser");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.StockCountLine", b =>
-                {
-                    b.HasOne("VietTien.API.Models.Inventory", "Inventory")
-                        .WithMany()
-                        .HasForeignKey("InventoryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.StockCountSession", "StockCountSession")
-                        .WithMany("Lines")
-                        .HasForeignKey("StockCountSessionId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Inventory");
-
-                    b.Navigation("StockCountSession");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.StockCountSession", b =>
-                {
-                    b.HasOne("VietTien.API.Models.User", "CreatedByUser")
-                        .WithMany()
-                        .HasForeignKey("CreatedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.Warehouse", "Warehouse")
-                        .WithMany()
-                        .HasForeignKey("WarehouseId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("CreatedByUser");
-
-                    b.Navigation("Warehouse");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.StockTransaction", b =>
                 {
                     b.HasOne("VietTien.API.Models.User", "CreatedByUser")
@@ -5655,13 +5347,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("Orders");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.DeliveryTrip", b =>
-                {
-                    b.Navigation("Attempts");
-
-                    b.Navigation("Orders");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.GoodsIssue", b =>
                 {
                     b.Navigation("Items");
@@ -5751,11 +5436,6 @@ namespace VietTien.API.Migrations
             modelBuilder.Entity("VietTien.API.Models.SalesChangeRequest", b =>
                 {
                     b.Navigation("OrderDecisions");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.StockCountSession", b =>
-                {
-                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.StockTransfer", b =>

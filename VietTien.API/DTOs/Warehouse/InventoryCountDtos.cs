@@ -9,7 +9,7 @@ namespace VietTien.API.DTOs.Warehouse
         public Guid WarehouseId { get; set; }
     }
 
-    public class InventoryCountSessionDto
+    public class StockCountSessionDto
     {
         public Guid Id { get; set; }
         public Guid WarehouseId { get; set; }

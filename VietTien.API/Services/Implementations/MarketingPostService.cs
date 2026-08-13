@@ -53,7 +53,7 @@ namespace VietTien.API.Services.Implementations
             }
 
             // SalesStaff chỉ thấy bài do chính mình tạo (hoặc bài đang duyệt/lịch công khai)
-            if (role == "SalesStaff" || role == "SaleStaff")
+            if (role == "SalesStaff")
             {
                 query = query.Where(p => p.CreatedByUserId == userId);
             }
@@ -112,7 +112,7 @@ namespace VietTien.API.Services.Implementations
 
         private static readonly HashSet<string> MarketingManagementRoles = new(StringComparer.OrdinalIgnoreCase)
         {
-            "SalesManager", "SaleManager", "Admin"
+            "SalesManager", "Admin"
         };
 
         public async Task<MarketingPostDto> UpdatePostAsync(Guid id, UpdateMarketingPostDto dto, Guid userId, string userRole)
