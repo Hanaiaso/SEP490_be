@@ -183,7 +183,7 @@ namespace VietTien.API.Controllers
         }
 
         [HttpPost("{id}/media")]
-        [Authorize(Roles = "SalesStaff,SaleStaff,SalesManager,SaleManager,Admin")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<IActionResult> UploadMedia(Guid id, IFormFile? file)
         {
             if (file == null || file.Length == 0)
