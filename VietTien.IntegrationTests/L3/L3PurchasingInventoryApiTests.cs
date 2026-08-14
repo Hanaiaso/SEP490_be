@@ -377,7 +377,7 @@ namespace VietTien.IntegrationTests.L3
         // ── Block: Stock Count / Adjustment / Material Issue (FT-12) ──────────────────────────
 
         /// INV-01 | Input-Domain-Error | FT-12 NAC-01; BR-044  ->  nhóm C
-        /// Phiên kiểm kê (count-session) chưa được triển khai; chức năng gần nhất là shift-count.
+        /// Phiên kiểm kê (count-session) theo snapshot lý thuyết chưa được triển khai.
         [Fact]
         public async Task L3_INV_01_CountSession_EndpointNotImplemented()
         {
@@ -387,9 +387,6 @@ namespace VietTien.IntegrationTests.L3
                     $"/api/inventory/count-sessions/{Guid.NewGuid()}/theoretical", new { }))
                 .StatusCode.Should().Be(HttpStatusCode.NotFound,
                     "DEF-L3-005: phiên kiểm kê có snapshot lý thuyết chưa được triển khai");
-
-            (await warehouse.PostAsJsonAsync("/api/inventory/shift-count", new { }))
-                .StatusCode.Should().NotBe(HttpStatusCode.NotFound, "chức năng kiểm đếm theo ca phải tồn tại");
         }
 
         /// INV-02 | BVA | FT-12 BV-01; NAC-02

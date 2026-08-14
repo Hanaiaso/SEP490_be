@@ -94,7 +94,7 @@ namespace VietTien.Tests.Services
             var dto = await _sut.AddProductToWarehouseAsync(new AddInventoryRequest
             {
                 ProductId = p1.Id,
-                WarehouseLocationId = loc2.Id,
+                WarehouseId = w2.Id,
                 InitialQuantity = 20
             }, staff.Id);
 
@@ -111,15 +111,16 @@ namespace VietTien.Tests.Services
             _db.Users.Add(staff);
             var inv = TestData.SeedInventory(_db, p1.Id, 10);
 
+            var invWarehouseId = _db.WarehouseLocations.Single(l => l.Id == inv.WarehouseLocationId).WarehouseId;
             var act = () => _sut.AddProductToWarehouseAsync(new AddInventoryRequest
             {
                 ProductId = p1.Id,
-                WarehouseLocationId = inv.WarehouseLocationId,
+                WarehouseId = invWarehouseId,
                 InitialQuantity = 5
             }, staff.Id);
 
             await act.Should().ThrowAsync<Exception>()
-                .WithMessage("Mục này đã tồn tại ở vị trí lưu trữ này.*");
+                .WithMessage("Mục này đã tồn tại trong kho này.*");
             _db.Inventories.Count(i => i.ProductId == p1.Id).Should().Be(1);
         }
     }

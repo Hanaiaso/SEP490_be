@@ -88,6 +88,18 @@ namespace VietTien.API.Services.Implementations
                 }
             }
 
+            // Người dùng không còn nhập vị trí lưu trữ lúc tạo kho -> đảm bảo kho luôn có ít nhất 1
+            // vị trí "Normal" để các luồng nhập/thêm hàng sau này có chỗ gán tồn kho vào.
+            if (!warehouse.Locations.Any(l => l.Type == "Normal"))
+            {
+                warehouse.Locations.Add(new WarehouseLocation
+                {
+                    Id = Guid.Empty,
+                    Name = "Vị trí mặc định",
+                    Type = "Normal"
+                });
+            }
+
             _context.Warehouses.Add(warehouse);
             await _context.SaveChangesAsync();
 

@@ -58,7 +58,7 @@ namespace VietTien.API.DTOs.Warehouse
         public Guid? MaterialId { get; set; }
 
         [Required]
-        public Guid WarehouseLocationId { get; set; }
+        public Guid WarehouseId { get; set; }
 
         [Range(0, int.MaxValue, ErrorMessage = "Số lượng khởi tạo phải lớn hơn hoặc bằng 0")]
         public int InitialQuantity { get; set; }
@@ -116,44 +116,4 @@ namespace VietTien.API.DTOs.Warehouse
         public string Suggestion { get; set; } = string.Empty;
     }
 
-    public class ShiftInventoryCountRequestDto
-    {
-        [Required]
-        public Guid WarehouseId { get; set; }
-        public Guid? ShiftId { get; set; }
-
-        [Required]
-        public DateTime CountDate { get; set; }
-
-        [Required]
-        [MinLength(1, ErrorMessage = "Danh sách kiểm kê không được để trống.")]
-        public List<ShiftInventoryCountItemDto> Items { get; set; } = new List<ShiftInventoryCountItemDto>();
-    }
-
-    public class ShiftInventoryCountItemDto
-    {
-        [Required]
-        public Guid InventoryId { get; set; }
-
-        [Range(0, int.MaxValue, ErrorMessage = "Số lượng đếm thực tế phải lớn hơn hoặc bằng 0")]
-        public int ActualQuantity { get; set; }
-
-        [MaxLength(500)]
-        public string? Note { get; set; }
-    }
-
-    public class ShiftInventoryCountResultDto
-    {
-        public int TotalCounted { get; set; }
-        public int AdjustedCount { get; set; }
-        public List<ShiftAdjustedItemDto> AdjustedItems { get; set; } = new List<ShiftAdjustedItemDto>();
-    }
-
-    public class ShiftAdjustedItemDto
-    {
-        public Guid InventoryId { get; set; }
-        public string ItemName { get; set; } = string.Empty;
-        public int OldQuantity { get; set; }
-        public int NewQuantity { get; set; }
-    }
 }

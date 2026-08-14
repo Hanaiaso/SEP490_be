@@ -72,38 +72,6 @@ namespace VietTien.API.Controllers
             return Ok(result);
         }
 
-        [HttpPost("shift-count")]
-        [Authorize(Roles = "WarehouseStaff,Admin")]
-        public async Task<IActionResult> SubmitShiftCount([FromBody] ShiftInventoryCountRequestDto request)
-        {
-            try
-            {
-                var staffId = GetUserId();
-                var result = await _inventoryService.SubmitShiftInventoryCountAsync(request, staffId);
-                return Ok(result);
-            }
-            catch (ArgumentException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-            catch (KeyNotFoundException ex)
-            {
-                return NotFound(new { message = ex.Message });
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return Forbid();
-            }
-            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
-            {
-                return Conflict(new { message = "Dữ liệu tồn kho đã bị thay đổi bởi tác vụ khác trong lúc kiểm kê. Vui lòng tải lại và thử lại." });
-            }
-            catch (Exception ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-        }
-
         // ─── INV-01: alias tương thích ngược cho InventoryCountSessionService (DEF-L4-003) ─────
         // Đã hợp nhất về 1 hệ thống kiểm kê duy nhất (POST/GET /api/inventory-count-sessions...,
         // xem InventoryCountSessionController) — bỏ StockCountSession/StockCountLine riêng của

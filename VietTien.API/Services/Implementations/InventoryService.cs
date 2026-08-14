@@ -197,25 +197,41 @@ namespace VietTien.API.Services.Implementations
                 itemType = "Material";
             }
 
-            var location = await _context.WarehouseLocations.Include(l => l.Warehouse).FirstOrDefaultAsync(l => l.Id == request.WarehouseLocationId);
-            if (location == null) throw new KeyNotFoundException("Không tìm thấy vị trí lưu trữ.");
+            var warehouseExists = await _context.Warehouses.AnyAsync(w => w.Id == request.WarehouseId);
+            if (!warehouseExists) throw new KeyNotFoundException("Không tìm thấy kho.");
+
+            // Người dùng không còn chọn vị trí lưu trữ nữa -> tự lấy (hoặc tạo nếu chưa có) vị trí
+            // "Normal" mặc định của kho, cùng ý tưởng với GoodsReceiptService khi nhận hàng theo PO.
+            var location = await _context.WarehouseLocations
+                .FirstOrDefaultAsync(l => l.WarehouseId == request.WarehouseId && l.Type == "Normal");
+            if (location == null)
+            {
+                location = new WarehouseLocation
+                {
+                    Id = Guid.NewGuid(),
+                    WarehouseId = request.WarehouseId,
+                    Name = "Vị trí mặc định",
+                    Type = "Normal"
+                };
+                _context.WarehouseLocations.Add(location);
+            }
 
             // Check if inventory already exists
             Inventory? existingInventory;
             if (request.ProductId != null)
             {
                 existingInventory = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == request.ProductId && i.WarehouseLocationId == request.WarehouseLocationId);
+                    .FirstOrDefaultAsync(i => i.ProductId == request.ProductId && i.WarehouseLocationId == location.Id);
             }
             else
             {
                 existingInventory = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.MaterialId == request.MaterialId && i.WarehouseLocationId == request.WarehouseLocationId);
+                    .FirstOrDefaultAsync(i => i.MaterialId == request.MaterialId && i.WarehouseLocationId == location.Id);
             }
 
             if (existingInventory != null)
             {
-                throw new InvalidOperationException("Mục này đã tồn tại ở vị trí lưu trữ này. Vui lòng cập nhật số lượng thay vì thêm mới.");
+                throw new InvalidOperationException("Mục này đã tồn tại trong kho này. Vui lòng cập nhật số lượng thay vì thêm mới.");
             }
 
             if (request.InitialQuantity < 0) throw new Exception("Số lượng ban đầu không hợp lệ.");
@@ -225,7 +241,7 @@ namespace VietTien.API.Services.Implementations
                 Id = Guid.NewGuid(),
                 ProductId = request.ProductId,
                 MaterialId = request.MaterialId,
-                WarehouseLocationId = request.WarehouseLocationId,
+                WarehouseLocationId = location.Id,
                 OnHandQuantity = request.InitialQuantity,
                 ReservedQuantity = 0,
                 AllocatedQuantity = 0,
@@ -247,7 +263,7 @@ namespace VietTien.API.Services.Implementations
                 // Lưới an toàn cuối cho race check-then-insert: 2 request đồng thời cùng thêm 1 sản phẩm/
                 // nguyên liệu vào cùng 1 vị trí kho -> request thứ 2 vi phạm unique index (Inventories) thay
                 // vì tạo dòng trùng. Message giữ giống hệt case check ở trên để client xử lý nhất quán.
-                throw new InvalidOperationException("Mục này đã tồn tại ở vị trí lưu trữ này. Vui lòng cập nhật số lượng thay vì thêm mới.");
+                throw new InvalidOperationException("Mục này đã tồn tại trong kho này. Vui lòng cập nhật số lượng thay vì thêm mới.");
             }
 
             var staff = await _context.Users.FindAsync(staffId);
@@ -473,108 +489,6 @@ namespace VietTien.API.Services.Implementations
             if (d >= 30) return "Báo Marketing xây dựng chiến dịch";
             if (d >= 14) return "Giảm giá khuyến mãi";
             return "Theo dõi thêm";
-        }
-
-        public async Task<ShiftInventoryCountResultDto> SubmitShiftInventoryCountAsync(ShiftInventoryCountRequestDto request, Guid staffId)
-        {
-            if (request.Items == null || request.Items.Count == 0)
-                throw new ArgumentException("Danh sách kiểm kê không được để trống.");
-
-            if (request.Items.Select(i => i.InventoryId).Distinct().Count() != request.Items.Count)
-                throw new ArgumentException("Danh sách kiểm kê có mã tồn kho bị trùng lặp.");
-
-            // Cho phép trễ 1 ngày để bù lệch múi giờ giữa client/server, không cho kiểm kê cho ngày ở tương lai.
-            if (request.CountDate.Date > DateTime.UtcNow.AddDays(1).Date)
-                throw new ArgumentException("Ngày kiểm kê không được ở tương lai.");
-
-            var warehouseExists = await _context.Warehouses.AnyAsync(w => w.Id == request.WarehouseId);
-            if (!warehouseExists)
-                throw new KeyNotFoundException("Không tìm thấy kho đã chọn.");
-
-            var staff = await _context.Users.FindAsync(staffId);
-
-            var shiftLabel = "ca không xác định";
-            if (request.ShiftId.HasValue)
-            {
-                var shift = await _context.WarehouseShifts.FindAsync(request.ShiftId.Value);
-                if (shift != null)
-                    shiftLabel = $"{shift.Name} ({shift.StartTime:hh\\:mm}-{shift.EndTime:hh\\:mm})";
-            }
-
-            var inventoryIds = request.Items.Select(i => i.InventoryId).ToList();
-            var inventories = await _context.Inventories
-                .Include(i => i.Product)
-                .Include(i => i.Material)
-                .Include(i => i.WarehouseLocation)
-                .Where(i => inventoryIds.Contains(i.Id))
-                .ToListAsync();
-
-            var result = new ShiftInventoryCountResultDto { TotalCounted = request.Items.Count };
-
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
-            {
-                foreach (var itemReq in request.Items)
-                {
-                    var inv = inventories.FirstOrDefault(i => i.Id == itemReq.InventoryId);
-                    if (inv == null) continue; // dòng không tồn tại -> bỏ qua, không chặn cả phiên kiểm kê
-
-                    if (inv.WarehouseLocation.WarehouseId != request.WarehouseId)
-                        continue; // an toàn: bỏ qua dòng không thuộc kho đã chọn trong request
-
-                    if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
-                        staff.AssignedWarehouseId != inv.WarehouseLocation.WarehouseId)
-                    {
-                        throw new UnauthorizedAccessException("Bạn không có quyền kiểm kê tồn kho của kho này.");
-                    }
-
-                    var diff = itemReq.ActualQuantity - inv.OnHandQuantity;
-                    if (diff == 0) continue; // khớp tồn hệ thống -> không cần ghi nhận điều chỉnh
-
-                    var oldQuantity = inv.OnHandQuantity;
-                    inv.OnHandQuantity = itemReq.ActualQuantity;
-                    inv.LastUpdatedByUserId = staffId;
-                    inv.LastUpdatedAt = DateTime.UtcNow;
-
-                    var noteText = $"Kiểm kê {shiftLabel} ngày {request.CountDate:dd/MM/yyyy}";
-                    if (!string.IsNullOrWhiteSpace(itemReq.Note))
-                        noteText += $": {itemReq.Note.Trim()}";
-                    if (noteText.Length > 500)
-                        noteText = noteText.Substring(0, 500); // giới hạn theo cột Note (nvarchar(500))
-
-                    _context.StockTransactions.Add(new StockTransaction
-                    {
-                        InventoryId = inv.Id,
-                        ProductId = inv.ProductId,
-                        MaterialId = inv.MaterialId,
-                        WarehouseLocationId = inv.WarehouseLocationId,
-                        QuantityChange = diff,
-                        TransactionType = TransactionType.StockAdjustment,
-                        CreatedByUserId = staffId,
-                        CreatedAt = DateTime.UtcNow,
-                        Note = noteText
-                    });
-
-                    result.AdjustedItems.Add(new ShiftAdjustedItemDto
-                    {
-                        InventoryId = inv.Id,
-                        ItemName = inv.Product?.Name ?? inv.Material?.Name ?? "N/A",
-                        OldQuantity = oldQuantity,
-                        NewQuantity = itemReq.ActualQuantity
-                    });
-                }
-
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-            }
-            catch
-            {
-                await transaction.RollbackAsync();
-                throw;
-            }
-
-            result.AdjustedCount = result.AdjustedItems.Count;
-            return result;
         }
 
         // L3-INV-06: cùng phép so sánh ngưỡng với LowStockAlertJob (Inventory.ReorderThreshold cho
