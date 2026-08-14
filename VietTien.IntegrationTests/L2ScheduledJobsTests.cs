@@ -485,10 +485,14 @@ namespace VietTien.IntegrationTests
                 var productId = await db.Products.Select(p => p.Id).FirstAsync();
                 var creatorId = Guid.Parse("44444444-4444-4444-4444-444444444444"); // Sales Staff Test (seed cố định)
                 var now = DateTime.UtcNow;
+                // Trang thai dung la Scheduled, KHONG phai Approved: MarketingPostService.cs:222 dat
+                // Status = Scheduled khi Sales Manager duyet kem gio dang, va
+                // MarketingPostMakeScheduleJob.cs:36 chi quet Status == Scheduled. Enum co them
+                // Scheduled sau khi test nay duoc viet -> seed Approved thi job khong thay bai nao.
                 db.MarketingPosts.AddRange(
                     new MarketingPost { ProductId = productId, CreatedByUserId = creatorId, Status = MarketingPostStatus.Draft, ScheduledTime = now.AddMinutes(-5) },
-                    new MarketingPost { ProductId = productId, CreatedByUserId = creatorId, Status = MarketingPostStatus.Approved, ScheduledTime = now.AddHours(2) },
-                    new MarketingPost { ProductId = productId, CreatedByUserId = creatorId, Status = MarketingPostStatus.Approved, ScheduledTime = now.AddMinutes(-5) });
+                    new MarketingPost { ProductId = productId, CreatedByUserId = creatorId, Status = MarketingPostStatus.Scheduled, ScheduledTime = now.AddHours(2) },
+                    new MarketingPost { ProductId = productId, CreatedByUserId = creatorId, Status = MarketingPostStatus.Scheduled, ScheduledTime = now.AddMinutes(-5) });
             });
 
             await Factory.RunJobAsync<MarketingPostMakeScheduleJob>();
@@ -518,7 +522,8 @@ namespace VietTien.IntegrationTests
                 {
                     Id = postId, ProductId = productId,
                     CreatedByUserId = Guid.Parse("44444444-4444-4444-4444-444444444444"), // Sales Staff Test (seed cố định)
-                    Status = MarketingPostStatus.Approved,
+                    // Xem chu thich o L2-SJOB-10: job chi quet Status == Scheduled.
+                    Status = MarketingPostStatus.Scheduled,
                     ScheduledTime = DateTime.UtcNow.AddMinutes(-5)
                 });
             });
@@ -526,7 +531,8 @@ namespace VietTien.IntegrationTests
             await Factory.RunJobAsync<MarketingPostMakeScheduleJob>();
 
             var post = await QueryAsync(db => db.MarketingPosts.AsNoTracking().FirstAsync(p => p.Id == postId));
-            post.Status.Should().NotBe(MarketingPostStatus.Approved, "thất bại phải được ghi nhận, không im lặng");
+            post.Status.Should().Be(MarketingPostStatus.PublishFailed,
+                "thất bại phải được ghi nhận, không im lặng (MarketingPostMakeScheduleJob.cs:57)");
 
             // Chạy lại: không được đẩy mù lần hai khi đã đánh dấu thất bại
             var triggeredAfterFirst = Factory.MakeWebhook.Triggered.Count;

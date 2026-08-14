@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -218,14 +218,44 @@ namespace VietTien.IntegrationTests.L3
         /// Workbook: POST /api/warehouse/orders/multi-pick khi chưa được Sales Manager duyệt.
         /// Hệ thống CHƯA có endpoint multi-pick — chứng minh bằng 404 (xem DEF-L3-005).
         [Fact]
-        public async Task L3_FUL_08_MultiPick_EndpointNotImplemented()
+        public async Task L3_FUL_08_ExecuteMultiPick_WithoutManagerApproval_Rejected409()
         {
             var warehouse = await ClientForSeededAsync(L3Seed.WarehouseStaffId);
+            var orderIds = new List<Guid>
+            {
+                await SeedDeliverableOrderAsync(),
+                await SeedDeliverableOrderAsync(),
+            };
 
-            var res = await warehouse.PostAsJsonAsync("/api/warehouse/orders/multi-pick", new { });
+            // NAC-03/BR-013: gộp pick nhiều đơn PHẢI được Sales Manager duyệt trước.
+            var res = await warehouse.PostAsJsonAsync("/api/warehouse/orders/multi-pick",
+                new { OrderIds = orderIds });
 
-            res.StatusCode.Should().Be(HttpStatusCode.NotFound,
-                "DEF-L3-005: chức năng multi-pick trong SRS chưa được triển khai");
+            res.StatusCode.Should().Be(HttpStatusCode.Conflict,
+                "chưa có kế hoạch gộp pick được duyệt; body: {0}",
+                await res.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(res)).GetProperty("code").GetString()
+                .Should().Be("FULFILMENT_PLAN_CONFLICT");
+
+            // Sau khi Sales Manager duyệt đúng danh sách đó thì mới thực thi được.
+            var request = await warehouse.PostAsJsonAsync("/api/warehouse/orders/multi-pick/request",
+                new { OrderIds = orderIds });
+            request.StatusCode.Should().Be(HttpStatusCode.OK,
+                "đề xuất gộp pick phải tạo được; body: {0}", await request.Content.ReadAsStringAsync());
+
+            var approvalId = (await ReadJsonAsync(request)).GetProperty("id").GetGuid();
+            var manager = await ClientForSeededAsync(L3Seed.SalesManagerId);
+            var decision = await manager.PostAsJsonAsync(
+                $"/api/warehouse/orders/multi-pick/{approvalId}/decision",
+                new { Approved = true, Note = "Duyet gop pick L3-FUL-08" });
+            decision.StatusCode.Should().Be(HttpStatusCode.OK,
+                "Sales Manager duyệt thất bại; body: {0}", await decision.Content.ReadAsStringAsync());
+
+            var afterApproval = await warehouse.PostAsJsonAsync("/api/warehouse/orders/multi-pick",
+                new { OrderIds = orderIds });
+            afterApproval.StatusCode.Should().NotBe(HttpStatusCode.Conflict,
+                "đã được duyệt thì không còn bị chặn bởi FULFILMENT_PLAN_CONFLICT; body: {0}",
+                await afterApproval.Content.ReadAsStringAsync());
         }
 
         /// FUL-09 | Workflow | FT-05 AC-02; BR-032; BR-033; NFR-D01
@@ -253,35 +283,133 @@ namespace VietTien.IntegrationTests.L3
 
         // ── Block: Delivery (lập chuyến -> POD -> thu COD) ────────────────────────────────────
 
+        /// <summary>
+        /// Ca giao hàng hợp lệ theo DeliveryDtos (RegularExpression): "Sáng" / "Trưa" / "Chiều".
+        /// Workbook Report_5_3 ghi Morning/Noon/Afternoon — lệch tên, giá trị thật là tiếng Việt.
+        /// </summary>
+        private const string ShiftSang = "Sáng";
+        private const string ShiftChieu = "Chiều";
+
+        /// <summary>Đơn COD sẵn sàng xếp chuyến (DeliveryStatus = NotScheduled).</summary>
+        private async Task<Guid> SeedDeliverableOrderAsync(decimal orderTotal = 500_000m)
+        {
+            var (_, profile) = await SeedVerifiedCustomerAsync(NewEmail(), L3Seed.DefaultPassword);
+            var orderId = Guid.NewGuid();
+            await SeedAsync(db =>
+            {
+                db.Orders.Add(new Order
+                {
+                    Id = orderId,
+                    OrderCode = "VT-L3-" + Guid.NewGuid().ToString("N")[..10],
+                    CustomerProfileId = profile.Id,
+                    OrderStatus = OrderStatus.Confirmed,
+                    PaymentMethod = PaymentMethod.COD,
+                    PaymentStatus = PaymentStatus.Unpaid,
+                    DeliveryStatus = DeliveryStatus.NotScheduled,
+                    TotalAmount = orderTotal,
+                    FinalPayment = orderTotal,
+                    AmountPaid = 0,
+                    ShippingAddress = "L3 dia chi giao",
+                    CreatedAt = DateTime.UtcNow,
+                });
+                return Task.CompletedTask;
+            });
+            return orderId;
+        }
+
+        /// <summary>Đơn COD đã được gom vào một chuyến giao — nền cho DEL-04/DEL-07/FLOW-04.</summary>
+        private async Task<(HttpClient sales, Guid orderId, Guid tripId)> ArrangeOrderInTripAsync(
+            decimal orderTotal = 500_000m)
+        {
+            var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
+            var orderId = await SeedDeliverableOrderAsync(orderTotal);
+
+            var vehicleId = await QueryAsync(db => db.Vehicles
+                .Where(v => v.IsActive).Select(v => v.Id).FirstAsync());
+            var created = await sales.PostAsJsonAsync("/api/delivery/trips", new
+            {
+                VehicleId = vehicleId, Shift = ShiftSang,
+                TripDate = DateTime.UtcNow.Date.AddDays(1),
+                OrderIds = new List<Guid> { orderId }
+            });
+            created.StatusCode.Should().Be(HttpStatusCode.OK,
+                "dựng chuyến giao cho test thất bại; body: {0}", await created.Content.ReadAsStringAsync());
+
+            var tripId = (await ReadJsonAsync(created)).GetProperty("id").GetGuid();
+            return (sales, orderId, tripId);
+        }
+
         /// DEL-01 | BVA | FT-07 BV-01; AC-01; BR-037  ->  nhóm C
         /// Workbook: POST /api/delivery/trips với ràng buộc xe/ca/ngày không trùng.
         /// Hệ thống chưa có module chuyến giao — endpoint tương đương gần nhất là /api/delivery/schedule.
         [Fact]
-        public async Task L3_DEL_01_DeliveryTrips_EndpointNotImplemented_ScheduleUsedInstead()
+        public async Task L3_DEL_01_CreateTrip_SecondTripSameVehicleShiftDate_Conflict409()
         {
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
+            var vehicleId = await QueryAsync(db => db.Vehicles
+                .Where(v => v.IsActive).Select(v => v.Id).FirstAsync());
+            var tripDate = DateTime.UtcNow.Date.AddDays(1);
 
-            (await sales.PostAsJsonAsync("/api/delivery/trips", new { VehicleId = 1, Shift = "Morning" }))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound,
-                    "DEF-L3-004: module Delivery Trip chưa triển khai");
+            var first = await sales.PostAsJsonAsync("/api/delivery/trips", new
+            {
+                VehicleId = vehicleId, Shift = ShiftSang, TripDate = tripDate,
+                OrderIds = new List<Guid> { await SeedDeliverableOrderAsync() }
+            });
+            first.StatusCode.Should().Be(HttpStatusCode.OK,
+                "lần xếp chuyến đầu tiên phải thành công; body: {0}",
+                await first.Content.ReadAsStringAsync());
 
-            // Chức năng tương đương đang có phải tồn tại và được bảo vệ đúng vai trò.
-            (await sales.PostAsJsonAsync("/api/delivery/schedule", new { }))
-                .StatusCode.Should().NotBe(HttpStatusCode.NotFound, "/api/delivery/schedule phải tồn tại");
+            // BR-037/BV-01: cùng xe + cùng ca + cùng ngày -> chuyến thứ 2 bị chặn.
+            var second = await sales.PostAsJsonAsync("/api/delivery/trips", new
+            {
+                VehicleId = vehicleId, Shift = ShiftSang, TripDate = tripDate,
+                OrderIds = new List<Guid> { await SeedDeliverableOrderAsync() }
+            });
+            second.StatusCode.Should().Be(HttpStatusCode.Conflict,
+                "1 xe chỉ chạy 1 chuyến mỗi ca mỗi ngày; body: {0}",
+                await second.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(second)).GetProperty("code").GetString()
+                .Should().Be("VEHICLE_SHIFT_CONFLICT");
+
+            // Ca khác cùng xe/ngày thì vẫn xếp được — chứng minh ràng buộc đúng chiều.
+            var otherShift = await sales.PostAsJsonAsync("/api/delivery/trips", new
+            {
+                VehicleId = vehicleId, Shift = ShiftChieu, TripDate = tripDate,
+                OrderIds = new List<Guid> { await SeedDeliverableOrderAsync() }
+            });
+            otherShift.StatusCode.Should().Be(HttpStatusCode.OK, "khác ca thì không xung đột");
         }
 
         /// DEL-02 | Input-Domain-Error | FT-07 NAC-01  ->  nhóm C
         /// Xe đang bảo trì/inactive không được xếp chuyến — không có API chuyến giao để kiểm.
         [Fact]
-        public async Task L3_DEL_02_VehicleNotAvailable_NoTripApiToEnforce()
+        public async Task L3_DEL_02_CreateTrip_InactiveVehicle_Rejected409()
         {
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
 
-            (await sales.PostAsJsonAsync("/api/delivery/trips", new { VehicleId = Guid.NewGuid() }))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound, "DEF-L3-004");
+            // Đưa 1 xe về trạng thái ngừng hoạt động (mô phỏng đang bảo trì).
+            var vehicleId = await QueryAsync(db => db.Vehicles.Select(v => v.Id).FirstAsync());
+            await SeedAsync(async db =>
+            {
+                var v = await db.Vehicles.SingleAsync(x => x.Id == vehicleId);
+                v.IsActive = false;
+            });
 
-            // Danh mục xe VẪN có và đọc được — dữ liệu nền cho tính năng này đã sẵn sàng.
-            (await sales.GetAsync("/api/vehicles")).StatusCode.Should().Be(HttpStatusCode.OK);
+            var res = await sales.PostAsJsonAsync("/api/delivery/trips", new
+            {
+                VehicleId = vehicleId, Shift = ShiftSang,
+                TripDate = DateTime.UtcNow.Date.AddDays(1),
+                OrderIds = new List<Guid> { await SeedDeliverableOrderAsync() }
+            });
+
+            res.StatusCode.Should().Be(HttpStatusCode.Conflict,
+                "NAC-01: xe ngừng hoạt động không được xếp chuyến; body: {0}",
+                await res.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(res)).GetProperty("code").GetString()
+                .Should().Be("VEHICLE_NOT_AVAILABLE");
+
+            (await QueryAsync(db => db.DeliveryTrips.CountAsync(t => t.VehicleId == vehicleId)))
+                .Should().Be(0, "bị chặn thì không được tạo chuyến nào");
         }
 
         /// DEL-03 | Input-Domain-Error | FT-07 NAC-02; BR-034  ->  nhóm C
@@ -297,16 +425,35 @@ namespace VietTien.IntegrationTests.L3
         /// DEL-04 | Input-Domain-Error | FT-07 NAC-03; BR-038  ->  nhóm C
         /// POD (ảnh/chữ ký/timestamp) chưa có endpoint riêng; gần nhất là /{orderId}/complete.
         [Fact]
-        public async Task L3_DEL_04_ProofOfDelivery_EndpointNotImplemented_CompleteUsedInstead()
+        public async Task L3_DEL_04_RecordAttempt_DeliveredWithoutProof_Rejected422()
         {
-            var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
+            var (sales, orderId, _) = await ArrangeOrderInTripAsync();
 
-            (await sales.PostAsJsonAsync("/api/delivery/attempts", new { Status = "DELIVERED" }))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound, "DEF-L3-004");
+            // Đánh dấu DELIVERED nhưng thiếu ảnh hiện trường và chữ ký khách.
+            var res = await sales.PostAsJsonAsync("/api/delivery/attempts", new
+            {
+                OrderId = orderId, Outcome = "Delivered", PhotoUrl = (string?)null, SignatureUrl = (string?)null
+            });
 
-            (await sales.PostAsJsonAsync($"/api/delivery/{Guid.NewGuid()}/complete", new { }))
-                .StatusCode.Should().NotBe(HttpStatusCode.Forbidden,
-                    "endpoint hoàn tất giao hàng đang có phải mở cho Sales Staff");
+            res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+                "BR-038: POD thiếu ảnh/chữ ký thì không được đánh dấu đã giao; body: {0}",
+                await res.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(res)).GetProperty("code").GetString()
+                .Should().Be("POD_INCOMPLETE_OR_INVALID");
+
+            (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
+                .DeliveryStatus.Should().NotBe(DeliveryStatus.Delivered,
+                    "bị chặn thì đơn không được chuyển sang đã giao");
+
+            // Có đủ bằng chứng thì phải nhận.
+            var ok = await sales.PostAsJsonAsync("/api/delivery/attempts", new
+            {
+                OrderId = orderId, Outcome = "Delivered",
+                PhotoUrl = "https://example.invalid/pod.jpg",
+                SignatureUrl = "https://example.invalid/sig.png"
+            });
+            ok.StatusCode.Should().Be(HttpStatusCode.OK,
+                "đủ bằng chứng thì ghi nhận được; body: {0}", await ok.Content.ReadAsStringAsync());
         }
 
         /// DEL-05 | BVA | FT-07 BV-02; AC-04; BR-039  ->  nhóm C
@@ -333,12 +480,39 @@ namespace VietTien.IntegrationTests.L3
         /// DEL-07 | BVA | FT-07 BV-03; AC-05; BR-040  ->  nhóm C
         /// Escalation sau 3 lần giao hỏng: chưa có endpoint ghi nhận lần giao.
         [Fact]
-        public async Task L3_DEL_07_DeliveryAttemptEscalation_EndpointNotImplemented()
+        public async Task L3_DEL_07_FailedAttempts_EscalateAtThirdAndBlockFourth()
         {
-            var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
+            var (sales, orderId, _) = await ArrangeOrderInTripAsync();
 
-            (await sales.PostAsJsonAsync("/api/delivery/attempts", new { Status = "FAILED" }))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound, "DEF-L3-004");
+            async Task<HttpResponseMessage> FailOnceAsync() =>
+                await sales.PostAsJsonAsync("/api/delivery/attempts", new
+                {
+                    OrderId = orderId, Outcome = "Failed", FailureReason = "Khach khong co nha"
+                });
+
+            // Lần 1-3: ghi nhận bình thường; lần 3 sinh cảnh báo cho Sales Manager (BR-040).
+            for (int i = 1; i <= 3; i++)
+            {
+                var r = await FailOnceAsync();
+                r.StatusCode.Should().Be(HttpStatusCode.OK,
+                    "lần giao hỏng thứ {0} vẫn phải ghi nhận được; body: {1}",
+                    i, await r.Content.ReadAsStringAsync());
+            }
+
+            (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
+                .FailedDeliveryCount.Should().Be(3);
+
+            (await QueryAsync(db => db.Notifications.CountAsync(n =>
+                n.Type == NotificationType.SYS_39_DeliveryTripAttemptEscalation)))
+                .Should().BeGreaterThan(0, "AC-05: lần hỏng thứ 3 phải sinh escalation cho Sales Manager");
+
+            // Lần 4: bị chặn khi chưa có quyết định của Sales Manager.
+            var fourth = await FailOnceAsync();
+            fourth.StatusCode.Should().Be(HttpStatusCode.Conflict,
+                "BR-040: sau 3 lần hỏng phải chờ quyết định, không được giao tiếp; body: {0}",
+                await fourth.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(fourth)).GetProperty("code").GetString()
+                .Should().Be("DELIVERY_ESCALATION_REQUIRED");
         }
 
         /// DEL-08 | Input-Domain-Happy | FT-07 AC-02; BR-034

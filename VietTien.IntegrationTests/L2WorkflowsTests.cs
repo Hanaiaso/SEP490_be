@@ -502,7 +502,23 @@ namespace VietTien.IntegrationTests
                             Id = versionId, VersionNumber = 1,
                             ProposedTotal = 140_000_000m,
                             Status = QuotationVersionStatus.CustomerAccepted,
-                            CreatedByUserId = salesUser.Id   // FK_QuotationVersions_Users_CreatedByUserId
+                            CreatedByUserId = salesUser.Id,  // FK_QuotationVersions_Users_CreatedByUserId
+                            // BẮT BUỘC có Items: OrderService.cs:119-130 đối chiếu TUYỆT ĐỐI từng dòng
+                            // của version đã duyệt với giỏ hiện tại (đúng số dòng, đúng ProductId, đúng
+                            // Quantity). Version rỗng -> 0 dòng vs 1 dòng trong giỏ -> 409
+                            // QUOTATION_VERSION_STALE. Trước đây service không đối chiếu nên seed thiếu
+                            // Items vẫn qua — chính lỗ hổng đó là DEF-L3-003 (giỏ 240tr bị tính 110tr
+                            // theo báo giá của một giỏ KHÁC) và đã được vá.
+                            Items = new List<QuotationVersionItem>
+                            {
+                                new()
+                                {
+                                    ProductId = productId,
+                                    Quantity = 1,
+                                    OriginalUnitPrice = 150_000_000m,
+                                    ProposedUnitPrice = 140_000_000m
+                                }
+                            }
                         }
                     }
                 });

@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -237,16 +237,78 @@ namespace VietTien.IntegrationTests.L3
             schedule.StatusCode.Should().NotBe(HttpStatusCode.NotFound, "B1: endpoint lên lịch phải tồn tại");
             schedule.StatusCode.Should().NotBe(HttpStatusCode.Forbidden, "B1: Sales phải được lên lịch");
 
-            // B2: module chuyến giao / POD / thu COD riêng CHƯA có (DEF-L3-004).
-            (await sales.PostAsJsonAsync("/api/delivery/trips", new { }))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound);
-            (await sales.PostAsJsonAsync("/api/delivery/collections", new { Amount = 100_000m }))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound);
+            // ── Luồng chuyến giao đầy đủ theo workbook: trips -> start -> attempts -> collections ──
+            // Trước 14/08/2026 khối này chỉ assert 404 (DEF-L3-004). Module nay đã có nên chạy thật.
 
-            // B3: hoàn tất giao — endpoint đang có phải tồn tại và mở cho Sales.
-            var complete = await sales.PostAsJsonAsync($"/api/delivery/{orderId}/complete", new { });
-            complete.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
-            complete.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+            // B1: xếp chuyến -> đơn chuyển sang SCHEDULED.
+            var vehicleId = await QueryAsync(db => db.Vehicles
+                .Where(v => v.IsActive).Select(v => v.Id).FirstAsync());
+            var trip = await sales.PostAsJsonAsync("/api/delivery/trips", new
+            {
+                VehicleId = vehicleId,
+                Shift = "Sáng",                       // giá trị hợp lệ là tiếng Việt, không phải "Morning"
+                TripDate = DateTime.UtcNow.Date.AddDays(1),
+                OrderIds = new List<Guid> { orderId }
+            });
+            trip.StatusCode.Should().Be(HttpStatusCode.OK,
+                "B1: xếp chuyến phải thành công; body: {0}", await trip.Content.ReadAsStringAsync());
+            var tripId = (await ReadJsonAsync(trip)).GetProperty("id").GetGuid();
+
+            (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
+                .DeliveryStatus.Should().Be(DeliveryStatus.Scheduled, "B1: đơn đã được xếp lịch");
+
+            // B2: bắt đầu chuyến — BR-034 đòi mọi đơn trong chuyến đã bàn giao xong.
+            (await sales.PostAsJsonAsync($"/api/delivery/trips/{tripId}/start", new { }))
+                .StatusCode.Should().Be(HttpStatusCode.Conflict,
+                    "B2: chưa bàn giao thì không được xuất phát");
+
+            await SeedAsync(db =>
+            {
+                db.HandoverRecords.Add(new HandoverRecord
+                {
+                    OrderId = orderId,
+                    Status = HandoverStatus.Confirmed,
+                    WarehouseStaffId = L3Seed.WarehouseStaffId,
+                    SalesStaffId = L3Seed.SalesStaffId,
+                    HandoverTime = DateTime.UtcNow,
+                });
+                return Task.CompletedTask;
+            });
+
+            var start = await sales.PostAsJsonAsync($"/api/delivery/trips/{tripId}/start", new { });
+            start.StatusCode.Should().Be(HttpStatusCode.OK,
+                "B2: đã bàn giao thì xuất phát được; body: {0}", await start.Content.ReadAsStringAsync());
+            (await QueryAsync(db => db.DeliveryTrips.SingleAsync(t => t.Id == tripId)))
+                .Status.Should().Be(DeliveryTripStatus.InDelivery, "B2: chuyến đang giao");
+
+            // B3: ghi nhận POD đầy đủ -> đơn DELIVERED.
+            var attempt = await sales.PostAsJsonAsync("/api/delivery/attempts", new
+            {
+                OrderId = orderId, Outcome = "Delivered",
+                PhotoUrl = "https://example.invalid/pod.jpg",
+                SignatureUrl = "https://example.invalid/sig.png"
+            });
+            attempt.StatusCode.Should().Be(HttpStatusCode.OK,
+                "B3: POD đủ bằng chứng; body: {0}", await attempt.Content.ReadAsStringAsync());
+            (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
+                .DeliveryStatus.Should().Be(DeliveryStatus.Delivered, "B3: đơn đã giao");
+
+            // B4: thu COD THIẾU 40.000đ -> ghi đúng số thu và tạo công nợ phần còn lại (BR-039).
+            var collect = await sales.PostAsJsonAsync("/api/delivery/collections", new
+            {
+                OrderId = orderId, AmountCollected = 60_000m
+            });
+            collect.StatusCode.Should().Be(HttpStatusCode.OK,
+                "B4: thu tiền một phần phải ghi nhận được; body: {0}",
+                await collect.Content.ReadAsStringAsync());
+
+            var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId));
+            order.AmountPaid.Should().Be(60_000m, "B4: ghi đúng số tiền đã thu");
+
+            var debt = await QueryAsync(db => db.CustomerDebts
+                .SingleOrDefaultAsync(d => d.OrderId == orderId && d.Status == DebtStatus.InDebt));
+            debt.Should().NotBeNull("B4: phần còn thiếu phải tạo công nợ");
+            debt!.DebtAmount.Should().Be(40_000m, "công nợ = tổng đơn 100.000 trừ 60.000 đã thu");
         }
 
         /// FLOW-05 | Workflow | FT-08 AC-01; AC-02; AC-03; BR-017; BR-041
