@@ -169,18 +169,24 @@ namespace VietTien.IntegrationTests
             var reread = await QueryAsync(db => db.AuditLogs.AsNoTracking().FirstAsync(a => a.Id == log.Id));
             reread.Action.Should().Be(log.Action, "bản ghi audit không được đổi");
 
-            // (c) Vế tầng DB — CHỈ GHI NHẬN, KHÔNG kết luận defect.
-            // Fixture nối bằng `sa` (toàn quyền) nên UPDATE thành công là điều đương nhiên và không
-            // nói lên gì về production. Nó chỉ cho biết bất biến NFR-SEC08 không được cưỡng chế bằng
-            // trigger/ràng buộc ở tầng schema. Quyền thật của tài khoản ứng dụng là cấu hình triển
-            // khai -> thuộc L3-Security trên staging, không kiểm được ở L2.
+            // (c) Vế tầng DB — bất biến nay ĐƯỢC CƯỠNG CHẾ Ở SCHEMA.
+            // Trước 13/08/2026 bảng AuditLogs không có ràng buộc nào, nên `sa` UPDATE được và ô này
+            // chỉ ghi nhận "chưa cưỡng chế ở tầng DB", không kết luận defect. Migration
+            // 20260813035338_AddAuditLogInsertOnlyTrigger đã dựng trigger INSTEAD OF UPDATE/DELETE,
+            // chặn kể cả tài khoản toàn quyền -> đây mới đúng NFR-SEC08/BR-048.
             await using var conn = new SqlConnection(Factory.ConnectionString);
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "UPDATE AuditLogs SET Reason = N'sa-da-sua' WHERE Id = @id";
             cmd.Parameters.AddWithValue("@id", log.Id);
-            var affected = await cmd.ExecuteNonQueryAsync();
-            affected.Should().Be(1, "sa có toàn quyền — đây là kỳ vọng đúng, KHÔNG phải defect");
+
+            var update = async () => await cmd.ExecuteNonQueryAsync();
+            await update.Should().ThrowAsync<SqlException>(
+                "NFR-SEC08: trigger phải chặn UPDATE audit log kể cả với tài khoản toàn quyền");
+
+            // Và nội dung thật sự không đổi.
+            (await QueryAsync(db => db.AuditLogs.AsNoTracking().FirstAsync(a => a.Id == log.Id)))
+                .Reason.Should().NotBe("sa-da-sua");
         }
 
         // ── L2-ADM-04 ──────────────────────────────────────────────────────────────────────

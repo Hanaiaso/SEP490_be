@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.HttpsPolicy;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
@@ -94,6 +95,19 @@ namespace VietTien.IntegrationTests
 
             builder.ConfigureServices(services =>
             {
+                // Program.cs:32 khai AddHttpsRedirection(HttpsPort = 443) (fix L3-SEC-05) và bật
+                // UseHttpsRedirection() cho MỌI environment khác "Development". Fixture này chạy
+                // environment "Test" nên middleware đó hoạt động: mỗi request qua TestServer bị 307
+                // sang https://localhost/... , HttpClient tự đi theo redirect và theo đúng đặc tả
+                // của .NET nó GỠ BỎ header Authorization khi redirect đổi scheme/origin -> mọi call
+                // cần đăng nhập trả 401 ("Bạn chưa đăng nhập hoặc token đã hết hạn").
+                //
+                // Đặt HttpsPort = null: middleware không phân giải được cổng HTTPS nên chỉ ghi log
+                // cảnh báo rồi cho request đi tiếp, không redirect. Chỉ ảnh hưởng host test.
+                // KHÔNG đổi environment sang "Development" — "Test" là có chủ đích (xem chú thích ở
+                // ConfigureWebHost), để không nạp appsettings.Development.json vốn chứa API key THẬT.
+                services.PostConfigure<HttpsRedirectionOptions>(o => o.HttpsPort = null);
+
                 services.RemoveAll<DbContextOptions<ApplicationDbContext>>();
                 services.RemoveAll<DbContextOptions>();
 
@@ -150,10 +164,41 @@ namespace VietTien.IntegrationTests
             await using (var conn = new SqlConnection(ConnectionString))
             {
                 await conn.OpenAsync();
-                await _respawner.ResetAsync(conn);
+
+                // Migration 20260813035338_AddAuditLogInsertOnlyTrigger dựng trigger INSTEAD OF
+                // UPDATE/DELETE trên AuditLogs (BR-048/NFR-SEC08). Trigger đó chặn luôn DELETE của
+                // Respawn -> ResetAsync ném lỗi và mọi test dùng collection "sqlserver" chết ngay.
+                //
+                // KHÔNG thêm AuditLogs vào TablesToIgnore: làm vậy thì bảng không bao giờ được dọn,
+                // audit log của test trước rơi sang test sau và mọi assertion đếm số bản ghi audit
+                // sẽ đỏ giả. Thay vào đó tắt trigger ĐÚNG trong lúc dọn rồi bật lại ngay — thân test
+                // vẫn chạy với bất biến có hiệu lực đầy đủ.
+                await SetAuditLogTriggerAsync(conn, enabled: false);
+                try
+                {
+                    await _respawner.ResetAsync(conn);
+                }
+                finally
+                {
+                    await SetAuditLogTriggerAsync(conn, enabled: true);
+                }
             }
 
             await ReseedAsync();
+        }
+
+        /// <summary>
+        /// Bật/tắt trigger bất biến của AuditLogs. Bọc IF EXISTS để vẫn chạy được trên DB dựng từ
+        /// migration cũ (chưa có trigger) — khi đó câu lệnh không làm gì.
+        /// </summary>
+        private static async Task SetAuditLogTriggerAsync(SqlConnection conn, bool enabled)
+        {
+            var verb = enabled ? "ENABLE" : "DISABLE";
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $@"
+                IF EXISTS (SELECT 1 FROM sys.triggers WHERE name = 'trg_AuditLogs_PreventUpdateDelete')
+                    ALTER TABLE dbo.AuditLogs {verb} TRIGGER trg_AuditLogs_PreventUpdateDelete;";
+            await cmd.ExecuteNonQueryAsync();
         }
 
         /// <summary>

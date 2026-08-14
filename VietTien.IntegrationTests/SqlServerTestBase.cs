@@ -119,6 +119,12 @@ namespace VietTien.IntegrationTests
                 Role = role,
                 IsActive = true,
                 IsEmailVerified = true,
+                // Luật mới: đơn ĐẦU TIÊN của khách bị chặn bằng PHONE_OTP_REQUIRED nếu số điện thoại
+                // chưa xác thực OTP. Helper này chỉ đặt IsEmailVerified nên mọi test đặt hàng đều
+                // nhận 409 vì lý do hạ tầng chứ không phải nghiệp vụ. L3TestBase.cs:65 đã đặt cả hai
+                // từ đầu — đây là chỗ bị bỏ sót. Case nào muốn kiểm chính nhánh chưa xác thực SĐT thì
+                // truyền mutate: u => u.IsPhoneVerified = false.
+                IsPhoneVerified = true,
             };
             mutate?.Invoke(user);
 

@@ -316,10 +316,34 @@ namespace VietTien.IntegrationTests
             var (ceo, _) = await CreateClientAsAsync(SystemRole.CEO);
             await SeedSupplierAndStockAsync(onHand: 0);
 
-            // File tối thiểu (nội dung không quan trọng cho assertion: điều được kiểm là
-            // 3 dòng trong file có được PHÂN TÍCH thành PurchaseOrderItem hay không).
+            // File .xlsx THẬT (nhị phân). Trước đây test gửi CSV kèm tên .xlsx và service cũng đọc
+            // theo kiểu text nên vẫn qua; từ GH-10 service dùng ClosedXML đọc đúng định dạng Excel
+            // (PurchaseOrderService.cs:117-159) nên CSV giả sẽ ném "Không đọc được file Excel".
+            // Dòng 1 là header, 3 dòng dữ liệu — đúng thứ tự cột ProductSku, Quantity, UnitPrice.
             var content = new MultipartFormDataContent();
-            var fileBytes = Encoding.UTF8.GetBytes("ProductSku,Quantity,UnitPrice\nSKU-1,10,1000\nSKU-2,20,2000\nSKU-3,30,3000\n");
+            byte[] fileBytes;
+            using (var workbook = new ClosedXML.Excel.XLWorkbook())
+            {
+                var sheet = workbook.Worksheets.Add("PO");
+                sheet.Cell(1, 1).Value = "ProductSku";
+                sheet.Cell(1, 2).Value = "Quantity";
+                sheet.Cell(1, 3).Value = "UnitPrice";
+
+                var data = new (string Sku, int Qty, decimal Price)[]
+                {
+                    ("SKU-1", 10, 1000m), ("SKU-2", 20, 2000m), ("SKU-3", 30, 3000m),
+                };
+                for (int i = 0; i < data.Length; i++)
+                {
+                    sheet.Cell(i + 2, 1).Value = data[i].Sku;
+                    sheet.Cell(i + 2, 2).Value = data[i].Qty;
+                    sheet.Cell(i + 2, 3).Value = data[i].Price;
+                }
+
+                using var ms = new MemoryStream();
+                workbook.SaveAs(ms);
+                fileBytes = ms.ToArray();
+            }
             var filePart = new ByteArrayContent(fileBytes);
             filePart.Headers.ContentType =
                 new System.Net.Http.Headers.MediaTypeHeaderValue("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

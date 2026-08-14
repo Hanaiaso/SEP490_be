@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -235,55 +235,120 @@ namespace VietTien.IntegrationTests.L3
                 res.IsSuccessStatusCode.Should().BeFalse($"hàng đợi đã đủ {existingScheduled} bài, phải chặn");
         }
 
-        /// MKT-09 | Input-Domain-Error | FT-10 NAC-04; NFR-SEC07  ->  nhóm C
-        /// Upload media riêng cho bài chưa có endpoint.
+        /// MKT-09 | Input-Domain-Error | FT-10 NAC-04; NFR-SEC07
+        /// File PE (.exe) đổi đuôi .png -> 415 MEDIA_TYPE_UNSUPPORTED, KHÔNG gắn vào bài,
+        /// KHÔNG upload lên storage.
+        ///
+        /// Trước 14/08/2026 case này là mốc đánh dấu "EndpointNotImplemented" (assert 404/405).
+        /// Endpoint nay đã có nên viết lại đúng đặc tả Report_5_3.
         [Fact]
-        public async Task L3_MKT_09_UploadMedia_EndpointNotImplemented()
+        public async Task L3_MKT_09_UploadMedia_DisguisedExecutable_Rejected415()
         {
             var post = await SeedPostAsync(MarketingPostStatus.Draft);
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
 
             using var content = new MultipartFormDataContent();
-            var exe = new ByteArrayContent(new byte[] { 0x4D, 0x5A }); // header MZ của file .exe
+            // Header "MZ" = file thực thi Windows. Đuôi và MIME đều giả là PNG -> chỉ soi magic byte
+            // mới phát hiện được (NFR-SEC07).
+            var exe = new ByteArrayContent(new byte[] { 0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00 });
             exe.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
             content.Add(exe, "file", "malware.png");
 
             var res = await sales.PostAsync($"/api/marketing-posts/{post.Id}/media", content);
 
-            res.StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+            res.StatusCode.Should().Be(HttpStatusCode.UnsupportedMediaType,
+                "NFR-SEC07: nội dung file không phải ảnh thật; body: {0}",
+                await res.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(res)).GetProperty("code").GetString()
+                .Should().Be("MEDIA_TYPE_UNSUPPORTED");
+
             Factory.Cloudinary.Uploaded.Should().BeEmpty("không có file nào được lưu trữ");
+            (await QueryAsync(db => db.MarketingPosts.SingleAsync(p => p.Id == post.Id)))
+                .SelectedImageUrl.Should().Be("https://example.invalid/a.png",
+                    "file bị từ chối thì không được gắn vào bài");
         }
 
-        /// MKT-10 | BVA | FT-10 BV-03; NAC-04; NFR-SEC07  ->  nhóm C
-        [Fact]
-        public async Task L3_MKT_10_MediaSizeLimit_EndpointNotImplemented()
+        /// MKT-10 | BVA | FT-10 BV-03; NAC-04; NFR-SEC07
+        /// Biên kích thước quanh hạn mức 10MB: limit-1B và limit phải nhận, limit+1B -> 413
+        /// MEDIA_TOO_LARGE.
+        [Theory]
+        [InlineData(-1, false)]  // 10MB - 1 byte -> nhận
+        [InlineData(0, false)]   // đúng 10MB      -> nhận (điều kiện chặn là "> limit")
+        [InlineData(1, true)]    // 10MB + 1 byte  -> chặn
+        public async Task L3_MKT_10_UploadMedia_SizeBoundaryAt10MB(int offsetBytes, bool expectRejected)
         {
+            const int limit = 10 * 1024 * 1024;
             var post = await SeedPostAsync(MarketingPostStatus.Draft);
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
 
-            using var content = new MultipartFormDataContent();
-            content.Add(new ByteArrayContent(new byte[1024]), "file", "big.png");
+            // PNG hợp lệ về magic byte để chắc chắn 413 (nếu có) đến từ KÍCH THƯỚC chứ không phải
+            // định dạng — nếu không thì 415 sẽ che mất phép kiểm biên.
+            var bytes = new byte[limit + offsetBytes];
+            new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }.CopyTo(bytes, 0);
 
-            (await sales.PostAsync($"/api/marketing-posts/{post.Id}/media", content))
-                .StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+            using var content = new MultipartFormDataContent();
+            var png = new ByteArrayContent(bytes);
+            png.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            content.Add(png, "file", "anh.png");
+
+            var res = await sales.PostAsync($"/api/marketing-posts/{post.Id}/media", content);
+
+            if (expectRejected)
+            {
+                res.StatusCode.Should().Be(HttpStatusCode.RequestEntityTooLarge,
+                    "BV-03: vượt hạn mức 10MB phải bị chặn; body: {0}",
+                    await res.Content.ReadAsStringAsync());
+                (await ReadJsonAsync(res)).GetProperty("code").GetString()
+                    .Should().Be("MEDIA_TOO_LARGE");
+                Factory.Cloudinary.Uploaded.Should().BeEmpty("file quá lớn thì không được lưu trữ");
+            }
+            else
+            {
+                res.StatusCode.Should().Be(HttpStatusCode.OK,
+                    "tại hoặc dưới hạn mức phải nhận; body: {0}",
+                    await res.Content.ReadAsStringAsync());
+            }
         }
 
-        /// MKT-11 | Input-Domain-Happy | FT-10 AC-05; BR-003  ->  nhóm C
-        /// Endpoint tra chỉ số bài đăng chưa có; các cột đếm đã tồn tại trong model.
+        /// MKT-11 | Input-Domain-Happy | FT-10 AC-05; BR-003
+        /// Bài ĐÃ ĐĂNG: chỉ số reach/like/comment/share đọc được và gắn ĐÚNG bài;
+        /// BR-003 — việc đăng bài KHÔNG làm đổi chủ sở hữu Sales của khách hàng.
         [Fact]
-        public async Task L3_MKT_11_PostMetrics_EndpointNotImplemented_CountersExistInModel()
+        public async Task L3_MKT_11_PostMetrics_ReturnsCountersForPublishedPost_OwnershipUnchanged()
         {
             var post = await SeedPostAsync(MarketingPostStatus.Success);
+            await SeedAsync(async db =>
+            {
+                var p = await db.MarketingPosts.SingleAsync(x => x.Id == post.Id);
+                p.ExternalPostId = "fb_123456";
+                p.ReachCount = 1500; p.LikeCount = 120; p.CommentCount = 8; p.ShareCount = 3;
+            });
+
+            // Chủ sở hữu Sales của một khách bất kỳ trước khi đọc chỉ số.
+            var (_, profile) = await SeedVerifiedCustomerAsync(NewEmail(), L3Seed.DefaultPassword);
+            var ownerBefore = await QueryAsync(db => db.CustomerProfiles
+                .AsNoTracking().Where(p => p.Id == profile.Id)
+                .Select(p => p.AssignedSalesStaffId).SingleAsync());
+
             var admin = await ClientForSeededAsync(L3Seed.AdminId);
+            var res = await admin.GetAsync($"/api/marketing-posts/{post.Id}/metrics");
 
-            (await admin.GetAsync($"/api/marketing-posts/{post.Id}/metrics"))
-                .StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+            res.StatusCode.Should().Be(HttpStatusCode.OK,
+                "body: {0}", await res.Content.ReadAsStringAsync());
 
-            // Bài vẫn đọc được qua endpoint chi tiết, và các cột chỉ số tồn tại (mặc định 0).
-            var detail = await admin.GetAsync($"/api/marketing-posts/{post.Id}");
-            detail.StatusCode.Should().Be(HttpStatusCode.OK);
-            (await QueryAsync(db => db.MarketingPosts.SingleAsync(p => p.Id == post.Id)))
-                .ReachCount.Should().Be(0);
+            var body = await ReadJsonAsync(res);
+            body.GetProperty("postId").GetGuid().Should().Be(post.Id, "số liệu phải gắn đúng bài");
+            body.GetProperty("externalPostId").GetString().Should().Be("fb_123456");
+            body.GetProperty("reachCount").GetInt32().Should().Be(1500);
+            body.GetProperty("likeCount").GetInt32().Should().Be(120);
+            body.GetProperty("commentCount").GetInt32().Should().Be(8);
+            body.GetProperty("shareCount").GetInt32().Should().Be(3);
+
+            var ownerAfter = await QueryAsync(db => db.CustomerProfiles
+                .AsNoTracking().Where(p => p.Id == profile.Id)
+                .Select(p => p.AssignedSalesStaffId).SingleAsync());
+            ownerAfter.Should().Be(ownerBefore,
+                "BR-003: đăng bài/marketing không bao giờ đổi chủ sở hữu Sales của khách");
         }
 
         // ── Block: Đổi/trả & thu hồi (FT-08) ──────────────────────────────────────────────────

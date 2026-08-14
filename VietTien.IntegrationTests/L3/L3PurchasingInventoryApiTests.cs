@@ -1,5 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Models;
@@ -460,16 +461,51 @@ namespace VietTien.IntegrationTests.L3
                     "1.000 đơn vị đang giữ cho đơn khách bị xoá trắng mà không có cảnh báo");
         }
 
-        /// INV-05 | Input-Domain-Error | FT-12 NAC-05; BR-045  ->  nhóm C
-        /// Xuất nguyên liệu sản xuất chưa có endpoint riêng. Bằng chứng bắt buộc (ảnh ký, người nhận,
-        /// số biên bản) ĐÃ được thực thi ở tầng post phiếu xuất loại ProductionMaterial.
+        /// INV-05 | Input-Domain-Error | FT-12 NAC-05; BR-045
+        /// Xuất nguyên liệu sản xuất THIẾU bằng chứng (ảnh biên bản đã ký) -> 422
+        /// PRODUCTION_ISSUE_EVIDENCE_REQUIRED và KHÔNG trừ kho.
+        ///
+        /// Trước 14/08/2026 case này bị thay bằng mốc đánh dấu "EndpointNotImplemented" (assert 404/405)
+        /// khi API chưa có. Endpoint nay đã có — và nhận multipart/form-data, nên gửi JSON sẽ ra 415
+        /// chứ không phải 404.
         [Fact]
-        public async Task L3_INV_05_ProductionIssue_EndpointNotImplemented_ButEvidenceRuleEnforcedOnPost()
+        public async Task L3_INV_05_ProductionIssue_MissingEvidence_Rejected_NoStockDeducted()
         {
             var warehouse = await ClientForSeededAsync(L3Seed.WarehouseStaffId);
+            var (product, inventory) = await SeedSellableProductAsync(50_000m, 100);
 
-            (await warehouse.PostAsJsonAsync("/api/materials/production-issues", new { }))
-                .StatusCode.Should().BeOneOf(HttpStatusCode.NotFound, HttpStatusCode.MethodNotAllowed);
+            // Form hợp lệ MỌI trường bắt buộc, chỉ CỐ TÌNH thiếu evidencePhoto — để chắc chắn 422 đến
+            // từ luật bằng chứng chứ không phải từ ModelState (sẽ là 400).
+            using var form = new MultipartFormDataContent
+            {
+                { new StringContent(L3Seed.WarehouseDefaultId.ToString()), "WarehouseId" },
+                { new StringContent("Nguyen Van Nhan"), "ExternalRecipientName" },
+                { new StringContent("To san xuat 1"), "Department" },
+                { new StringContent(DateTime.UtcNow.ToString("O")), "ReceivedAt" },
+                { new StringContent("BB-L3-INV-05"), "PaperDocumentNumber" },
+                { new StringContent(product.Id.ToString()), "Items[0].ProductId" },
+                { new StringContent("5"), "Items[0].Quantity" },
+            };
+
+            var res = await warehouse.PostAsync("/api/materials/production-issues", form);
+
+            res.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+                "BR-045: thiếu ảnh biên bản đã ký thì không được xuất; body: {0}",
+                await res.Content.ReadAsStringAsync());
+
+            (await ReadJsonAsync(res)).TryGetProperty("code", out var code).Should().BeTrue(
+                "workbook L3-INV-05 yêu cầu errorCode PRODUCTION_ISSUE_EVIDENCE_REQUIRED trong body");
+            code.GetString().Should().Be("PRODUCTION_ISSUE_EVIDENCE_REQUIRED");
+
+            (await QueryAsync(db => db.Inventories.SingleAsync(i => i.Id == inventory.Id)))
+                .OnHandQuantity.Should().Be(100, "bị chặn thì tuyệt đối không trừ kho");
+        }
+
+        /// INV-05 (vế bổ sung) | Luật bằng chứng còn được thực thi ở tầng post phiếu xuất.
+        [Fact]
+        public async Task L3_INV_05b_PostProductionMaterialIssue_WithoutEvidence_Rejected()
+        {
+            var warehouse = await ClientForSeededAsync(L3Seed.WarehouseStaffId);
 
             // Luật bằng chứng vẫn được thực thi khi post phiếu xuất nguyên liệu sản xuất.
             var (product, _) = await SeedSellableProductAsync(50_000m, 100);
@@ -497,20 +533,57 @@ namespace VietTien.IntegrationTests.L3
                 .OnHandQuantity.Should().Be(100, "không trừ kho khi thiếu bằng chứng");
         }
 
-        /// INV-06 | BVA | FT-12 AC-04; BV-03; BR-049  ->  nhóm C
-        /// Cảnh báo tồn thấp không có endpoint riêng; ngưỡng ReorderThreshold có trong model.
-        [Fact]
-        public async Task L3_INV_06_LowStockAlerts_EndpointNotImplemented()
+        /// INV-06 | BVA | FT-12 AC-04; BV-03; BR-049
+        /// Cảnh báo tồn thấp quanh ngưỡng ReorderThreshold: threshold+1 KHÔNG cảnh báo,
+        /// threshold và threshold-1 sinh ĐÚNG 1 cảnh báo kèm số lượng, ngưỡng, kho, hành động.
+        ///
+        /// Trước 14/08/2026 case này bị thay bằng mốc đánh dấu "EndpointNotImplemented" (assert 404)
+        /// khi API chưa có. Endpoint nay đã có nên viết lại đúng đặc tả trong Report_5_3.
+        [Theory]
+        [InlineData(1, false)]   // threshold + 1 -> chưa tới ngưỡng
+        [InlineData(0, true)]    // đúng ngưỡng    -> phải cảnh báo (AC-04: "tại hoặc dưới")
+        [InlineData(-1, true)]   // dưới ngưỡng    -> phải cảnh báo
+        public async Task L3_INV_06_LowStockAlerts_BoundaryAroundReorderThreshold(
+            int offsetFromThreshold, bool expectAlert)
         {
+            const int threshold = 20;
             var warehouse = await ClientForSeededAsync(L3Seed.WarehouseStaffId);
 
-            (await warehouse.GetAsync("/api/inventory/low-stock-alerts"))
-                .StatusCode.Should().Be(HttpStatusCode.NotFound,
-                    "DEF-L3-005: chưa có API tra cứu cảnh báo tồn thấp");
+            var (product, inventory) = await SeedSellableProductAsync(
+                50_000m, threshold + offsetFromThreshold);
+            await SeedAsync(async db =>
+            {
+                var inv = await db.Inventories.SingleAsync(i => i.Id == inventory.Id);
+                inv.ReorderThreshold = threshold;
+            });
 
-            // Báo cáo tồn kho (chức năng đang có) vẫn phải đọc được.
-            (await warehouse.GetAsync("/api/inventory/report"))
-                .StatusCode.Should().Be(HttpStatusCode.OK);
+            var res = await warehouse.GetAsync("/api/inventory/low-stock-alerts");
+            res.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            var alerts = await res.Content.ReadFromJsonAsync<List<JsonElement>>();
+            var mine = alerts!
+                .Where(a => a.GetProperty("itemId").GetGuid() == product.Id)
+                .ToList();
+
+            if (!expectAlert)
+            {
+                mine.Should().BeEmpty(
+                    "tồn {0} vẫn TRÊN ngưỡng {1} nên chưa được cảnh báo", threshold + offsetFromThreshold, threshold);
+                return;
+            }
+
+            mine.Should().ContainSingle(
+                "tại hoặc dưới ngưỡng phải có ĐÚNG 1 cảnh báo, không nhân bản");
+
+            // Nội dung cảnh báo phải đủ 4 thông tin workbook yêu cầu.
+            var alert = mine[0];
+            alert.GetProperty("availableQuantity").GetDouble()
+                .Should().Be(threshold + offsetFromThreshold, "số lượng hiện tại");
+            alert.GetProperty("threshold").GetDouble().Should().Be(threshold, "ngưỡng");
+            alert.GetProperty("warehouseName").GetString()
+                .Should().NotBeNullOrWhiteSpace("kho");
+            alert.GetProperty("suggestedAction").GetString()
+                .Should().NotBeNullOrWhiteSpace("hành động tiếp theo");
         }
 
         /// INV-07 | BVA | FT-12 BV-03; NAC-03; BR-045
