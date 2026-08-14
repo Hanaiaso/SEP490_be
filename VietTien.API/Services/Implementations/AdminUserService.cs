@@ -85,15 +85,20 @@ namespace VietTien.API.Services.Implementations
             if (await _context.Users.AnyAsync(u => u.Email == normalizedEmail))
                 throw new InvalidOperationException($"Email '{normalizedEmail}' đã được sử dụng.");
 
-            if (!string.IsNullOrWhiteSpace(request.PhoneNumber) &&
-                await _context.Users.AnyAsync(u => u.PhoneNumber == request.PhoneNumber))
-                throw new InvalidOperationException($"Số điện thoại '{request.PhoneNumber}' đã được sử dụng.");
+            // So khớp trên giá trị ĐÃ trim, khớp đúng với giá trị thực sự được lưu ở dưới
+            // (PhoneNumber = request.PhoneNumber?.Trim()) — nếu so trên giá trị thô, SĐT có khoảng
+            // trắng thừa (vd " 0912345678") sẽ lọt qua check này rồi mới đụng unique index lúc
+            // SaveChanges, gây lỗi 500 chung chung thay vì thông báo rõ ràng.
+            var normalizedPhone = request.PhoneNumber?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(normalizedPhone) &&
+                await _context.Users.AnyAsync(u => u.PhoneNumber == normalizedPhone))
+                throw new InvalidOperationException($"Số điện thoại '{normalizedPhone}' đã được sử dụng.");
 
             var user = new User
             {
                 FullName = request.FullName.Trim(),
                 Email = normalizedEmail,
-                PhoneNumber = request.PhoneNumber?.Trim() ?? string.Empty,
+                PhoneNumber = normalizedPhone,
                 PasswordHash = BCrypt.Net.BCrypt.HashPassword(request.Password),
                 Role = role,
                 IsActive = true,

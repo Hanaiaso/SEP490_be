@@ -118,5 +118,52 @@ namespace VietTien.Tests.Services
             saved!.IsDefault.Should().BeTrue();
             result.IsDefault.Should().BeTrue();
         }
+
+        // L1-ADDR-05 | EP-Valid | Địa chỉ đầu tiên, user chưa có SĐT, SĐT người nhận CHƯA ai dùng
+        // -> đồng bộ vào User.PhoneNumber như thiết kế.
+        [Fact]
+        public async Task L1_ADDR_05_Create_FirstAddress_SyncsPhoneToUser_WhenPhoneNotTaken()
+        {
+            var user = new User { Id = _userId, PhoneNumber = string.Empty };
+            _addressRepo.Setup(r => r.CountByCustomerProfileIdAsync(_profile.Id)).ReturnsAsync(0);
+            _addressRepo.Setup(r => r.AddAsync(It.IsAny<Address>())).Returns(Task.CompletedTask);
+            _userRepo.Setup(r => r.GetByIdAsync(_userId)).ReturnsAsync(user);
+            _userRepo.Setup(r => r.PhoneExistsAsync("0912345678")).ReturnsAsync(false);
+
+            await _sut.CreateAddressAsync(_userId, new CreateAddressDto
+            {
+                Name = "Người nhận", Phone = "0912345678", City = "Hà Nội",
+                Ward = "Phường 1", AddressLine = "1 Phố X", Type = "Nhà riêng",
+            });
+
+            user.PhoneNumber.Should().Be("0912345678");
+            _userRepo.Verify(r => r.Update(user), Times.Once);
+        }
+
+        // L1-ADDR-06 | BC-TRUE | Địa chỉ đầu tiên, SĐT người nhận đã thuộc VỀ TÀI KHOẢN KHÁC
+        // (IX_Users_PhoneNumber duy nhất toàn hệ thống) -> KHÔNG ghi đè User.PhoneNumber, nhưng
+        // địa chỉ vẫn phải lưu thành công (trước đây toàn bộ SaveChanges bị lỗi 500 theo).
+        [Fact]
+        public async Task L1_ADDR_06_Create_FirstAddress_SkipsPhoneSync_WhenPhoneAlreadyTakenByAnotherUser()
+        {
+            var user = new User { Id = _userId, PhoneNumber = string.Empty };
+            _addressRepo.Setup(r => r.CountByCustomerProfileIdAsync(_profile.Id)).ReturnsAsync(0);
+            Address? saved = null;
+            _addressRepo.Setup(r => r.AddAsync(It.IsAny<Address>())).Callback<Address>(a => saved = a).Returns(Task.CompletedTask);
+            _userRepo.Setup(r => r.GetByIdAsync(_userId)).ReturnsAsync(user);
+            _userRepo.Setup(r => r.PhoneExistsAsync("0901234567")).ReturnsAsync(true);
+
+            var result = await _sut.CreateAddressAsync(_userId, new CreateAddressDto
+            {
+                Name = "Người nhận", Phone = "0901234567", City = "Hà Nội",
+                Ward = "Phường 1", AddressLine = "1 Phố X", Type = "Nhà riêng",
+            });
+
+            saved.Should().NotBeNull();
+            result.Phone.Should().Be("0901234567"); // địa chỉ vẫn lưu đúng SĐT người nhận
+            user.PhoneNumber.Should().BeEmpty(); // nhưng KHÔNG đụng vào hồ sơ user
+            _userRepo.Verify(r => r.Update(It.IsAny<User>()), Times.Never);
+            _uow.Verify(u => u.SaveChangesAsync(), Times.Once);
+        }
     }
 }

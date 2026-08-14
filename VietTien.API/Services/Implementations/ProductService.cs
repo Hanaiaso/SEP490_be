@@ -1,3 +1,4 @@
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Product;
@@ -194,7 +195,18 @@ namespace VietTien.API.Services.Implementations
             };
 
             await _unitOfWork.Products.AddAsync(newProduct);
-            await _unitOfWork.SaveChangesAsync();
+
+            try
+            {
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                // Lưới an toàn cuối cho race check-then-insert ở AnyAsync(Sku) phía trên: 2 request đồng
+                // thời cùng tạo sản phẩm với SKU trùng nhau đều pass check rồi mới đụng unique index lúc
+                // SaveChanges -> request thua cuộc nhận lỗi rõ ràng thay vì 500 chung chung.
+                throw new InvalidOperationException($"SKU '{dto.Sku}' đã được sử dụng bởi sản phẩm khác.");
+            }
 
             return await GetProductByIdAsync(newProduct.Id) ?? throw new Exception("Không thể lấy thông tin sản phẩm sau khi tạo.");
         }
@@ -276,7 +288,14 @@ namespace VietTien.API.Services.Implementations
             if (dto.Specifications != null) product.Specifications = dto.Specifications;
             product.IsDiscontinued = dto.IsDiscontinued;
 
-            await _unitOfWork.SaveChangesAsync();
+            try
+            {
+                await _unitOfWork.SaveChangesAsync();
+            }
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
+            {
+                throw new InvalidOperationException($"SKU '{dto.Sku}' đã được sử dụng bởi sản phẩm khác.");
+            }
 
             return new ProductDetailDto
             {
@@ -390,5 +409,10 @@ namespace VietTien.API.Services.Implementations
                 SlowMovers  = slowMovers
             };
         }
+
+        // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
+        // unique index (Product.Sku) khỏi các lỗi DbUpdateException khác không nên bị nuốt thành 409.
+        private static bool IsUniqueConstraintViolation(DbUpdateException ex)
+            => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
     }
 }

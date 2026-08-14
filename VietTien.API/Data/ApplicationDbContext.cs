@@ -349,6 +349,26 @@ namespace VietTien.API.Data
                 .HasForeignKey(p => p.CategoryId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Chống race check-then-insert ở ProductService.Create/UpdateProductAsync: 2 request đồng
+            // thời tạo/sửa sản phẩm cùng SKU đều pass AnyAsync() rồi cùng insert/update -> 2 sản phẩm
+            // trùng SKU âm thầm tồn tại song song (SKU dùng để định danh sản phẩm ở kho/đơn hàng).
+            modelBuilder.Entity<Product>()
+                .HasIndex(p => p.Sku)
+                .IsUnique();
+
+            // Chống race tương tự ở MaterialService.CreateAsync/UpdateAsync (so trùng theo
+            // Name.ToLower()). Collation mặc định của SQL Server (SQL_Latin1_General_CP1_CI_AS) đã
+            // không phân biệt hoa/thường -> unique index thường trên Name đã khớp đúng ngữ nghĩa so
+            // sánh case-insensitive của tầng service, không cần cấu hình collation riêng.
+            modelBuilder.Entity<Material>()
+                .HasIndex(m => m.Name)
+                .IsUnique();
+
+            // Chống race tương tự ở SupplierService.CreateAsync/UpdateAsync (so trùng theo Code).
+            modelBuilder.Entity<Supplier>()
+                .HasIndex(s => s.Code)
+                .IsUnique();
+
             // Inventory -> Product (nullable, dùng cho thành phẩm/hàng hóa)
             modelBuilder.Entity<Inventory>()
                 .HasOne(i => i.Product)
@@ -1208,6 +1228,17 @@ namespace VietTien.API.Data
                 .HasConversion<string>()
                 .HasMaxLength(20);
 
+            // Chống race check-then-insert ở InventoryCountSessionService.OpenAsync: kho bấm 2 lần liên
+            // tiếp "Mở phiên kiểm kê" (double-tap) đều pass AnyAsync(Status == Open) rồi cùng insert ->
+            // 2 phiên đang mở song song cho cùng 1 kho, mỗi phiên chốt SystemQuantity từ 1 baseline
+            // OnHandQuantity riêng, đóng phiên nào trước cũng làm phiên còn lại sai lệch số liệu.
+            // Lọc theo Status = 'Open' (HasConversion<string> ở trên) vì nhiều phiên Closed cho cùng 1
+            // kho là hợp lệ, chỉ được có tối đa 1 phiên Open tại một thời điểm.
+            modelBuilder.Entity<InventoryCountSession>()
+                .HasIndex(s => s.WarehouseId)
+                .IsUnique()
+                .HasFilter("[Status] = 'Open'");
+
             modelBuilder.Entity<InventoryCountSessionItem>()
                 .HasOne(i => i.Session)
                 .WithMany(s => s.Items)
@@ -1382,6 +1413,10 @@ namespace VietTien.API.Data
             modelBuilder.Entity<Vehicle>(entity =>
             {
                 entity.HasIndex(v => v.VehicleNumber).IsUnique();
+                // Chống race check-then-insert ở VehicleService.Create/UpdateAsync: VehicleNumber đã có
+                // unique index nhưng LicensePlate (kiểm tra trùng riêng, cùng lỗi) thì chưa -> 2 request
+                // đồng thời có thể tạo 2 xe cùng biển số.
+                entity.HasIndex(v => v.LicensePlate).IsUnique();
                 entity.Property(v => v.LicensePlate).HasMaxLength(20);
                 // decimal? không bị vòng lặp SetPrecision(18,2) phía dưới bắt được (ClrType của property nullable
                 // khác typeof(decimal)) -> khai báo rõ ràng ở đây để tránh SQL Server âm thầm cắt phần thập phân.
