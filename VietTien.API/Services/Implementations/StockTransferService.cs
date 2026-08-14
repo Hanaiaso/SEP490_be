@@ -116,35 +116,46 @@ namespace VietTien.API.Services.Implementations
 
                 _context.StockTransfers.Add(transfer);
                 await _context.SaveChangesAsync();
-
-                // Gửi email thông báo nếu có
-                if (!string.IsNullOrWhiteSpace(dto.NotificationEmail))
-                {
-                    var staffName = "Nhân viên kho";
-                    if (dto.AssignedStaffId.HasValue)
-                    {
-                        var staff = await _context.Users.FindAsync(dto.AssignedStaffId.Value);
-                        if (staff != null) staffName = staff.FullName;
-                    }
-                    
-                    // Gửi email ngầm không await để không làm chậm request (hoặc await nếu muốn đảm bảo)
-                    _ = _emailService.SendStockTransferNotificationAsync(
-                        dto.NotificationEmail,
-                        staffName,
-                        transfer.Code,
-                        sourceWarehouse.Name,
-                        destinationWarehouse.Name,
-                        dto.Note
-                    );
-                }
-
                 await transaction.CommitAsync();
-                
+
                 // Return basic info, client can call GetById for details
                 transfer.SourceWarehouse = sourceWarehouse;
                 transfer.DestinationWarehouse = destinationWarehouse;
                 transfer.CreatedByUser = await _context.Users.FindAsync(createdByUserId) ?? new User();
-                
+
+                // Gửi email thông báo nếu có — PHẢI await (không fire-and-forget) và làm sau khi đã
+                // commit: EmailService đọc cấu hình SMTP qua ISystemConfigService, dùng chung
+                // ApplicationDbContext theo scope request với service này. Nếu không await, task gửi
+                // email chạy song song với các câu lệnh khác trên cùng context/connection phía trên,
+                // và vì connection string không bật MultipleActiveResultSets nên SQL Server ném lỗi
+                // "The connection does not support MultipleActiveResultSets." Lỗi gửi email (SMTP down,
+                // config sai...) không được làm hỏng phiếu đã tạo thành công nên bọc riêng try/catch.
+                if (!string.IsNullOrWhiteSpace(dto.NotificationEmail))
+                {
+                    try
+                    {
+                        var staffName = "Nhân viên kho";
+                        if (dto.AssignedStaffId.HasValue)
+                        {
+                            var staff = await _context.Users.FindAsync(dto.AssignedStaffId.Value);
+                            if (staff != null) staffName = staff.FullName;
+                        }
+
+                        await _emailService.SendStockTransferNotificationAsync(
+                            dto.NotificationEmail,
+                            staffName,
+                            transfer.Code,
+                            sourceWarehouse.Name,
+                            destinationWarehouse.Name,
+                            dto.Note
+                        );
+                    }
+                    catch
+                    {
+                        // Bỏ qua: phiếu điều chuyển đã tạo/commit thành công, chỉ email thông báo lỗi.
+                    }
+                }
+
                 return MapToDto(transfer);
             }
             catch
@@ -223,7 +234,7 @@ namespace VietTien.API.Services.Implementations
                 // Deduct from Source Warehouse
                 foreach (var item in transfer.Items)
                 {
-                    // Lấy tồn kho của sản phẩm/nguyên liệu ở kho xuất (Lấy vị trí đầu tiên có hàng)
+                    // Lấy toàn bộ tồn kho của sản phẩm/nguyên liệu ở kho xuất, trải trên mọi vị trí.
                     List<Inventory> inventories;
                     if (item.ProductId != null)
                     {
@@ -240,31 +251,42 @@ namespace VietTien.API.Services.Implementations
                             .ToListAsync();
                     }
 
-                    var availableInv = inventories.FirstOrDefault(i => i.AvailableQuantity >= item.Quantity);
-                    if (availableInv == null)
+                    // BUGFIX: trước đây chỉ chấp nhận 1 vị trí đơn lẻ đủ số lượng (FirstOrDefault), nên
+                    // hàng tồn nằm rải ở nhiều vị trí (rất phổ biến sau nhiều lần nhập kho) bị báo thiếu
+                    // hàng oan dù tổng tồn kho thực tế vẫn đủ. Nay cộng dồn và trừ dần qua nhiều vị trí.
+                    var totalAvailable = inventories.Sum(i => i.AvailableQuantity);
+                    if (totalAvailable < item.Quantity)
                     {
                         var itemName = item.ProductId != null ? $"sản phẩm ID {item.ProductId}" : $"nguyên liệu ID {item.MaterialId}";
-                        throw new Exception($"Không đủ hàng trong kho xuất cho {itemName}.");
+                        throw new Exception($"Không đủ hàng trong kho xuất cho {itemName}. Cần {item.Quantity}, tồn khả dụng {totalAvailable}.");
                     }
 
-                    // Trừ tồn kho và cộng vào hàng đi đường
-                    availableInv.OnHandQuantity -= item.Quantity;
-                    availableInv.InTransitQuantity += item.Quantity;
-
-                    // GH-06/BR-035: mọi biến động tồn phải để lại vết StockTransaction (append-only).
-                    _context.StockTransactions.Add(new StockTransaction
+                    var remaining = item.Quantity;
+                    foreach (var inv in inventories.Where(i => i.AvailableQuantity > 0).OrderByDescending(i => i.AvailableQuantity))
                     {
-                        InventoryId = availableInv.Id,
-                        ProductId = item.ProductId,
-                        MaterialId = item.MaterialId,
-                        WarehouseLocationId = availableInv.WarehouseLocationId,
-                        QuantityChange = -item.Quantity,
-                        TransactionType = TransactionType.StockAdjustment,
-                        ReferenceId = transfer.Id,
-                        Note = $"Xuất điều chuyển {transfer.Code} sang kho {transfer.DestinationWarehouse.Name}",
-                        CreatedByUserId = transfer.CreatedByUserId,
-                        CreatedAt = DateTime.UtcNow
-                    });
+                        if (remaining <= 0) break;
+                        var take = Math.Min(remaining, inv.AvailableQuantity);
+
+                        // Trừ tồn kho và cộng vào hàng đi đường
+                        inv.OnHandQuantity -= take;
+                        inv.InTransitQuantity += take;
+                        remaining -= take;
+
+                        // GH-06/BR-035: mọi biến động tồn phải để lại vết StockTransaction (append-only).
+                        _context.StockTransactions.Add(new StockTransaction
+                        {
+                            InventoryId = inv.Id,
+                            ProductId = item.ProductId,
+                            MaterialId = item.MaterialId,
+                            WarehouseLocationId = inv.WarehouseLocationId,
+                            QuantityChange = -take,
+                            TransactionType = TransactionType.StockAdjustment,
+                            ReferenceId = transfer.Id,
+                            Note = $"Xuất điều chuyển {transfer.Code} sang kho {transfer.DestinationWarehouse.Name}",
+                            CreatedByUserId = transfer.CreatedByUserId,
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
                 }
 
                 transfer.Status = StockTransferStatus.Dispatched;
@@ -375,25 +397,26 @@ namespace VietTien.API.Services.Implementations
 
                     transferItem.ReceivedQuantity = rcvItem.ReceivedQuantity;
 
-                    // Giảm InTransit của kho xuất
-                    Inventory? sourceInv;
-                    if (rcvItem.ProductId != null)
-                    {
-                        sourceInv = await _context.Inventories
-                            .Include(i => i.WarehouseLocation)
-                            .FirstOrDefaultAsync(i => i.WarehouseLocation.WarehouseId == transfer.SourceWarehouseId && i.ProductId == rcvItem.ProductId);
-                    }
-                    else
-                    {
-                        sourceInv = await _context.Inventories
-                            .Include(i => i.WarehouseLocation)
-                            .FirstOrDefaultAsync(i => i.WarehouseLocation.WarehouseId == transfer.SourceWarehouseId && i.MaterialId == rcvItem.MaterialId);
-                    }
+                    // Giảm InTransit của kho xuất — BUGFIX: trước đây chỉ trừ vào 1 dòng tồn kho đầu
+                    // tiên tìm thấy (FirstOrDefault), nhưng từ khi Dispatch có thể xuất hàng từ NHIỀU
+                    // vị trí (xem DispatchAsync), phải trừ đúng những dòng đã thực sự được cộng InTransit
+                    // lúc xuất kho -> tra lại đúng các StockTransaction (chân vết) đã ghi khi Dispatch.
+                    var dispatchLegs = await _context.StockTransactions
+                        .Where(t => t.ReferenceId == transfer.Id
+                                 && t.TransactionType == TransactionType.StockAdjustment
+                                 && t.QuantityChange < 0
+                                 && (rcvItem.ProductId != null ? t.ProductId == rcvItem.ProductId : t.MaterialId == rcvItem.MaterialId))
+                        .ToListAsync();
 
-                    if (sourceInv != null)
+                    foreach (var leg in dispatchLegs)
                     {
-                        sourceInv.InTransitQuantity -= transferItem.Quantity;
-                        if (sourceInv.InTransitQuantity < 0) sourceInv.InTransitQuantity = 0;
+                        var sourceInv = await _context.Inventories.FindAsync(leg.InventoryId);
+                        if (sourceInv != null)
+                        {
+                            var takeBack = -leg.QuantityChange;
+                            sourceInv.InTransitQuantity -= takeBack;
+                            if (sourceInv.InTransitQuantity < 0) sourceInv.InTransitQuantity = 0;
+                        }
                     }
 
                     // Tăng OnHand của kho nhập
@@ -487,45 +510,66 @@ namespace VietTien.API.Services.Implementations
 
                 if (transfer.Status == StockTransferStatus.Dispatched)
                 {
-                    // Hoàn lại tồn kho cho kho xuất
-                    foreach (var item in transfer.Items)
-                    {
-                        Inventory? sourceInv;
-                        if (item.ProductId != null)
-                        {
-                            sourceInv = await _context.Inventories
-                                .Include(i => i.WarehouseLocation)
-                                .FirstOrDefaultAsync(i => i.WarehouseLocation.WarehouseId == transfer.SourceWarehouseId && i.ProductId == item.ProductId);
-                        }
-                        else
-                        {
-                            sourceInv = await _context.Inventories
-                                .Include(i => i.WarehouseLocation)
-                                .FirstOrDefaultAsync(i => i.WarehouseLocation.WarehouseId == transfer.SourceWarehouseId && i.MaterialId == item.MaterialId);
-                        }
+                    // Hoàn lại tồn kho cho kho xuất — BUGFIX: trước đây chỉ hoàn vào 1 dòng tồn kho đầu
+                    // tiên tìm thấy, không khớp với các vị trí thực sự đã bị trừ lúc Dispatch (nay có thể
+                    // trải nhiều vị trí) -> tra lại đúng StockTransaction đã ghi khi Dispatch và hoàn đúng
+                    // từng dòng tồn kho đó.
+                    var dispatchLegs = await _context.StockTransactions
+                        .Where(t => t.ReferenceId == transfer.Id
+                                 && t.TransactionType == TransactionType.StockAdjustment
+                                 && t.QuantityChange < 0)
+                        .ToListAsync();
 
-                        if (sourceInv != null)
+                    foreach (var leg in dispatchLegs)
+                    {
+                        var sourceInv = await _context.Inventories.FindAsync(leg.InventoryId);
+                        if (sourceInv == null) continue;
+
+                        var takeBack = -leg.QuantityChange;
+                        sourceInv.InTransitQuantity -= takeBack;
+                        if (sourceInv.InTransitQuantity < 0) sourceInv.InTransitQuantity = 0;
+                        sourceInv.OnHandQuantity += takeBack;
+
+                        // GH-06/BR-035: mọi biến động tồn phải để lại vết StockTransaction (append-only).
+                        _context.StockTransactions.Add(new StockTransaction
                         {
-                            sourceInv.InTransitQuantity -= item.Quantity;
-                            if (sourceInv.InTransitQuantity < 0) sourceInv.InTransitQuantity = 0;
-                            sourceInv.OnHandQuantity += item.Quantity;
-                        }
+                            InventoryId = sourceInv.Id,
+                            ProductId = leg.ProductId,
+                            MaterialId = leg.MaterialId,
+                            WarehouseLocationId = sourceInv.WarehouseLocationId,
+                            QuantityChange = takeBack,
+                            TransactionType = TransactionType.StockAdjustment,
+                            ReferenceId = transfer.Id,
+                            Note = $"Hủy điều chuyển {transfer.Code}, hoàn tồn kho xuất",
+                            CreatedByUserId = transfer.CreatedByUserId,
+                            CreatedAt = DateTime.UtcNow
+                        });
                     }
                 }
 
                 transfer.Status = StockTransferStatus.Cancelled;
 
-                if (!string.IsNullOrEmpty(transfer.NotificationEmail))
-                {
-                    _ = _emailService.SendGenericEmailAsync(
-                        transfer.NotificationEmail, 
-                        $"[Hủy Lệnh] Lệnh điều chuyển kho {transfer.Code} đã bị hủy", 
-                        $"Lệnh điều chuyển kho có mã {transfer.Code} từ {transfer.SourceWarehouse?.Name} đến {transfer.DestinationWarehouse?.Name} đã bị hủy."
-                    );
-                }
-
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
+
+                // Gửi sau khi đã commit và PHẢI await (không fire-and-forget) — cùng lý do MARS đã nêu
+                // ở CreateAsync: EmailService dùng chung ApplicationDbContext theo scope request, chạy
+                // song song với SaveChangesAsync/CommitAsync phía trên sẽ vỡ "MultipleActiveResultSets".
+                if (!string.IsNullOrEmpty(transfer.NotificationEmail))
+                {
+                    try
+                    {
+                        await _emailService.SendGenericEmailAsync(
+                            transfer.NotificationEmail,
+                            $"[Hủy Lệnh] Lệnh điều chuyển kho {transfer.Code} đã bị hủy",
+                            $"Lệnh điều chuyển kho có mã {transfer.Code} từ {transfer.SourceWarehouse?.Name} đến {transfer.DestinationWarehouse?.Name} đã bị hủy."
+                        );
+                    }
+                    catch
+                    {
+                        // Bỏ qua: phiếu đã hủy/commit thành công, chỉ email thông báo lỗi.
+                    }
+                }
 
                 return MapToDto(transfer);
             }
