@@ -278,12 +278,17 @@ namespace VietTien.API.Controllers
                     request.SalesSignature = url;
                 }
 
-                await _warehouseService.HandoverOrderAsync(orderId, staffId, request);
+                var role = User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+                await _warehouseService.HandoverOrderAsync(orderId, staffId, role, request);
                 return Ok(new { message = "Bàn giao đơn hàng thành công." });
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {

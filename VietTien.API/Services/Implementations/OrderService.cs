@@ -95,15 +95,8 @@ namespace VietTien.API.Services.Implementations
 
             if (totalAmount >= quotationMinValue)
             {
-                // BR-007 (Quotation Version Immutability) + SRS FT-02 AC-05/NAC-04: báo giá đã duyệt bị
-                // khóa CỨNG vào đúng nội dung giỏ (SKU + số lượng) tại thời điểm khách chấp nhận version
-                // — không phải bảng giá riêng dùng lại cho giỏ khác/số lượng khác. Lệch bất kỳ điều kiện
-                // ảnh hưởng giá nào -> version cũ hết hiệu lực ngay, phải tạo version mới + duyệt lại từ đầu
-                // (NAC-04: HTTP 409 QUOTATION_VERSION_STALE).
-                //
-                // (Có 1 giai đoạn ngắn code đổi sang "giá đàm phán áp dụng cho mọi giỏ sau này" — đã revert
-                // vì thay đổi đó chưa từng qua Change Log/RTW chính thức và đi ngược NAC-04/AC-05/BR-007
-                // đã Approved trong SRS.)
+                // BR-007 (Quotation Version Immutability) + SRS FT-02 AC-05/NAC-04: nếu khách hàng có báo giá
+                // đã duyệt (CustomerAccepted) và còn hạn thì ưu tiên áp dụng giá đàm phán của báo giá đó.
                 var acceptedVersion = await _context.QuotationVersions
                     .Include(v => v.Items)
                     .Where(v => v.Quotation.CustomerProfileId == customerProfileId
@@ -113,26 +106,28 @@ namespace VietTien.API.Services.Implementations
                     .OrderByDescending(v => v.Quotation.RequestDate)
                     .FirstOrDefaultAsync();
 
-                if (acceptedVersion == null)
-                    throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+                if (acceptedVersion != null)
+                {
+                    var cartLineList = cartLines.ToList();
+                    var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
 
-                var cartLineList = cartLines.ToList();
-                var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
+                    // DEF-L3-003: trước đây đòi khớp TUYỆT ĐỐI cả số lượng từng dòng — khách chỉ cần đổi
+                    // số lượng sau khi báo giá đã duyệt là mất trắng toàn bộ ưu đãi đàm phán, quay về giá
+                    // niêm yết. Giá đã đàm phán là ĐƠN GIÁ trên từng SKU, không gắn với đúng số lượng tại
+                    // thời điểm duyệt — nên chỉ cần mọi dòng trong giỏ đều thuộc tập SKU đã đàm phán là áp
+                    // đơn giá đó nhân với số lượng THỰC TẾ trong giỏ, không quan tâm số lượng đã đổi.
+                    var allLinesNegotiated = cartLineList.Count > 0
+                        && cartLineList.All(line => negotiatedByProduct.ContainsKey(line.ProductId));
 
-                // Khớp tuyệt đối: đúng số dòng, đúng từng ProductId, đúng từng Quantity — không thừa,
-                // không thiếu, không lệch số lượng so với đúng nội dung đã được duyệt.
-                var isExactMatch = cartLineList.Count == negotiatedByProduct.Count
-                    && cartLineList.All(line =>
-                        negotiatedByProduct.TryGetValue(line.ProductId, out var item) && item.Quantity == line.Quantity);
-
-                if (!isExactMatch)
-                    throw new QuotationVersionStaleException(
-                        "Giỏ hàng đã thay đổi so với báo giá đã duyệt (SKU/số lượng khác). Vui lòng tạo báo giá mới và chờ duyệt lại.");
-
-                var negotiatedTotal = acceptedVersion.Items.Sum(i => i.ProposedUnitPrice * i.Quantity);
-                var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
-                var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
-                return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
+                    if (allLinesNegotiated)
+                    {
+                        var negotiatedTotal = cartLineList.Sum(line =>
+                            negotiatedByProduct[line.ProductId].ProposedUnitPrice * line.Quantity);
+                        var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
+                        var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
+                        return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
+                    }
+                }
             }
 
             var discountPercentage = await _discountTierService.GetApplicableDiscountPercentAsync(totalAmount);
@@ -143,15 +138,36 @@ namespace VietTien.API.Services.Implementations
             return (discountAmount, discountPercentage);
         }
 
+        // BR-026: đơn ≥ ngưỡng báo giá B2B (mặc định 100 triệu, cấu hình qua QUOTATION_MIN_VALUE) mà
+        // khách chưa có báo giá được duyệt (CustomerAccepted, còn hạn) thì không được đặt thẳng theo
+        // giá niêm yết — phải đi qua Sales duyệt giá trước. Trước đây chỉ chặn ở FE (Cart.jsx disable
+        // nút đặt hàng), BE không hề kiểm tra -> gọi thẳng API là bypass được hoàn toàn.
+        private async Task EnsureQuotationRequirementMetAsync(decimal totalAmount, Guid customerProfileId)
+        {
+            var quotationMinValueRaw = await _systemConfigService.GetEffectiveValueAsync("QUOTATION_MIN_VALUE");
+            var quotationMinValue = decimal.TryParse(quotationMinValueRaw, out var parsedMinValue) ? parsedMinValue : 100_000_000m;
+
+            if (totalAmount < quotationMinValue) return;
+
+            var hasApprovedQuotation = await _context.Quotations.AnyAsync(q =>
+                q.CustomerProfileId == customerProfileId
+                && q.Status == QuotationStatus.CustomerAccepted
+                && (q.ValidUntil == null || q.ValidUntil >= DateTime.UtcNow));
+
+            if (!hasApprovedQuotation)
+                throw new Exception($"Đơn hàng từ {quotationMinValue:N0}đ trở lên bắt buộc phải có báo giá được duyệt. Vui lòng gửi yêu cầu báo giá trước khi đặt hàng.");
+        }
+
         public async Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId)
         {
             var profile = await GetCustomerProfileAsync(userId);
-            var cart = await _cartService.GetCartAsync(userId); 
-            
+            var cart = await _cartService.GetCartAsync(userId);
+
             if (cart == null || !cart.Items.Any())
                 throw new Exception("Giỏ hàng trống.");
 
             var baseTotal = cart.Items.Sum(i => i.TotalPrice);
+            await EnsureQuotationRequirementMetAsync(baseTotal, profile.Id);
             var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
                 baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
 
@@ -197,6 +213,10 @@ namespace VietTien.API.Services.Implementations
             // sẽ bị từ chối ngay vì thiếu xác thực OTP.
             if (await RequiresFirstOrderPhoneOtpAsync(profile))
                 throw new PhoneVerificationRequiredException("Vui lòng xác thực số điện thoại qua OTP trước khi đặt đơn hàng đầu tiên.");
+
+            // BR-026: chặn TRƯỚC khi giữ tồn — đơn ≥ ngưỡng báo giá B2B mà chưa có báo giá được duyệt
+            // thì không được đặt thẳng theo giá niêm yết, phải đi qua Sales duyệt giá trước.
+            await EnsureQuotationRequirementMetAsync(cart.Items.Sum(i => i.TotalPrice), profile.Id);
 
             Order order;
 
@@ -3038,6 +3058,10 @@ namespace VietTien.API.Services.Implementations
 
             // BR-019: hàng thu hồi từ khách phải vào khu cách ly (Quarantine), KHÔNG được cộng thẳng
             // vào tồn khả dụng — chờ kiểm tra chất lượng trước khi nhập lại kho hoặc huỷ.
+            // QuarantineQuantity đã được cộng bởi WarehouseManagementController.ReceiveToQuarantine
+            // (bước "Tiếp nhận xe hoàn" ở kho, gọi trước Confirm này cho từng item + tạo QuarantineLog
+            // để QA duyệt sau) — cộng lại ở đây sẽ bị trùng, vì QuarantineLog chỉ trừ lại đúng 1 lần
+            // khi QA dispatch, khiến khả dụng bị báo thấp hơn thực tế vĩnh viễn.
             var defaultLocationId = await _context.Warehouses
                 .Where(w => w.Code == "WH-DEFAULT")
                 .SelectMany(w => w.Locations)
@@ -3053,10 +3077,9 @@ namespace VietTien.API.Services.Implementations
                     inventory = new Inventory { ProductId = item.ProductId, WarehouseLocationId = defaultLocationId };
                     _context.Inventories.Add(inventory);
                 }
-                // Hàng đã vật lý về lại kho (đã pickup) nên cộng OnHand, nhưng giữ trong Quarantine nên
-                // KHÔNG được tính vào khả dụng — RawAvailable = OnHand - ... - Quarantine giữ nguyên.
+                // Hàng đã vật lý về lại kho (đã pickup) nên cộng OnHand; Quarantine đã được cộng ở
+                // bước tiếp nhận, không cộng lại ở đây.
                 inventory.OnHandQuantity += item.Quantity;
-                inventory.QuarantineQuantity += item.Quantity;
 
                 _context.StockTransactions.Add(new StockTransaction
                 {
