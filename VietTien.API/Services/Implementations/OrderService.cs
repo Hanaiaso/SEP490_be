@@ -2085,7 +2085,19 @@ namespace VietTien.API.Services.Implementations
                 .Select(o => o.Id)
                 .ToListAsync();
 
-            if (conflictingOrderIds.Any())
+            // BUGFIX: trùng lịch xe/ca/ngày trước đây chỉ so với Orders -> khi payload chỉ gồm
+            // StockTransfer (điều chuyển nội bộ), điều kiện trên không có gì để so khớp nên bỏ sót
+            // hoàn toàn các phiếu điều chuyển đã xếp xe (TransportArranged) trùng xe/ca/ngày.
+            var conflictingTransferIds = await _context.StockTransfers
+                .Where(st => st.DeliveryVehicleId == dto.VehicleId
+                          && st.DeliveryShift == dto.Shift
+                          && st.ScheduledDeliveryDate.HasValue && st.ScheduledDeliveryDate.Value.Date == targetDate.Date
+                          && st.Status == StockTransferStatus.TransportArranged
+                          && !dto.OrderIds.Contains(st.Id))
+                .Select(st => st.Id)
+                .ToListAsync();
+
+            if (conflictingOrderIds.Any() || conflictingTransferIds.Any())
             {
                 var conflict = new DeliveryScheduleConflict
                 {
@@ -2217,6 +2229,18 @@ namespace VietTien.API.Services.Implementations
                         o.ScheduledDeliveryDate.HasValue && o.ScheduledDeliveryDate.Value.Date == date &&
                         (o.DeliveryStatus == DeliveryStatus.InDelivery || o.DeliveryStatus == DeliveryStatus.Scheduled) &&
                         !orderIds.Contains(o.Id));
+
+                    // BUGFIX: cũng phải kiểm tra trùng với StockTransfer (điều chuyển nội bộ) đã xếp xe,
+                    // không chỉ Orders — cùng lỗi gốc với ScheduleDeliveryAsync ở trên.
+                    if (!stillConflicting)
+                    {
+                        stillConflicting = await _context.StockTransfers.AnyAsync(st =>
+                            st.DeliveryVehicleId == vehicleId && st.DeliveryShift == shift &&
+                            st.ScheduledDeliveryDate.HasValue && st.ScheduledDeliveryDate.Value.Date == date &&
+                            st.Status == StockTransferStatus.TransportArranged &&
+                            !orderIds.Contains(st.Id));
+                    }
+
                     if (stillConflicting)
                         throw new InvalidOperationException("Lịch mới được chọn cũng đang trùng. Vui lòng chọn xe/ca/ngày khác.");
                 }
@@ -2227,9 +2251,6 @@ namespace VietTien.API.Services.Implementations
                     date = conflict.RequestedDate;
                 }
 
-                // Chỉ áp lại cho Order — StockTransfer (điều chuyển nội bộ) nằm trong cùng lô xung đột
-                // (nếu có) cần Sales/Warehouse tự lập lịch lại qua endpoint schedule sau khi xung đột
-                // được đóng, vì đây là trường hợp hiếm (trộn PO + Order cùng chuyến).
                 var orders = await _context.Orders.Where(o => orderIds.Contains(o.Id)).ToListAsync();
                 foreach (var order in orders)
                 {
@@ -2241,8 +2262,23 @@ namespace VietTien.API.Services.Implementations
                     order.ScheduledDeliveryDate = date;
                     order.DeliveryStatus = DeliveryStatus.Scheduled;
                 }
+
+                // BUGFIX: trước đây chỉ áp lại lịch cho Order, StockTransfer (điều chuyển nội bộ) trong
+                // cùng lô xung đột bị bỏ quên vĩnh viễn ở trạng thái TransportRequested — nhân viên kho
+                // không có cách nào yêu cầu lại xe (RequestTransportAsync chỉ nhận trạng thái Draft).
+                // Nay áp lại lịch cho cả StockTransfer, giống hệt Order.
+                var stockTransfersInConflict = await _context.StockTransfers
+                    .Where(st => orderIds.Contains(st.Id) && st.Status == StockTransferStatus.TransportRequested)
+                    .ToListAsync();
+                foreach (var st in stockTransfersInConflict)
+                {
+                    st.DeliveryVehicleId = vehicleId;
+                    st.DeliveryShift = shift;
+                    st.ScheduledDeliveryDate = date;
+                    st.Status = StockTransferStatus.TransportArranged;
+                }
             }
-            // Reject: không đổi gì trên Order — Sales phải tự lập lịch lại từ đầu qua endpoint schedule.
+            // Reject: không đổi gì trên Order/StockTransfer — Sales/Kho phải tự lập lịch lại từ đầu qua endpoint schedule.
 
             conflict.Status = dto.Action == "Reject" ? DeliveryConflictStatus.Rejected : DeliveryConflictStatus.Resolved;
             conflict.ResolvedByUserId = managerId;
