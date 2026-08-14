@@ -621,9 +621,28 @@ namespace VietTien.Tests.Services
 
             var order = _db.Orders.Single(o => o.Id == response.OrderId);
             order.IsExternalOrder.Should().BeTrue();
-            order.PaymentStatus.Should().Be(PaymentStatus.Paid); // Cash = thu ngay
+            // BUGFIX: trước đây set Paid ngay tại đây, khiến ConfirmDirectOrderPaymentAsync (nút "Xác nhận
+            // đã nhận tiền mặt") luôn bị chặn bởi guard "đã xác nhận thanh toán trước đó" -> không bao giờ
+            // xác nhận được đơn quầy trả tiền mặt. Phải Pending tới khi nhân viên xác nhận thực thu.
+            order.PaymentStatus.Should().Be(PaymentStatus.Pending);
             _db.OrderItems.Count(oi => oi.OrderId == order.Id).Should().Be(1); // lịch sử mua hàng
             _db.Inventories.Single(i => i.ProductId == product.Id).OnHandQuantity.Should().Be(6); // 10 - 4
+        }
+
+        // L1-ORD-26b | State-Valid | Đơn quầy trả tiền mặt -> nhân viên xác nhận thu tiền được thành công
+        // (tái hiện đúng luồng thực tế bị lỗi: tạo đơn Cash rồi bấm "Xác nhận đã nhận tiền mặt")
+        [Fact]
+        public async Task L1_ORD_26b_DirectOrder_Cash_ThenConfirmPayment_Succeeds()
+        {
+            var (product, _) = SeedDirectOrderStock(10);
+
+            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 4, method: PaymentMethod.Cash));
+
+            await _sut.ConfirmDirectOrderPaymentAsync(response.OrderId);
+
+            var order = _db.Orders.Single(o => o.Id == response.OrderId);
+            order.PaymentStatus.Should().Be(PaymentStatus.Paid);
+            order.OrderStatus.Should().Be(OrderStatus.Completed);
         }
 
         // L1-ORD-27 | BVA-Max | Số lượng = đúng tồn kho -> cho phép, tồn về 0 (không âm)

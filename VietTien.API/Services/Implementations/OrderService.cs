@@ -770,7 +770,11 @@ namespace VietTien.API.Services.Implementations
                 VatAmount = request.VatAmount,
                 FinalPayment = request.FinalPayment,
                 PaymentMethod = request.PaymentMethod,
-                PaymentStatus = request.PaymentMethod == PaymentMethod.Cash ? PaymentStatus.Paid : PaymentStatus.Pending,
+                // Cash tại quầy KHÔNG được coi là đã thanh toán ngay lúc tạo đơn: nhân viên phải bấm
+                // "Xác nhận đã nhận tiền mặt" sau khi thực thu tiền từ khách (ConfirmDirectOrderPaymentAsync
+                // mới set Paid). Trước đây set Paid ngay tại đây khiến bước xác nhận đó luôn bị chặn bởi
+                // guard "đơn hàng đã được xác nhận thanh toán trước đó" -> nút xác nhận không bao giờ chạy được.
+                PaymentStatus = PaymentStatus.Pending,
                 OrderStatus = request.PaymentMethod == PaymentMethod.COD ? OrderStatus.PendingConfirmation : OrderStatus.Draft,
                 FulfillmentStatus = request.PaymentMethod == PaymentMethod.COD ? FulfillmentStatus.Reserved : FulfillmentStatus.Unallocated,
                 IsExternalOrder = true,
