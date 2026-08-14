@@ -109,6 +109,10 @@ namespace VietTien.API.Services.Implementations
             };
 
             order.PaymentStatus = PaymentStatus.Paid;
+            // Đã khớp CHÍNH XÁC với FinalPayment ở Bước 6 -> ghi nhận đã thu đủ, cùng lý do với
+            // ProcessSePayWebhookAsync (nếu không AmountPaid vẫn = 0 dù Paid, gây tính nhầm công nợ
+            // lúc giao hàng dù khách đã thanh toán từ trước).
+            order.AmountPaid = request.ActualAmount;
             order.ManualConfirmedByUserId = confirmedByUserId;
             order.ManualConfirmedAt = DateTime.UtcNow;
             order.ManualConfirmEvidenceUrl = request.EvidenceUrl;

@@ -68,6 +68,8 @@ namespace VietTien.Tests.Services
             res.OrderStatus.Should().Be("Confirmed");
             var updated = _db.Orders.Single(o => o.Id == order.Id);
             updated.PaymentStatus.Should().Be(PaymentStatus.Paid);
+            updated.AmountPaid.Should().Be(5_000_000m,
+                "AmountPaid phải được ghi nhận khi xác nhận thủ công, nếu không lúc giao hàng sẽ tính nhầm công nợ");
             updated.ManualConfirmedByUserId.Should().Be(_manager.Id);
             _db.PaymentTransactions.Should().ContainSingle(t => t.TransactionId == "TX-001" && t.IsManualConfirmed);
         }

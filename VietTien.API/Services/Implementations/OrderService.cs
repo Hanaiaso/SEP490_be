@@ -437,6 +437,11 @@ namespace VietTien.API.Services.Implementations
             }
 
             order.PaymentStatus = PaymentStatus.Paid;
+            // Đã khớp CHÍNH XÁC với FinalPayment ở check phía trên -> ghi nhận đã thu đủ. Thiếu dòng
+            // này khiến AmountPaid vẫn = 0 dù PaymentStatus = Paid: lúc giao hàng RecordDeliveryResultAsync
+            // tính công nợ dựa trên AmountPaid nên sẽ coi đơn CHƯA trả 1 đồng nào, tạo nợ = cả FinalPayment
+            // dù khách đã chuyển khoản đủ qua SePay từ trước.
+            order.AmountPaid = payload.transferAmount;
 
             var transaction = new PaymentTransaction
             {
@@ -2424,8 +2429,11 @@ namespace VietTien.API.Services.Implementations
 
             if (outcome == "delivered" || outcome == "partially_delivered")
             {
-                // ─ Cập nhật tiền thu
-                order.AmountPaid = dto.AmountCollected;
+                // ─ Cập nhật tiền thu — CỘNG DỒN vào số đã thu trước đó (vd. đã trả trước qua SePay),
+                // không GHI ĐÈ. Ghi đè sẽ xóa mất AmountPaid đã ghi nhận từ SePay/xác nhận thủ công,
+                // khiến đơn đã thanh toán đủ nhưng thu COD thêm 0đ lúc giao hàng bị tính nhầm thành nợ
+                // toàn bộ FinalPayment (cùng pattern với DeliveryTripService.RecordCollectionAsync).
+                order.AmountPaid += dto.AmountCollected;
                 order.DeliveredAt = DateTime.UtcNow;
                 
                 if (outcome == "delivered")
@@ -2437,7 +2445,7 @@ namespace VietTien.API.Services.Implementations
                     order.DeliveryStatus = DeliveryStatus.PartiallyDelivered;
                 }
 
-                var amountDue = order.FinalPayment - dto.AmountCollected;
+                var amountDue = order.FinalPayment - order.AmountPaid;
 
                 if (amountDue <= 0)
                 {

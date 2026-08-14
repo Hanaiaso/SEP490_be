@@ -1,4 +1,5 @@
 using FluentAssertions;
+using VietTien.API.DTOs.Delivery;
 using VietTien.API.Models;
 using VietTien.Tests.TestHelpers;
 using Xunit;
@@ -88,9 +89,47 @@ namespace VietTien.Tests.Services
                 WebhookPayload(order.OrderCode, 5_000_000m), TestConfig.SePayApiToken);
 
             _db.ChangeTracker.Clear();
-            _db.Orders.Single(o => o.Id == order.Id).PaymentStatus.Should().Be(PaymentStatus.Paid);
+            var saved = _db.Orders.Single(o => o.Id == order.Id);
+            saved.PaymentStatus.Should().Be(PaymentStatus.Paid);
+            saved.AmountPaid.Should().Be(5_000_000m,
+                "AmountPaid phải được ghi nhận khi Paid, nếu không lúc giao hàng sẽ tính nhầm công nợ");
             _db.PaymentTransactions.Should().ContainSingle()
                 .Which.Amount.Should().Be(5_000_000m);
+        }
+
+        // L1-ORD-78 | EP-Valid | Đơn SePay đã trả đủ qua webhook -> lúc giao hàng thu COD 0đ (đúng, vì
+        // đã trả trước) -> KHÔNG được tính nhầm thành công nợ toàn bộ FinalPayment.
+        //
+        // 🔴 DEFECT (đã sửa): RecordDeliveryResultAsync trước đây GHI ĐÈ `order.AmountPaid =
+        // dto.AmountCollected` thay vì cộng dồn, và tính amountDue từ dto.AmountCollected thay vì
+        // order.AmountPaid — xóa mất dấu vết đã trả qua SePay, tạo CustomerDebt = cả FinalPayment
+        // dù khách không còn nợ gì.
+        [Fact]
+        public async Task L1_ORD_78_Delivery_ZeroCodAfterSePayPrepaid_DoesNotCreateDebt()
+        {
+            var order = SeedPendingSePayOrder();
+            await _sut.ProcessSePayWebhookAsync(
+                WebhookPayload(order.OrderCode, 5_000_000m), TestConfig.SePayApiToken);
+            _db.ChangeTracker.Clear();
+
+            var toDeliver = _db.Orders.Single(o => o.Id == order.Id);
+            toDeliver.IsBlockedForDelivery = false;
+            toDeliver.ScheduledDeliveryDate = null;
+            _db.SaveChanges();
+
+            await _sut.RecordDeliveryResultAsync(order.Id, _salesStaff.Id, new RecordDeliveryResultDto
+            {
+                DeliveryOutcome = "delivered",
+                AmountCollected = 0,
+                Notes = "Khách đã trả trước qua SePay, không thu thêm."
+            });
+
+            _db.ChangeTracker.Clear();
+            var final = _db.Orders.Single(o => o.Id == order.Id);
+            final.AmountPaid.Should().Be(5_000_000m, "tiền đã trả qua SePay không được xóa mất khi giao hàng");
+            final.PaymentStatus.Should().Be(PaymentStatus.Paid, "đơn đã trả đủ từ trước, không được hạ xuống PartiallyPaid");
+            final.OrderStatus.Should().Be(OrderStatus.Completed);
+            _db.CustomerDebts.Should().BeEmpty("khách đã trả đủ qua SePay, không có căn cứ nào để tạo công nợ");
         }
 
         // ── Block: ⊕ đề xuất v2.4 — Công thức VAT ────────────────────────────
