@@ -421,7 +421,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task HandoverOrder_WhenOrderMissing_Returns404()
         {
-            _service.Setup(s => s.HandoverOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<HandoverRequestDto>()))
+            _service.Setup(s => s.HandoverOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<HandoverRequestDto>()))
                 .ThrowsAsync(new KeyNotFoundException("x"));
 
             (await _sut.HandoverOrder(Guid.NewGuid(), new HandoverRequestDto())).StatusOf().Should().Be(404);
@@ -430,7 +430,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task HandoverOrder_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.HandoverOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<HandoverRequestDto>()))
+            _service.Setup(s => s.HandoverOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<HandoverRequestDto>()))
                 .ThrowsAsync(new Exception("loi"));
 
             (await _sut.HandoverOrder(Guid.NewGuid(), new HandoverRequestDto())).StatusOf().Should().Be(400);

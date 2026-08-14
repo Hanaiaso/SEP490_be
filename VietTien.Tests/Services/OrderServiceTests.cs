@@ -223,7 +223,7 @@ namespace VietTien.Tests.Services
             var act = () => _sut.GetCheckoutSummaryAsync(_customer.Id);
 
             await act.Should().ThrowAsync<Exception>()
-                .WithMessage("Đơn hàng trên*vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+                .WithMessage("Đơn hàng từ*bắt buộc phải có báo giá được duyệt*");
         }
 
         // L1-ORD-05 | Guard-FALSE | Tổng >= 100M -> chặn checkout, yêu cầu báo giá B2B
@@ -235,7 +235,7 @@ namespace VietTien.Tests.Services
             var act = () => _sut.GetCheckoutSummaryAsync(_customer.Id);
 
             await act.Should().ThrowAsync<Exception>()
-                .WithMessage("Đơn hàng trên*vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+                .WithMessage("Đơn hàng từ*bắt buộc phải có báo giá được duyệt*");
         }
 
         // L1-ORD-06 | EP-Invalid | Đơn 80M dù khách có giá thỏa thuận -> vẫn dùng bậc chiết khấu thường (8%)

@@ -232,7 +232,10 @@ namespace VietTien.Tests.Services
         {
             var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Consolidated, _whStaff.Id);
 
-            await _sut.HandoverOrderAsync(order.Id, _whStaff.Id, new HandoverRequestDto
+            // BR-034: callerRole=Admin vì test này ký cả 2 phía trong 1 lần gọi (kiểm tra logic tạo
+            // HandoverRecord đầy đủ) — WarehouseStaff/SalesStaff bị chặn ký thay phía kia, chỉ CEO/Admin
+            // được phép ký cả hai.
+            await _sut.HandoverOrderAsync(order.Id, _whStaff.Id, nameof(SystemRole.Admin), new HandoverRequestDto
             {
                 WarehouseSignature = "wh-signature",
                 SalesSignature = "sales-signature"
