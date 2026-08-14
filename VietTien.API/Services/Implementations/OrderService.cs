@@ -868,7 +868,15 @@ namespace VietTien.API.Services.Implementations
             var shippingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Processing);
             var deliveredTodayCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.Date == today);
             var revenueToday = allOrders.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.Date == today).Sum(o => o.FinalPayment);
-            var pendingDebt = allOrders.Where(o => o.PaymentStatus == PaymentStatus.Pending).Sum(o => o.FinalPayment);
+
+            // "Công nợ cần thu" phải lấy từ sổ công nợ THẬT (CustomerDebts, sinh ra khi khách trả
+            // thiếu qua COD lúc giao hàng), KHÔNG phải đơn PaymentStatus=Pending — Pending chỉ là
+            // "đơn đang chờ thanh toán" (kể cả đơn đã bị hủy do hết hạn giữ chỗ), không phải khoản
+            // khách nợ. Trộn 2 khái niệm này khiến dashboard hiện "nợ" ảo dù sổ công nợ thật = 0đ.
+            var pendingDebtQuery = _context.CustomerDebts.Where(d => d.Status == DebtStatus.InDebt);
+            if (scopedSalesStaffId.HasValue)
+                pendingDebtQuery = pendingDebtQuery.Where(d => d.Order.SalesStaffId == scopedSalesStaffId.Value);
+            var pendingDebt = await pendingDebtQuery.SumAsync(d => (decimal?)d.DebtAmount) ?? 0m;
 
             var kpiDto = new DashboardKpiDto
             {

@@ -126,6 +126,38 @@ namespace VietTien.Tests.Services
             stats.Kpi.NewOrdersCount.Should().Be(5, "đủ 5 đơn của cả nhóm");
         }
 
+        // L1-ORD-65b | EP-Valid | "Công nợ cần thu" phải lấy từ sổ công nợ thật (CustomerDebts, InDebt),
+        // KHÔNG được cộng FinalPayment của đơn PaymentStatus=Pending (đơn đang chờ/chưa từng thanh toán,
+        // kể cả đã bị hủy — không phải khoản khách nợ).
+        //
+        // 🔴 DEFECT (đã sửa): OrderService.cs cũ tính `pendingDebt = Sum(FinalPayment) WHERE
+        // PaymentStatus=Pending`, khiến dashboard hiện "nợ" ảo cho cả đơn đã Cancelled do hết hạn giữ
+        // chỗ dù sổ công nợ thật đang là 0đ (phát hiện qua đối chiếu dữ liệu production).
+        [Fact]
+        public async Task L1_ORD_65b_SalesDashboardStats_PendingDebt_UsesRealDebtLedger()
+        {
+            // Đơn chỉ đang CHỜ thanh toán (chưa từng có tiền vào) -> KHÔNG tính là nợ.
+            SeedOrder(o => { o.SalesStaffId = _salesStaff.Id; o.PaymentStatus = PaymentStatus.Pending; o.FinalPayment = 50_000_000m; });
+            // Đơn đã bị hủy do hết hạn giữ chỗ, vẫn còn PaymentStatus=Pending -> càng không phải nợ.
+            SeedOrder(o => { o.SalesStaffId = _salesStaff.Id; o.PaymentStatus = PaymentStatus.Pending; o.OrderStatus = OrderStatus.Cancelled; o.FinalPayment = 20_000_000m; });
+
+            // Đơn THẬT SỰ còn nợ (khách trả thiếu qua COD) -> phải tính vào PendingDebt.
+            var debtOrder = SeedOrder(o => { o.SalesStaffId = _salesStaff.Id; o.PaymentStatus = PaymentStatus.PartiallyPaid; o.FinalPayment = 1_000_000m; o.AmountPaid = 700_000m; });
+            _db.CustomerDebts.Add(new CustomerDebt
+            {
+                CustomerProfileId = debtOrder.CustomerProfileId,
+                OrderId = debtOrder.Id,
+                DebtAmount = 300_000m,
+                Status = DebtStatus.InDebt,
+            });
+            _db.SaveChanges();
+
+            var stats = await _sut.GetSalesDashboardStatsAsync(_salesStaff.Id);
+
+            stats.Kpi.PendingDebt.Should().Be(300_000m,
+                "chỉ tính khoản nợ THẬT (CustomerDebts InDebt), không cộng FinalPayment của đơn đang chờ/đã hủy");
+        }
+
         // ── Block: Truy vấn công khai & thống kê ────────────────────────────
 
         // L1-ORD-67 | EP-Valid | Tra cứu công khai bằng mã đơn -> chỉ trả thông tin KHÔNG nhạy cảm

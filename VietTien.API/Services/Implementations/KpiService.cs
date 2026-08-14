@@ -30,7 +30,10 @@ namespace VietTien.API.Services.Implementations
             if (salesStaffId.HasValue)
                 completedOrders = completedOrders.Where(o => o.SalesStaffId == salesStaffId.Value);
 
-            var revenue = await completedOrders.SumAsync(o => (decimal?)o.FinalPayment) ?? 0m;
+            // Dùng AmountPaid (tiền THỰC thu) thay vì FinalPayment (giá trị đơn) — một đơn Completed
+            // vẫn có thể PartiallyPaid nếu khách trả thiếu qua COD (phần còn lại nằm ở CustomerDebts),
+            // dùng FinalPayment sẽ cộng nhầm cả phần khách chưa trả vào doanh thu.
+            var revenue = await completedOrders.SumAsync(o => (decimal?)o.AmountPaid) ?? 0m;
             var completedCount = await completedOrders.CountAsync();
 
             // --- DeliverySuccessRate ---

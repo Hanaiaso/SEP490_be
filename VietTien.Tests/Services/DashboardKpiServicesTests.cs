@@ -44,7 +44,7 @@ namespace VietTien.Tests.Services
             return user;
         }
 
-        /// <summary>Seed 1 đơn đã hoàn tất gán cho 1 Sales. ConfirmedAt để null (xem ghi chú class).</summary>
+        /// <summary>Seed 1 đơn đã hoàn tất, thu đủ tiền, gán cho 1 Sales. ConfirmedAt để null (xem ghi chú class).</summary>
         private Order SeedCompletedOrder(Guid salesStaffId, decimal amount = 1_000_000m, DateTime? createdAt = null)
         {
             var (_, profile) = TestData.SeedCustomer(_db);
@@ -53,6 +53,7 @@ namespace VietTien.Tests.Services
                 o.SalesStaffId = salesStaffId;
                 o.OrderStatus = OrderStatus.Completed;
                 o.FinalPayment = amount;
+                o.AmountPaid = amount; // Doanh thu tính trên tiền THỰC thu (AmountPaid) — đơn Completed bình thường đã thu đủ.
                 o.CreatedAt = createdAt ?? DateTime.UtcNow.AddDays(-1);
                 o.ConfirmedAt = null;
             });
@@ -154,6 +155,38 @@ namespace VietTien.Tests.Services
 
             snapshot.CompletedOrderCount.Should().Be(3);
             snapshot.Revenue.Should().Be(3_000_000m, "2 đơn huỷ 5tr không được cộng vào doanh thu");
+        }
+
+        // L1-DASH-07b | EP-Valid | Đơn Completed nhưng khách trả THIẾU qua COD (còn nợ) -> doanh thu chỉ
+        // tính phần THỰC thu (AmountPaid), không cộng cả phần khách còn nợ vào doanh thu.
+        //
+        // 🔴 DEFECT (đã sửa): code cũ tính Revenue = Sum(FinalPayment) của đơn Completed, không quan
+        // tâm PaymentStatus — đơn PartiallyPaid (nợ hợp lệ, chưa thu đủ) vẫn bị cộng NGUYÊN giá trị đơn
+        // vào doanh thu, phóng đại số liệu dù tiền đó thực chất đang nằm ở sổ công nợ (CustomerDebts).
+        [Fact]
+        public async Task L1_DASH_07b_PartiallyPaidCompletedOrder_RevenueCountsOnlyAmountPaid()
+        {
+            var s1 = SeedSales();
+            SeedCompletedOrder(s1.Id, 1_000_000m); // đơn thu đủ bình thường
+
+            var (_, profile) = TestData.SeedCustomer(_db);
+            _db.Orders.Add(TestData.Order(profile.Id, o =>
+            {
+                o.SalesStaffId = s1.Id;
+                o.OrderStatus = OrderStatus.Completed;
+                o.PaymentStatus = PaymentStatus.PartiallyPaid;
+                o.FinalPayment = 2_000_000m;
+                o.AmountPaid = 1_500_000m; // còn nợ 500k
+                o.CreatedAt = DateTime.UtcNow.AddDays(-1);
+                o.ConfirmedAt = null;
+            }));
+            _db.SaveChanges();
+
+            var snapshot = await _kpi.GetSnapshotAsync(s1.Id, _from, _to);
+
+            snapshot.CompletedOrderCount.Should().Be(2);
+            snapshot.Revenue.Should().Be(2_500_000m,
+                "1tr (thu đủ) + 1.5tr (thực thu của đơn còn nợ 500k) — KHÔNG cộng nguyên 2tr FinalPayment của đơn còn nợ");
         }
 
         // L1-DASH-08 | EP-Valid | Kỳ không có dữ liệu -> mọi chỉ số = 0, không chia cho 0, không ném lỗi
