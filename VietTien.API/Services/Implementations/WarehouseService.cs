@@ -77,6 +77,7 @@ namespace VietTien.API.Services.Implementations
                     OrderCode = o.OrderCode,
                     ConfirmedAt = o.CreatedAt,
                     TotalQuantity = o.OrderItems.Sum(i => i.Quantity),
+                    FinalPayment = o.FinalPayment,
                     Status = o.FulfillmentStatus.ToString(),
                     OrderProgress = o.OrderItems.Sum(i => i.Quantity) > 0 ? (o.OrderItems.Sum(i => i.PackedQuantity) * 100 / o.OrderItems.Sum(i => i.Quantity)) : 0,
                     PickingStartedAt = o.PickingStartedAt,
@@ -158,7 +159,8 @@ namespace VietTien.API.Services.Implementations
                 AllocatedWarehouseCode = "WH-DEFAULT",
                 OrderProgress = progress,
                 PickingStartedAt = order.PickingStartedAt,
-                PickingCompletedAt = order.PickingCompletedAt
+                PickingCompletedAt = order.PickingCompletedAt,
+                FinalPayment = order.FinalPayment
             };
 
             foreach (var item in order.OrderItems)
@@ -375,6 +377,7 @@ namespace VietTien.API.Services.Implementations
                     PickTaskId = pt.Id,
                     OrderId = pt.OrderId,
                     OrderCode = pt.Order?.OrderCode ?? string.Empty,
+                    FinalPayment = pt.Order?.FinalPayment ?? 0,
                     WarehouseName = pt.Warehouse?.Name ?? "Unknown",
                     WarehouseCode = pt.Warehouse?.Code ?? "UNKNOWN",
                     Status = pt.Status.ToString(),
@@ -396,6 +399,7 @@ namespace VietTien.API.Services.Implementations
         public async Task<PickTaskDto> GetPickTaskDetailAsync(Guid pickTaskId)
         {
             var pt = await _context.PickTasks
+                .Include(p => p.Order)
                 .Include(p => p.Warehouse)
                 .Include(p => p.Items)
                 .ThenInclude(pti => pti.Product)
@@ -408,6 +412,7 @@ namespace VietTien.API.Services.Implementations
                 PickTaskId = pt.Id,
                 OrderId = pt.OrderId,
                 OrderCode = pt.Order?.OrderCode ?? string.Empty,
+                FinalPayment = pt.Order?.FinalPayment ?? 0,
                 WarehouseName = pt.Warehouse?.Name ?? "Unknown",
                 WarehouseCode = pt.Warehouse?.Code ?? "UNKNOWN",
                 Status = pt.Status.ToString(),

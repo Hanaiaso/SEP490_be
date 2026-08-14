@@ -11,6 +11,7 @@ namespace VietTien.API.DTOs.Warehouse
         public int OrderProgress { get; set; }
         public DateTime? PickingStartedAt { get; set; }
         public DateTime? PickingCompletedAt { get; set; }
+        public decimal FinalPayment { get; set; }
 
         public List<WarehouseOrderItemDto> Items { get; set; } = new List<WarehouseOrderItemDto>();
         public List<PickTaskDto> PickTasks { get; set; } = new List<PickTaskDto>();
@@ -21,6 +22,7 @@ namespace VietTien.API.DTOs.Warehouse
         public Guid PickTaskId { get; set; }
         public Guid? OrderId { get; set; }
         public string OrderCode { get; set; } = string.Empty;
+        public decimal FinalPayment { get; set; }
         public string WarehouseName { get; set; } = string.Empty;
         public string WarehouseCode { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
