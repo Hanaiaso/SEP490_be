@@ -17,7 +17,7 @@ namespace VietTien.API.Services.Interfaces
         Task AcceptOrderAsync(Guid orderId, Guid staffId);
         Task ReportShortageAsync(Guid orderId, Guid staffId, ShortageAlertRequestDto alert);
         Task ConsolidateOrderAsync(Guid orderId, Guid staffId);
-        Task HandoverOrderAsync(Guid orderId, Guid staffId, HandoverRequestDto dto);
+        Task HandoverOrderAsync(Guid orderId, Guid staffId, string callerRole, HandoverRequestDto dto);
         Task PostGoodsIssueAsync(Guid orderId, Guid staffId);
 
         // FUL-08: gộp pick nhiều đơn — cần Sales Manager duyệt trước (MultiPickApproval)

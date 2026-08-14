@@ -748,8 +748,17 @@ namespace VietTien.API.Services.Implementations
             await _context.SaveChangesAsync();
         }
 
-        public async Task HandoverOrderAsync(Guid orderId, Guid staffId, HandoverRequestDto dto)
+        public async Task HandoverOrderAsync(Guid orderId, Guid staffId, string callerRole, HandoverRequestDto dto)
         {
+            // BR-034: xác nhận kép — mỗi bên chỉ được ký phần chữ ký của mình. Trước đây endpoint dùng
+            // chung [Authorize(Roles = "WarehouseStaff,SalesStaff,...")] không đối chiếu vai trò gọi
+            // với trường chữ ký đang gửi -> WarehouseStaff ký được cả SalesSignature (và ngược lại),
+            // vô hiệu hoá cơ chế xác nhận kép. CEO/Admin không bị chặn vì họ giám sát cả hai phía.
+            if (callerRole == nameof(SystemRole.WarehouseStaff) && !string.IsNullOrEmpty(dto.SalesSignature))
+                throw new UnauthorizedAccessException("Nhân viên kho không được ký thay phía Sales.");
+            if (callerRole == nameof(SystemRole.SalesStaff) && !string.IsNullOrEmpty(dto.WarehouseSignature))
+                throw new UnauthorizedAccessException("Sales không được ký thay phía kho.");
+
             var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
