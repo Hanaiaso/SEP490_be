@@ -544,7 +544,7 @@ namespace VietTien.Tests.Services
             var (product, _) = SeedDirectOrderStock(10);
             var profileCountBefore = _db.CustomerProfiles.Count(); // _customer có phone 0912345678
 
-            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 2, phone: _customer.PhoneNumber));
+            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 2, phone: _customer.PhoneNumber), _salesStaff.Id);
 
             _db.CustomerProfiles.Count().Should().Be(profileCountBefore); // không tạo profile mới
             _db.Orders.Single(o => o.Id == response.OrderId).CustomerProfileId.Should().Be(_profile.Id);
@@ -556,7 +556,7 @@ namespace VietTien.Tests.Services
         {
             var (product, _) = SeedDirectOrderStock(10);
 
-            var act = () => _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 11));
+            var act = () => _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 11), _salesStaff.Id);
 
             await act.Should().ThrowAsync<Exception>()
                 .WithMessage("Stock depleted by another transaction*");
@@ -575,7 +575,7 @@ namespace VietTien.Tests.Services
             var (product, _) = SeedDirectOrderStock(10);
             var profileCountBefore = _db.CustomerProfiles.Count();
 
-            var act = () => _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 1, phone: invalidPhone));
+            var act = () => _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 1, phone: invalidPhone), _salesStaff.Id);
 
             await act.Should().ThrowAsync<InvalidOperationException>()
                 .WithMessage("Số điện thoại không đúng định dạng.");
@@ -590,7 +590,7 @@ namespace VietTien.Tests.Services
             var request = DirectRequest(Guid.NewGuid(), 1);
             request.Items = new List<DirectOrderItemDto>();
 
-            var act = () => _sut.PlaceDirectOrderAsync(request);
+            var act = () => _sut.PlaceDirectOrderAsync(request, _salesStaff.Id);
 
             await act.Should().ThrowAsync<Exception>().WithMessage("Danh sách sản phẩm trống.");
             _db.Orders.Count().Should().Be(0);
@@ -604,7 +604,7 @@ namespace VietTien.Tests.Services
             var request = DirectRequest(product.Id, 2); // TotalAmount = FinalPayment = 100_000
             request.FinalPayment = 999_000m; // giả mạo số tiền phải trả
 
-            var act = () => _sut.PlaceDirectOrderAsync(request);
+            var act = () => _sut.PlaceDirectOrderAsync(request, _salesStaff.Id);
 
             await act.Should().ThrowAsync<Exception>().WithMessage("*FinalPayment*");
             _db.Orders.Count().Should().Be(0);
@@ -617,7 +617,7 @@ namespace VietTien.Tests.Services
         {
             var (product, _) = SeedDirectOrderStock(10);
 
-            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 4));
+            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 4), _salesStaff.Id);
 
             var order = _db.Orders.Single(o => o.Id == response.OrderId);
             order.IsExternalOrder.Should().BeTrue();
@@ -636,7 +636,7 @@ namespace VietTien.Tests.Services
         {
             var (product, _) = SeedDirectOrderStock(10);
 
-            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 4, method: PaymentMethod.Cash));
+            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 4, method: PaymentMethod.Cash), _salesStaff.Id);
 
             await _sut.ConfirmDirectOrderPaymentAsync(response.OrderId);
 
@@ -645,13 +645,33 @@ namespace VietTien.Tests.Services
             order.OrderStatus.Should().Be(OrderStatus.Completed);
         }
 
+        // L1-ORD-26c | State-Valid | Đơn quầy phải gắn SalesStaffId = nhân viên đang lập đơn (không phải
+        // AssignedSalesStaffId trên hồ sơ khách — với khách vãng lai/mới trường đó luôn null). BUGFIX: trước
+        // đây gán theo AssignedSalesStaffId, khiến đơn quầy biến mất khỏi "Quản lý đơn hàng" và dashboard
+        // của chính nhân viên vừa lập đơn (2 màn hình đó đều lọc theo Order.SalesStaffId == nhân viên đăng nhập).
+        [Fact]
+        public async Task L1_ORD_26c_DirectOrder_NewWalkInCustomer_AttributedToCreatingStaff()
+        {
+            var (product, _) = SeedDirectOrderStock(10);
+            var otherStaff = TestData.User(u => u.Role = SystemRole.SalesStaff);
+            _db.Users.Add(otherStaff);
+            await _db.SaveChangesAsync();
+
+            // SĐT hoàn toàn mới -> tạo khách vãng lai mới, AssignedSalesStaffId chắc chắn null trên hồ sơ.
+            var response = await _sut.PlaceDirectOrderAsync(
+                DirectRequest(product.Id, 1, phone: "0999888777"), otherStaff.Id);
+
+            var order = _db.Orders.Single(o => o.Id == response.OrderId);
+            order.SalesStaffId.Should().Be(otherStaff.Id, "đơn quầy phải thuộc về nhân viên đang lập đơn, không phải Sale phụ trách trên hồ sơ khách (thường null với khách mới)");
+        }
+
         // L1-ORD-27 | BVA-Max | Số lượng = đúng tồn kho -> cho phép, tồn về 0 (không âm)
         [Fact]
         public async Task L1_ORD_27_DirectOrder_QtyEqualsStock_StockToZero()
         {
             var (product, _) = SeedDirectOrderStock(10);
 
-            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 10));
+            var response = await _sut.PlaceDirectOrderAsync(DirectRequest(product.Id, 10), _salesStaff.Id);
 
             response.OrderId.Should().NotBeEmpty();
             _db.Inventories.Single(i => i.ProductId == product.Id).OnHandQuantity.Should().Be(0);

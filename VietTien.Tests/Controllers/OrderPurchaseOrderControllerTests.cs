@@ -165,7 +165,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task PlaceDirectOrder_Success_ReturnsOk()
         {
-            _service.Setup(s => s.PlaceDirectOrderAsync(It.IsAny<PlaceDirectOrderRequestDto>()))
+            _service.Setup(s => s.PlaceDirectOrderAsync(It.IsAny<PlaceDirectOrderRequestDto>(), It.IsAny<Guid>()))
                 .ReturnsAsync(new DirectOrderResponseDto());
 
             (await Build("SalesStaff").PlaceDirectOrder(new PlaceDirectOrderRequestDto())).StatusOf().Should().Be(200);
@@ -174,7 +174,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task PlaceDirectOrder_WhenProductMissing_Returns404()
         {
-            _service.Setup(s => s.PlaceDirectOrderAsync(It.IsAny<PlaceDirectOrderRequestDto>()))
+            _service.Setup(s => s.PlaceDirectOrderAsync(It.IsAny<PlaceDirectOrderRequestDto>(), It.IsAny<Guid>()))
                 .ThrowsAsync(new KeyNotFoundException("x"));
 
             (await Build("SalesStaff").PlaceDirectOrder(new PlaceDirectOrderRequestDto())).StatusOf().Should().Be(404);
@@ -183,7 +183,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task PlaceDirectOrder_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.PlaceDirectOrderAsync(It.IsAny<PlaceDirectOrderRequestDto>()))
+            _service.Setup(s => s.PlaceDirectOrderAsync(It.IsAny<PlaceDirectOrderRequestDto>(), It.IsAny<Guid>()))
                 .ThrowsAsync(new Exception("loi"));
 
             (await Build("SalesStaff").PlaceDirectOrder(new PlaceDirectOrderRequestDto())).StatusOf().Should().Be(400);

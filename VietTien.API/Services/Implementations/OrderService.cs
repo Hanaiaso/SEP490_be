@@ -663,7 +663,7 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
-        public async Task<DirectOrderResponseDto> PlaceDirectOrderAsync(PlaceDirectOrderRequestDto request)
+        public async Task<DirectOrderResponseDto> PlaceDirectOrderAsync(PlaceDirectOrderRequestDto request, Guid staffId)
         {
             if (request.Items == null || !request.Items.Any())
             {
@@ -781,7 +781,12 @@ namespace VietTien.API.Services.Implementations
                 CreatedAt = DateTime.UtcNow,
                 RequiresRedInvoice = false,
                 InvoicePdfUrl = pdfUrl,
-                SalesStaffId = customerProfile.AssignedSalesStaffId, // Snapshot Sale phụ trách tại thời điểm tạo đơn (LUỒNG 7)
+                // BUGFIX: trước đây gán theo customerProfile.AssignedSalesStaffId (Sale phụ trách khách
+                // trên hồ sơ) — với khách vãng lai/mới (đa số đơn bán tại quầy) trường này luôn null, nên
+                // đơn không gắn với ai cả. Mọi truy vấn "Quản lý đơn hàng"/dashboard của Sales Staff đều
+                // lọc theo Order.SalesStaffId == chính nhân viên đang đăng nhập -> đơn quầy biến mất khỏi
+                // cả 2 màn hình. Đơn bán trực tiếp tại quầy phải gắn với nhân viên đang đứng quầy lập đơn.
+                SalesStaffId = staffId,
                 ShippingAddress = string.IsNullOrWhiteSpace(request.Address) ? null : request.Address.Trim()
             };
 

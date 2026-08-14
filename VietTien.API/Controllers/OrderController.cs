@@ -132,7 +132,7 @@ namespace VietTien.API.Controllers
 
             try
             {
-                var response = await _orderService.PlaceDirectOrderAsync(request);
+                var response = await _orderService.PlaceDirectOrderAsync(request, GetUserId());
                 return Ok(response);
             }
             catch (KeyNotFoundException ex)

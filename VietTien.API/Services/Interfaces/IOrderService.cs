@@ -8,7 +8,7 @@ namespace VietTien.API.Services.Interfaces
     {
         Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId);
         Task<OrderResponseDto> PlaceOrderAsync(Guid userId, PlaceOrderRequestDto request);
-        Task<DirectOrderResponseDto> PlaceDirectOrderAsync(PlaceDirectOrderRequestDto request);
+        Task<DirectOrderResponseDto> PlaceDirectOrderAsync(PlaceDirectOrderRequestDto request, Guid staffId);
         Task<SePayQrResponseDto> GenerateSePayQrAsync(Guid orderId, Guid callerUserId, string callerRole);
         Task ProcessSePayWebhookAsync(SePayWebhookDto payload, string providedToken);
         Task<PaymentStatusResponseDto> GetPaymentStatusAsync(Guid orderId, Guid callerUserId, string callerRole);
