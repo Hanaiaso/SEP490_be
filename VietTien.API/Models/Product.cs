@@ -34,5 +34,6 @@ namespace VietTien.API.Models
         public ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();
         public ICollection<AiMarketingCampaign> MarketingCampaigns { get; set; } = new List<AiMarketingCampaign>();
         public ICollection<ProductReview> Reviews { get; set; } = new List<ProductReview>();
+        public ICollection<ProductImage> Images { get; set; } = new List<ProductImage>();
     }
 }

@@ -13,6 +13,7 @@ namespace VietTien.API.Data
         public DbSet<Address> Addresses => Set<Address>();
         public DbSet<Category> Categories => Set<Category>();
         public DbSet<Product> Products => Set<Product>();
+        public DbSet<ProductImage> ProductImages => Set<ProductImage>();
         public DbSet<ProductMaterial> ProductMaterials => Set<ProductMaterial>();
         public DbSet<Cart> Carts => Set<Cart>();
         public DbSet<CartItem> CartItems => Set<CartItem>();
@@ -374,6 +375,16 @@ namespace VietTien.API.Data
             modelBuilder.Entity<Product>()
                 .HasIndex(p => p.Sku)
                 .IsUnique();
+
+            // Quan hệ 1 - n giữa Product và ProductImage (gallery nhiều ảnh)
+            modelBuilder.Entity<ProductImage>()
+                .HasOne(pi => pi.Product)
+                .WithMany(p => p.Images)
+                .HasForeignKey(pi => pi.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ProductImage>()
+                .HasIndex(pi => new { pi.ProductId, pi.SortOrder });
 
             // Chống race tương tự ở MaterialService.CreateAsync/UpdateAsync (so trùng theo
             // Name.ToLower()). Collation mặc định của SQL Server (SQL_Latin1_General_CP1_CI_AS) đã

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using VietTien.API.Data;
 
@@ -11,9 +12,11 @@ using VietTien.API.Data;
 namespace VietTien.API.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260814092009_AddProductImages")]
+    partial class AddProductImages
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -3069,45 +3072,6 @@ namespace VietTien.API.Migrations
                     b.ToTable("SalesChangeRequestOrderDecisions");
                 });
 
-            modelBuilder.Entity("VietTien.API.Models.SalesRevenueTarget", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier")
-                        .HasDefaultValueSql("NEWSEQUENTIALID()");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Month")
-                        .HasColumnType("int");
-
-                    b.Property<Guid>("SalesStaffId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid>("SetByUserId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.Property<decimal>("TargetAmount")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("Year")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SetByUserId");
-
-                    b.HasIndex("SalesStaffId", "Year", "Month")
-                        .IsUnique();
-
-                    b.ToTable("SalesRevenueTargets");
-                });
-
             modelBuilder.Entity("VietTien.API.Models.StockAdjustment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5468,25 +5432,6 @@ namespace VietTien.API.Migrations
                     b.Navigation("Order");
 
                     b.Navigation("SalesChangeRequest");
-                });
-
-            modelBuilder.Entity("VietTien.API.Models.SalesRevenueTarget", b =>
-                {
-                    b.HasOne("VietTien.API.Models.User", "SalesStaff")
-                        .WithMany()
-                        .HasForeignKey("SalesStaffId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("VietTien.API.Models.User", "SetByUser")
-                        .WithMany()
-                        .HasForeignKey("SetByUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("SalesStaff");
-
-                    b.Navigation("SetByUser");
                 });
 
             modelBuilder.Entity("VietTien.API.Models.StockAdjustment", b =>
