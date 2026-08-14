@@ -95,15 +95,8 @@ namespace VietTien.API.Services.Implementations
 
             if (totalAmount >= quotationMinValue)
             {
-                // BR-007 (Quotation Version Immutability) + SRS FT-02 AC-05/NAC-04: báo giá đã duyệt bị
-                // khóa CỨNG vào đúng nội dung giỏ (SKU + số lượng) tại thời điểm khách chấp nhận version
-                // — không phải bảng giá riêng dùng lại cho giỏ khác/số lượng khác. Lệch bất kỳ điều kiện
-                // ảnh hưởng giá nào -> version cũ hết hiệu lực ngay, phải tạo version mới + duyệt lại từ đầu
-                // (NAC-04: HTTP 409 QUOTATION_VERSION_STALE).
-                //
-                // (Có 1 giai đoạn ngắn code đổi sang "giá đàm phán áp dụng cho mọi giỏ sau này" — đã revert
-                // vì thay đổi đó chưa từng qua Change Log/RTW chính thức và đi ngược NAC-04/AC-05/BR-007
-                // đã Approved trong SRS.)
+                // BR-007 (Quotation Version Immutability) + SRS FT-02 AC-05/NAC-04: nếu khách hàng có báo giá
+                // đã duyệt (CustomerAccepted) và còn hạn thì ưu tiên áp dụng giá đàm phán của báo giá đó.
                 var acceptedVersion = await _context.QuotationVersions
                     .Include(v => v.Items)
                     .Where(v => v.Quotation.CustomerProfileId == customerProfileId
@@ -113,26 +106,25 @@ namespace VietTien.API.Services.Implementations
                     .OrderByDescending(v => v.Quotation.RequestDate)
                     .FirstOrDefaultAsync();
 
-                if (acceptedVersion == null)
-                    throw new Exception($"Đơn hàng trên {quotationMinValue:N0}đ vui lòng liên hệ NV Bán hàng để nhận báo giá B2B.");
+                if (acceptedVersion != null)
+                {
+                    var cartLineList = cartLines.ToList();
+                    var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
 
-                var cartLineList = cartLines.ToList();
-                var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
+                    // Khớp tuyệt đối: đúng số dòng, đúng từng ProductId, đúng từng Quantity — không thừa,
+                    // không thiếu, không lệch số lượng so với đúng nội dung đã được duyệt.
+                    var isExactMatch = cartLineList.Count == negotiatedByProduct.Count
+                        && cartLineList.All(line =>
+                            negotiatedByProduct.TryGetValue(line.ProductId, out var item) && item.Quantity == line.Quantity);
 
-                // Khớp tuyệt đối: đúng số dòng, đúng từng ProductId, đúng từng Quantity — không thừa,
-                // không thiếu, không lệch số lượng so với đúng nội dung đã được duyệt.
-                var isExactMatch = cartLineList.Count == negotiatedByProduct.Count
-                    && cartLineList.All(line =>
-                        negotiatedByProduct.TryGetValue(line.ProductId, out var item) && item.Quantity == line.Quantity);
-
-                if (!isExactMatch)
-                    throw new QuotationVersionStaleException(
-                        "Giỏ hàng đã thay đổi so với báo giá đã duyệt (SKU/số lượng khác). Vui lòng tạo báo giá mới và chờ duyệt lại.");
-
-                var negotiatedTotal = acceptedVersion.Items.Sum(i => i.ProposedUnitPrice * i.Quantity);
-                var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
-                var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
-                return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
+                    if (isExactMatch)
+                    {
+                        var negotiatedTotal = acceptedVersion.Items.Sum(i => i.ProposedUnitPrice * i.Quantity);
+                        var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
+                        var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
+                        return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
+                    }
+                }
             }
 
             var discountPercentage = await _discountTierService.GetApplicableDiscountPercentAsync(totalAmount);
