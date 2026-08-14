@@ -24,6 +24,7 @@ namespace VietTien.API.Repositories.Implementations
             var query = _context.Products
                 .Include(p => p.Category)
                 .Include(p => p.Inventories)
+                .Include(p => p.Images)
                 .Where(p => !p.IsDiscontinued)
                 .AsQueryable();
 
@@ -67,6 +68,7 @@ namespace VietTien.API.Repositories.Implementations
             return await _context.Products
                 .Include(p => p.Category)
                 .Include(p => p.Inventories)
+                .Include(p => p.Images)
                 .FirstOrDefaultAsync(p => p.Id == id && !p.IsDiscontinued);
         }
 
@@ -75,6 +77,7 @@ namespace VietTien.API.Repositories.Implementations
             return await _context.Products
                 .Include(p => p.Category)
                 .Include(p => p.Inventories)
+                .Include(p => p.Images)
                 .FirstOrDefaultAsync(p => p.Id == id);
         }
 
@@ -101,6 +104,7 @@ namespace VietTien.API.Repositories.Implementations
             var query = _context.Products
                 .Include(p => p.Category)
                 .Include(p => p.Inventories)
+                .Include(p => p.Images)
                 .AsQueryable();
 
             if (isDiscontinued.HasValue)
