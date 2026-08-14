@@ -1,6 +1,5 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http;
-using VietTien.API.Infrastructure.Validation;
 
 namespace VietTien.API.DTOs.Product
 {
@@ -22,6 +21,14 @@ namespace VietTien.API.DTOs.Product
         public int ReviewCount { get; set; }
     }
 
+    /// <summary>1 ảnh trong gallery sản phẩm</summary>
+    public class ProductImageDto
+    {
+        public Guid Id { get; set; }
+        public string ImageUrl { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+    }
+
     /// <summary>DTO trả về khi lấy chi tiết 1 sản phẩm</summary>
     public class ProductDetailDto
     {
@@ -31,7 +38,12 @@ namespace VietTien.API.DTOs.Product
         public decimal StandardListedPrice { get; set; }
         public string? Description { get; set; }
         public string? Specifications { get; set; }
+
+        /// <summary>Ảnh đại diện (trùng với ảnh đầu tiên trong Images) — giữ lại để tương thích ngược</summary>
         public string? ImageUrl { get; set; }
+
+        /// <summary>Toàn bộ ảnh sản phẩm theo thứ tự hiển thị</summary>
+        public List<ProductImageDto> Images { get; set; } = new();
         public Guid CategoryId { get; set; }
         public string CategoryName { get; set; } = string.Empty;
 
@@ -112,8 +124,8 @@ namespace VietTien.API.DTOs.Product
 
         public string? Specifications { get; set; }
 
-        [ImageFile(5)]
-        public IFormFile? ImageFile { get; set; }
+        /// <summary>Danh sách ảnh sản phẩm (ảnh đầu tiên trở thành ảnh đại diện). Từng file được validate thủ công trong ProductService.</summary>
+        public List<IFormFile>? ImageFiles { get; set; }
     }
 
     /// <summary>DTO cập nhật sản phẩm (dùng bởi CEO/Admin)</summary>
@@ -141,8 +153,11 @@ namespace VietTien.API.DTOs.Product
 
         public string? Specifications { get; set; }
 
-        [ImageFile(5)]
-        public IFormFile? ImageFile { get; set; }
+        /// <summary>Ảnh mới cần thêm vào gallery (giữ nguyên ảnh cũ trừ khi liệt kê trong RemoveImageIds). Từng file được validate thủ công trong ProductService.</summary>
+        public List<IFormFile>? ImageFiles { get; set; }
+
+        /// <summary>Id các ProductImage cần xóa khỏi gallery</summary>
+        public List<Guid>? RemoveImageIds { get; set; }
 
         /// <summary>Ngừng kinh doanh sản phẩm (true) hoặc khôi phục lại (false)</summary>
         public bool IsDiscontinued { get; set; } = false;

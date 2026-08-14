@@ -26,16 +26,26 @@ namespace VietTien.API.Infrastructure.Validation
             if (value is not IFormFile file)
                 return ValidationResult.Success;
 
-            if (file.Length == 0)
-                return new ValidationResult("File ảnh không được để trống.");
+            var error = Validate(file, _maxBytes);
+            return error is null ? ValidationResult.Success : new ValidationResult(error);
+        }
 
-            if (file.Length > _maxBytes)
-                return new ValidationResult($"Kích thước ảnh vượt quá giới hạn {_maxBytes / (1024 * 1024)}MB.");
+        /// <summary>Validate thủ công 1 IFormFile (dùng cho danh sách nhiều file, nơi ValidationAttribute không áp dụng trực tiếp được)</summary>
+        public static string? Validate(IFormFile file, int maxMegabytes)
+            => Validate(file, (long)maxMegabytes * 1024 * 1024);
+
+        private static string? Validate(IFormFile file, long maxBytes)
+        {
+            if (file.Length == 0)
+                return "File ảnh không được để trống.";
+
+            if (file.Length > maxBytes)
+                return $"Kích thước ảnh vượt quá giới hạn {maxBytes / (1024 * 1024)}MB.";
 
             if (!AllowedContentTypes.Contains(file.ContentType?.ToLowerInvariant()))
-                return new ValidationResult("Định dạng ảnh không hợp lệ. Chỉ chấp nhận JPEG, PNG, WEBP hoặc GIF.");
+                return "Định dạng ảnh không hợp lệ. Chỉ chấp nhận JPEG, PNG, WEBP hoặc GIF.";
 
-            return ValidationResult.Success;
+            return null;
         }
     }
 }
