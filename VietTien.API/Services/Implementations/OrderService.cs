@@ -1006,6 +1006,16 @@ namespace VietTien.API.Services.Implementations
                             && (scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId))
                 .ToListAsync();
 
+            // Mục tiêu/ngày = mục tiêu THÁNG (Sales Manager đặt, bảng SalesRevenueTargets) chia đều cho
+            // số ngày trong tháng hiện tại — không còn hardcode 5tr/ngày cho mọi Sales Staff.
+            var monthlyTargetQuery = _context.SalesRevenueTargets
+                .Where(t => t.Year == today.Year && t.Month == today.Month);
+            if (scopedSalesStaffId.HasValue)
+                monthlyTargetQuery = monthlyTargetQuery.Where(t => t.SalesStaffId == scopedSalesStaffId.Value);
+            var monthlyTargetTotal = await monthlyTargetQuery.SumAsync(t => (decimal?)t.TargetAmount) ?? 0m;
+            var daysInMonth = DateTime.DaysInMonth(today.Year, today.Month);
+            var dailyTarget = Math.Round(monthlyTargetTotal / daysInMonth / 1_000_000m, 2); // triệu đồng/ngày
+
             var culture = new System.Globalization.CultureInfo("vi-VN");
             for (int i = 6; i >= 0; i--)
             {
@@ -1021,7 +1031,7 @@ namespace VietTien.API.Services.Implementations
                 {
                     Day = dayName,
                     Revenue = Math.Round(dailyRevenue, 2),
-                    Target = 5.0m // Giả định target 5 triệu/ngày
+                    Target = dailyTarget
                 });
             }
 

@@ -104,6 +104,7 @@ builder.Services.AddScoped<IScheduledJob, QuotationExpiryJob>();
 builder.Services.AddScoped<IScheduledJob, UpcomingDeliveryReminderJob>();
 
 // Admin module (Phase 3): KPI engine + dashboard theo role
+builder.Services.AddScoped<ISalesTargetService, SalesTargetService>();
 builder.Services.AddScoped<IKpiService, KpiService>();
 builder.Services.AddScoped<ISalesStaffDashboardService, SalesStaffDashboardService>();
 builder.Services.AddScoped<ISalesManagerDashboardService, SalesManagerDashboardService>();

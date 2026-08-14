@@ -24,6 +24,7 @@ namespace VietTien.API.Data
         public DbSet<Material> Materials => Set<Material>();
         public DbSet<ReturnedGoodsLog> ReturnedGoodsLogs => Set<ReturnedGoodsLog>();
         public DbSet<CustomerDebt> CustomerDebts => Set<CustomerDebt>();
+        public DbSet<SalesRevenueTarget> SalesRevenueTargets => Set<SalesRevenueTarget>();
         public DbSet<EmployeeSalary> EmployeeSalaries => Set<EmployeeSalary>();
         public DbSet<MonthlyPayroll> MonthlyPayrolls => Set<MonthlyPayroll>();
         public DbSet<PayrollDetail> PayrollDetails => Set<PayrollDetail>();
@@ -178,6 +179,24 @@ namespace VietTien.API.Data
                 .WithMany()
                 .HasForeignKey(u => u.ReferredBySalesStaffId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            // --- MỤC TIÊU DOANH THU (Sales Manager đặt cho từng Sales Staff theo tháng) ---
+            modelBuilder.Entity<SalesRevenueTarget>()
+                .HasOne(t => t.SalesStaff)
+                .WithMany()
+                .HasForeignKey(t => t.SalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<SalesRevenueTarget>()
+                .HasOne(t => t.SetByUser)
+                .WithMany()
+                .HasForeignKey(t => t.SetByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // Mỗi Sales Staff chỉ có 1 mục tiêu cho 1 tháng/năm — đặt lại thì UPDATE, không tạo dòng mới.
+            modelBuilder.Entity<SalesRevenueTarget>()
+                .HasIndex(t => new { t.SalesStaffId, t.Year, t.Month })
+                .IsUnique();
 
             // --- PHÂN HỆ THÔNG BÁO ---
             modelBuilder.Entity<Notification>()

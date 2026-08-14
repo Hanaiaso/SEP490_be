@@ -1,5 +1,6 @@
 using FluentAssertions;
 using VietTien.API.Models;
+using VietTien.API.Services.Implementations;
 using VietTien.Tests.TestHelpers;
 using Xunit;
 
@@ -156,6 +157,25 @@ namespace VietTien.Tests.Services
 
             stats.Kpi.PendingDebt.Should().Be(300_000m,
                 "chỉ tính khoản nợ THẬT (CustomerDebts InDebt), không cộng FinalPayment của đơn đang chờ/đã hủy");
+        }
+
+        // L1-ORD-65c | EP-Valid | Mục tiêu/ngày trên biểu đồ 7 ngày = mục tiêu THÁNG (Sales Manager đặt)
+        // chia đều số ngày trong tháng — không còn hardcode "5 triệu/ngày" cho mọi Sales Staff.
+        [Fact]
+        public async Task L1_ORD_65c_SalesDashboardStats_DailyTarget_DerivedFromMonthlyTarget()
+        {
+            var manager = TestData.User(u => u.Role = SystemRole.SalesManager);
+            _db.Users.Add(manager);
+            _db.SaveChanges();
+            var now = DateTime.UtcNow;
+            var daysInMonth = DateTime.DaysInMonth(now.Year, now.Month);
+            await new SalesTargetService(_db).SetTargetAsync(new API.DTOs.Admin.SetSalesTargetRequest
+            { SalesStaffId = _salesStaff.Id, Year = now.Year, Month = now.Month, TargetAmount = daysInMonth * 2_000_000m }, manager.Id);
+
+            var stats = await _sut.GetSalesDashboardStatsAsync(_salesStaff.Id);
+
+            stats.Last7DaysRevenue.Should().OnlyContain(d => d.Target == 2.0m,
+                "mục tiêu tháng chia đều cho số ngày trong tháng phải ra đúng 2 triệu/ngày");
         }
 
         // ── Block: Truy vấn công khai & thống kê ────────────────────────────

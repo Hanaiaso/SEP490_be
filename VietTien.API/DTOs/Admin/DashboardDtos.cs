@@ -18,6 +18,13 @@ namespace VietTien.API.DTOs.Admin
 
         public double ReturningCustomerRate { get; set; } // 0..1
         public int CustomersInScopeCount { get; set; }
+
+        // Mục tiêu doanh thu THÁNG HIỆN TẠI do Sales Manager đặt — luôn tính theo tháng dương lịch
+        // hiện tại, KHÔNG phụ thuộc PeriodFrom/PeriodTo (2 mốc đó có thể tuỳ chỉnh, còn mục tiêu
+        // luôn cố định theo tháng).
+        public decimal MonthlyTarget { get; set; } // 0 = chưa được Sales Manager đặt mục tiêu
+        public decimal MonthlyRevenue { get; set; } // doanh thu thực thu (AmountPaid) từ đầu tháng tới nay
+        public double? MonthlyTargetAchievementRate { get; set; } // MonthlyRevenue / MonthlyTarget, null nếu chưa có mục tiêu
     }
 
     public class SalesStaffKpiDto

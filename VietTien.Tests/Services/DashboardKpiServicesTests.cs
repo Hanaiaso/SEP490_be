@@ -33,7 +33,7 @@ namespace VietTien.Tests.Services
 
         public DashboardKpiServicesTests()
         {
-            _kpi = new KpiService(_db);
+            _kpi = new KpiService(_db, new SalesTargetService(_db));
         }
 
         private User SeedSales()
@@ -79,6 +79,41 @@ namespace VietTien.Tests.Services
             dashboard.Kpi.CompletedOrderCount.Should().Be(5, "chỉ 5 đơn của S1");
             dashboard.Kpi.Revenue.Should().Be(5_000_000m, "không lẫn doanh thu 8tr của S2");
             dashboard.Kpi.SalesStaffId.Should().Be(s1.Id);
+        }
+
+        // L1-DASH-01b | EP-Valid | KpiSnapshotDto phải mang theo mục tiêu doanh thu tháng do Sales Manager
+        // đặt (SalesRevenueTargets) và % đạt được — không phụ thuộc PeriodFrom/PeriodTo tuỳ chỉnh.
+        [Fact]
+        public async Task L1_DASH_01b_Snapshot_IncludesMonthlyTargetAndAchievementRate()
+        {
+            var s1 = SeedSales();
+            var manager = TestData.User(u => u.Role = SystemRole.SalesManager);
+            _db.Users.Add(manager);
+            _db.SaveChanges();
+            var targetService = new SalesTargetService(_db);
+            var now = DateTime.UtcNow;
+            await targetService.SetTargetAsync(new API.DTOs.Admin.SetSalesTargetRequest
+            { SalesStaffId = s1.Id, Year = now.Year, Month = now.Month, TargetAmount = 4_000_000m }, manager.Id);
+            SeedCompletedOrder(s1.Id, 2_000_000m); // AmountPaid = FinalPayment = 2tr (SeedCompletedOrder gán sẵn)
+
+            var snapshot = await _kpi.GetSnapshotAsync(s1.Id, _from, _to);
+
+            snapshot.MonthlyTarget.Should().Be(4_000_000m);
+            snapshot.MonthlyRevenue.Should().Be(2_000_000m);
+            snapshot.MonthlyTargetAchievementRate.Should().BeApproximately(0.5, 0.001);
+        }
+
+        // L1-DASH-01c | EP-Valid | Chưa được Sales Manager đặt mục tiêu -> MonthlyTarget=0, rate=null (không chia 0)
+        [Fact]
+        public async Task L1_DASH_01c_Snapshot_NoTargetSet_ReturnsZeroTargetAndNullRate()
+        {
+            var s1 = SeedSales();
+            SeedCompletedOrder(s1.Id, 2_000_000m);
+
+            var snapshot = await _kpi.GetSnapshotAsync(s1.Id, _from, _to);
+
+            snapshot.MonthlyTarget.Should().Be(0);
+            snapshot.MonthlyTargetAchievementRate.Should().BeNull();
         }
 
         // L1-DASH-03 | EP-Valid | Sales Manager thấy số liệu toàn nhóm + breakdown theo từng nhân viên

@@ -17,10 +17,12 @@ namespace VietTien.API.Services.Implementations
         };
 
         private readonly ApplicationDbContext _context;
+        private readonly ISalesTargetService _salesTargetService;
 
-        public KpiService(ApplicationDbContext context)
+        public KpiService(ApplicationDbContext context, ISalesTargetService salesTargetService)
         {
             _context = context;
+            _salesTargetService = salesTargetService;
         }
 
         public async Task<KpiSnapshotDto> GetSnapshotAsync(Guid? salesStaffId, DateTime from, DateTime to)
@@ -72,6 +74,8 @@ namespace VietTien.API.Services.Implementations
             }
             var returningCustomerRate = customersInScope.Count == 0 ? 0 : (double)returningCount / customersInScope.Count;
 
+            var (monthlyTarget, monthlyRevenue) = await _salesTargetService.GetCurrentMonthTargetAndRevenueAsync(salesStaffId);
+
             return new KpiSnapshotDto
             {
                 SalesStaffId = salesStaffId,
@@ -83,7 +87,10 @@ namespace VietTien.API.Services.Implementations
                 DeliveryAttemptedOrderCount = deliveryAttemptedCount,
                 ProcessingSpeedAvgHours = processingSpeedAvgHours,
                 ReturningCustomerRate = returningCustomerRate,
-                CustomersInScopeCount = customersInScope.Count
+                CustomersInScopeCount = customersInScope.Count,
+                MonthlyTarget = monthlyTarget,
+                MonthlyRevenue = monthlyRevenue,
+                MonthlyTargetAchievementRate = monthlyTarget > 0 ? (double)(monthlyRevenue / monthlyTarget) : null
             };
         }
     }
