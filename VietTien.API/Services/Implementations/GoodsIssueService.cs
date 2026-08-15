@@ -102,7 +102,8 @@ namespace VietTien.API.Services.Implementations
                 {
                     ProductId = item.ProductId,
                     MaterialId = item.MaterialId,
-                    Quantity = item.Quantity
+                    Quantity = item.Quantity,
+                    Note = item.Note?.Trim()
                 });
             }
 
@@ -352,7 +353,8 @@ namespace VietTien.API.Services.Implementations
                     {
                         ProductId = item.ProductId,
                         MaterialId = item.MaterialId,
-                        Quantity = item.Quantity
+                        Quantity = item.Quantity,
+                        Note = item.Note
                     });
 
                     Inventory? inventory = null;
@@ -442,7 +444,8 @@ namespace VietTien.API.Services.Implementations
                     ItemSku = i.Product != null ? i.Product.Sku : string.Empty,
                     ItemType = i.MaterialId != null ? "Material" : "Product",
                     Unit = i.Product != null ? i.Product.Unit : i.Material != null ? i.Material.Unit : string.Empty,
-                    Quantity = i.Quantity
+                    Quantity = i.Quantity,
+                    Note = i.Note
                 }).ToList()
             };
         }
