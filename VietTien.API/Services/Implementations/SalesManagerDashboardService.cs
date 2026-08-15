@@ -61,12 +61,19 @@ namespace VietTien.API.Services.Implementations
                 })
                 .ToListAsync();
 
-            var overdueDebts = await _context.CustomerDebts
+            // Field OverdueDays trong CustomerDebt chỉ được set 1 lần lúc tạo (luôn = 0) và không có
+            // job nào cập nhật theo thời gian — tính lại số ngày quá hạn thực tế ở đây (in-memory,
+            // giống OrderService.GetDebtsAsync) thay vì tin giá trị đã lưu hoặc dùng EF.Functions.DateDiffDay
+            // (chỉ dịch được sang SQL Server, không chạy được trên EF InMemory dùng trong unit test).
+            var allInDebtOrders = await _context.CustomerDebts
                 .AsNoTracking()
                 .Include(d => d.CustomerProfile)
                 .Include(d => d.Order)
                 .Where(d => d.Status == DebtStatus.InDebt)
-                .OrderByDescending(d => d.OverdueDays)
+                .ToListAsync();
+
+            var overdueDebts = allInDebtOrders
+                .OrderByDescending(d => (DateTime.UtcNow - d.CreatedAt).TotalDays)
                 .Take(ListLimit)
                 .Select(d => new CustomerDebtDto
                 {
@@ -76,11 +83,13 @@ namespace VietTien.API.Services.Implementations
                     OrderId = d.OrderId,
                     OrderCode = d.Order.OrderCode,
                     DebtAmount = d.DebtAmount,
-                    OverdueDays = d.OverdueDays
+                    OverdueDays = Math.Max(0, (int)(DateTime.UtcNow - d.CreatedAt).TotalDays)
                 })
-                .ToListAsync();
+                .ToList();
 
-            var todayStart = DateTime.UtcNow.Date;
+            // "Hôm nay" tính theo giờ Việt Nam (UTC+7), không phải ngày UTC — tránh tính nhầm các vi
+            // phạm SLA phát sinh vào sáng sớm giờ VN (vẫn là ngày UTC hôm trước) sang hôm qua.
+            var todayStart = DateTime.UtcNow.AddHours(7).Date.AddHours(-7);
             var codSlaBreachCountToday = await _context.Notifications
                 .AsNoTracking()
                 .Where(n => n.Type == NotificationType.SYS_04_CodUnconfirmed30m && n.CreatedAt >= todayStart)
