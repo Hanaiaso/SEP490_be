@@ -164,7 +164,7 @@ namespace VietTien.API.Controllers
                     }).ToList()
                 }, staffId);
 
-                await _goodsIssueService.UploadProofAsync(created.Id, evidencePhoto);
+                await _goodsIssueService.UploadProofAsync(created.Id, staffId, evidencePhoto);
                 var posted = await _goodsIssueService.PostGoodsIssueAsync(created.Id, staffId);
 
                 return Ok(posted);
@@ -172,6 +172,10 @@ namespace VietTien.API.Controllers
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (InvalidOperationException ex)
             {

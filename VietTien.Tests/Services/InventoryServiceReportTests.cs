@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using VietTien.API.Data;
@@ -27,7 +27,7 @@ namespace VietTien.Tests.Services
 
         public InventoryServiceReportTests()
             => _sut = new InventoryService(_db, MockHubContext.Create<WarehouseHub>().Object,
-                new Mock<ILogger<InventoryService>>().Object);
+                new Mock<ILogger<InventoryService>>().Object, TestWarehouseAccessGuard.Create(_db));
 
         private Material SeedMaterial(string name = "Màng PE", double safety = 100)
         {

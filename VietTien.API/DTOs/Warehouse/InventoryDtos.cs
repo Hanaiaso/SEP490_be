@@ -16,6 +16,7 @@ namespace VietTien.API.DTOs.Warehouse
         public string? WarehouseName { get; set; }
         public double AvailableQuantity { get; set; }
         public double Threshold { get; set; }
+        public string? Unit { get; set; }
         public string SuggestedAction { get; set; } = string.Empty;
     }
 

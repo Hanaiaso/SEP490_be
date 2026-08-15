@@ -65,23 +65,38 @@ namespace VietTien.API.Services.Implementations
                 .ToListAsync();
 
             var orderIds = orders.Select(o => o.Id).ToList();
-            var handovers = tabType == "Handover" 
+            var handovers = tabType == "Handover"
                 ? await _context.HandoverRecords.Where(h => orderIds.Contains(h.OrderId)).ToListAsync()
                 : new List<HandoverRecord>();
+
+            // OrderItem.PackedQuantity không bao giờ được ghi (tiến trình pick/pack thật nằm ở
+            // PickTaskItem.PickedQuantity, cập nhật trong UpdateItemPickProgressAsync) — nạp trước
+            // PickTask theo lô để tính đúng % như GetOrderDetailAsync, tránh cột "Tiến trình" luôn 0%.
+            var pickTasksByOrder = (await _context.PickTasks
+                    .Include(pt => pt.Items)
+                    .Where(pt => orderIds.Contains(pt.OrderId))
+                    .ToListAsync())
+                .GroupBy(pt => pt.OrderId)
+                .ToDictionary(g => g.Key, g => g.ToList());
 
             var orderDtos = new List<WarehouseOrderListDto>();
             foreach (var o in orders)
             {
                 var handover = handovers.FirstOrDefault(h => h.OrderId == o.Id);
+                var orderPickTasks = pickTasksByOrder.TryGetValue(o.Id, out var pts) ? pts : new List<PickTask>();
+                var totalRequestedQty = o.OrderItems.Sum(i => i.Quantity);
+                var totalPackedQty = orderPickTasks.Any()
+                    ? orderPickTasks.SelectMany(pt => pt.Items).Sum(i => i.PickedQuantity)
+                    : o.OrderItems.Sum(i => i.PackedQuantity);
                 var dto = new WarehouseOrderListDto
                 {
                     OrderId = o.Id,
                     OrderCode = o.OrderCode,
                     ConfirmedAt = o.CreatedAt,
-                    TotalQuantity = o.OrderItems.Sum(i => i.Quantity),
+                    TotalQuantity = totalRequestedQty,
                     FinalPayment = o.FinalPayment,
                     Status = o.FulfillmentStatus.ToString(),
-                    OrderProgress = o.OrderItems.Sum(i => i.Quantity) > 0 ? (o.OrderItems.Sum(i => i.PackedQuantity) * 100 / o.OrderItems.Sum(i => i.Quantity)) : 0,
+                    OrderProgress = totalRequestedQty > 0 ? (totalPackedQty * 100 / totalRequestedQty) : 0,
                     PickingStartedAt = o.PickingStartedAt,
                     PickingCompletedAt = o.PickingCompletedAt,
                     AllocatedWarehouse = "Kho mặc định",
@@ -237,11 +252,18 @@ namespace VietTien.API.Services.Implementations
                 
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
+            // Trạng thái Picking được chấp nhận làm đầu vào (cho phép nhận lại đơn của chính mình),
+            // nên nếu không đối chiếu người sở hữu thì một dialog cũ còn mở sẽ cướp đơn đang được
+            // người khác xử lý mà vẫn trả 200. Dùng đúng pattern của AcceptPickTaskAsync/
+            // ConsolidateOrderAsync/ReportShortageAsync trong chính file này.
+            if (order.WarehouseStaffId.HasValue && order.WarehouseStaffId.Value != staffId)
+                throw new UnauthorizedAccessException("Đơn hàng này đã được nhân viên khác tiếp nhận.");
+
             if (order.FulfillmentStatus != FulfillmentStatus.Allocated && order.FulfillmentStatus != FulfillmentStatus.Unallocated && order.FulfillmentStatus != FulfillmentStatus.Picking)
                 throw new Exception("Đơn hàng chưa được phân bổ hoặc không ở trạng thái hợp lệ, không thể xử lý.");
 
             order.FulfillmentStatus = FulfillmentStatus.Picking;
-            order.WarehouseStaffId = staffId;
+            order.WarehouseStaffId ??= staffId;
             order.PickingStartedAt = DateTime.UtcNow;
 
             // Generate PickTasks if they don't exist (for older orders before the new flow)
@@ -362,6 +384,17 @@ namespace VietTien.API.Services.Implementations
             else if (tabType == "History")
             {
                 query = query.Where(pt => pt.Status == PickTaskStatus.Completed);
+            }
+            else if (tabType == "Completed")
+            {
+                // Khớp đúng định nghĩa "Hoàn tất hôm nay" của WarehouseDashboardService (CompletedToday) —
+                // trước đây tabType này không được nhận diện (rơi vào default, không lọc gì cả) nên
+                // dashboard bấm vào KPI "Hoàn tất hôm nay" lại hiện danh sách pick task không liên quan.
+                var localToday = DateTime.UtcNow.AddHours(7).Date;
+                var todayStart = localToday.AddHours(-7);
+                var tomorrowStart = todayStart.AddDays(1);
+                query = query.Where(pt => pt.Status == PickTaskStatus.Completed
+                    && pt.CompletedAt != null && pt.CompletedAt >= todayStart && pt.CompletedAt < tomorrowStart);
             }
 
             query = query.OrderBy(pt => pt.CreatedAt);

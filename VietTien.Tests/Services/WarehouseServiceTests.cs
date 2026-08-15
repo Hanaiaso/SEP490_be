@@ -114,6 +114,39 @@ namespace VietTien.Tests.Services
             _db.Orders.Single(o => o.Id == order.Id).WarehouseStaffId.Should().BeNull();
         }
 
+        // Đơn đang Picking và đã thuộc nhân viên khác -> không được cướp quyền sở hữu.
+        // Trạng thái Picking là đầu vào hợp lệ của AcceptOrderAsync, nên nếu thiếu guard quyền sở hữu
+        // thì một dialog cũ còn mở bấm "Nhận đơn" sẽ ghi đè WarehouseStaffId và vẫn trả về thành công.
+        [Fact]
+        public async Task AcceptOrder_WhenAlreadyOwnedByAnotherStaff_IsForbiddenAndOwnerUnchanged()
+        {
+            var otherStaff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
+            _db.Users.Add(otherStaff);
+            _db.SaveChanges();
+            SeedDefaultWarehouseStock(_p1.Id, 10);
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Picking, otherStaff.Id);
+
+            var act = () => _sut.AcceptOrderAsync(order.Id, _whStaff.Id);
+
+            await act.Should().ThrowAsync<UnauthorizedAccessException>();
+            _db.ChangeTracker.Clear();
+            _db.Orders.Single(o => o.Id == order.Id).WarehouseStaffId
+                .Should().Be(otherStaff.Id, "đơn phải ở nguyên tay người đã nhận trước đó");
+        }
+
+        // Nhận lại chính đơn của mình (F5/bấm 2 lần) vẫn phải thành công — guard không được chặn nhầm.
+        [Fact]
+        public async Task AcceptOrder_WhenAlreadyOwnedBySameStaff_IsIdempotent()
+        {
+            SeedDefaultWarehouseStock(_p1.Id, 10);
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Picking, _whStaff.Id);
+
+            await _sut.AcceptOrderAsync(order.Id, _whStaff.Id);
+
+            _db.ChangeTracker.Clear();
+            _db.Orders.Single(o => o.Id == order.Id).WarehouseStaffId.Should().Be(_whStaff.Id);
+        }
+
         //  ▶ Block: ReportShortageAsync()
 
         // L1-WH-05 | State-Valid | Đang picking, báo thiếu hàng -> đơn quay về PendingConfirmation, SalesManager được báo

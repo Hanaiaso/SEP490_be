@@ -12,13 +12,15 @@ namespace VietTien.API.Services.Implementations
         private readonly INotificationService _notificationService;
         private readonly ICloudinaryService _cloudinaryService;
         private readonly ILogger<GoodsReceiptService> _logger;
+        private readonly IAuditLogService _auditLogService;
 
-        public GoodsReceiptService(ApplicationDbContext context, INotificationService notificationService, ICloudinaryService cloudinaryService, ILogger<GoodsReceiptService> logger)
+        public GoodsReceiptService(ApplicationDbContext context, INotificationService notificationService, ICloudinaryService cloudinaryService, ILogger<GoodsReceiptService> logger, IAuditLogService auditLogService)
         {
             _context = context;
             _notificationService = notificationService;
             _cloudinaryService = cloudinaryService;
             _logger = logger;
+            _auditLogService = auditLogService;
         }
 
         public async Task<GoodsReceiptDto> CreateFromPOAsync(Guid poId, Guid warehouseStaffId, CreateGoodsReceiptRequest request)
@@ -295,6 +297,20 @@ namespace VietTien.API.Services.Implementations
             }
 
             await _context.SaveChangesAsync();
+
+            // BR-022: Post phiếu nhận hàng cộng thẳng vào OnHandQuantity (và có thể tạo cách ly) ->
+            // bắt buộc audit trail, trước đây luồng nhập kho không ghi AuditLog nào cả.
+            var receiptActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == warehouseStaffId);
+            await _auditLogService.LogAsync(
+                entityName: "GoodsReceipt",
+                entityId: receipt.Id.ToString(),
+                action: "POST",
+                actorUserId: warehouseStaffId,
+                actorEmail: receiptActor?.Email,
+                actorRole: "WarehouseStaff",
+                before: new { Status = "Draft", receipt.Code },
+                after: new { Status = "Posted", receipt.Code, PoStatus = po.Status.ToString() },
+                reason: $"Nhận hàng cho PO {po.Code}");
 
             if (hasDiscrepancy)
             {

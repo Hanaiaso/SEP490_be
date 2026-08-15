@@ -82,6 +82,10 @@ namespace VietTien.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });

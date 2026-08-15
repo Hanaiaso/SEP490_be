@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using VietTien.API.DTOs.Warehouse;
@@ -21,7 +21,7 @@ namespace VietTien.Tests.Services
 
         public InventoryServiceTests()
         {
-            _sut = new InventoryService(_db, MockHubContext.Create<WarehouseHub>().Object, new Mock<ILogger<InventoryService>>().Object);
+            _sut = new InventoryService(_db, MockHubContext.Create<WarehouseHub>().Object, new Mock<ILogger<InventoryService>>().Object, TestWarehouseAccessGuard.Create(_db));
         }
 
         // L1-INV-01 | EP-Valid | Lọc theo kho + từ khóa -> chỉ trả dòng khớp trong đúng kho

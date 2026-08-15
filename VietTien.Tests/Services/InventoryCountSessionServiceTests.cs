@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
@@ -27,7 +27,7 @@ namespace VietTien.Tests.Services
             _db = TestDbFactory.Create();
             _sysConfig.Setup(s => s.GetEffectiveValueAsync("INVENTORY_COUNT_VARIANCE_THRESHOLD", It.IsAny<DateTime?>()))
                       .ReturnsAsync("5");
-            _sut = new InventoryCountSessionService(_db, _sysConfig.Object, _noti.Object);
+            _sut = new InventoryCountSessionService(_db, _sysConfig.Object, _noti.Object, TestWarehouseAccessGuard.Create(_db));
         }
 
         private (Warehouse warehouse, WarehouseLocation location) SeedWarehouse()
@@ -93,7 +93,7 @@ namespace VietTien.Tests.Services
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var itemId = session.Items.Single().Id;
 
-            var updated = await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 97, Note = "Thiếu 3" });
+            var updated = await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 97, Note = "Thiếu 3" });
 
             var item = updated.Items.Single();
             item.PhysicalQuantity.Should().Be(97);
@@ -114,7 +114,7 @@ namespace VietTien.Tests.Services
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var firstItem = session.Items.First();
-            await _sut.RecordItemCountAsync(session.Id, firstItem.Id, new RecordCountItemRequest { PhysicalQuantity = firstItem.SystemQuantity });
+            await _sut.RecordItemCountAsync(session.Id, firstItem.Id, staff.Id, new RecordCountItemRequest { PhysicalQuantity = firstItem.SystemQuantity });
 
             var act = () => _sut.CloseAsync(session.Id, staff.Id);
 
@@ -133,7 +133,7 @@ namespace VietTien.Tests.Services
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var itemId = session.Items.Single().Id;
-            await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 103 }); // +3, trong ngưỡng 5
+            await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 103 }); // +3, trong ngưỡng 5
 
             var result = await _sut.CloseAsync(session.Id, staff.Id);
 
@@ -158,7 +158,7 @@ namespace VietTien.Tests.Services
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var itemId = session.Items.Single().Id;
-            await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 80 }); // -20, vượt ngưỡng 5
+            await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 80 }); // -20, vượt ngưỡng 5
 
             var result = await _sut.CloseAsync(session.Id, staff.Id);
 
@@ -189,7 +189,7 @@ namespace VietTien.Tests.Services
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var itemId = session.Items.Single().Id;
-            await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 95 }); // -5, đúng ngưỡng
+            await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 95 }); // -5, đúng ngưỡng
 
             var result = await _sut.CloseAsync(session.Id, staff.Id);
 
@@ -209,7 +209,7 @@ namespace VietTien.Tests.Services
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var itemId = session.Items.Single().Id;
-            await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 100 });
+            await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 100 });
 
             var result = await _sut.CloseAsync(session.Id, staff.Id);
 
@@ -237,7 +237,7 @@ namespace VietTien.Tests.Services
             inv.OnHandQuantity = 70;
             _db.SaveChanges();
 
-            await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 100 });
+            await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 100 });
             var result = await _sut.CloseAsync(session.Id, staff.Id);
 
             // So với SystemQuantity khoá (100): chênh lệch = 0 -> không auto-apply, không tạo StockAdjustment.
@@ -256,7 +256,7 @@ namespace VietTien.Tests.Services
             _db.SaveChanges();
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
-            await _sut.RecordItemCountAsync(session.Id, session.Items.Single().Id, new RecordCountItemRequest { PhysicalQuantity = 100 });
+            await _sut.RecordItemCountAsync(session.Id, session.Items.Single().Id, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 100 });
             await _sut.CloseAsync(session.Id, staff.Id);
 
             var act = () => _sut.CloseAsync(session.Id, staff.Id);
@@ -275,10 +275,10 @@ namespace VietTien.Tests.Services
             var (staff, _) = SeedStaffAndCeo(wh.Id);
             var session = await _sut.OpenAsync(staff.Id, new OpenInventoryCountSessionRequest { WarehouseId = wh.Id });
             var itemId = session.Items.Single().Id;
-            await _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 100 });
+            await _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 100 });
             await _sut.CloseAsync(session.Id, staff.Id);
 
-            var act = () => _sut.RecordItemCountAsync(session.Id, itemId, new RecordCountItemRequest { PhysicalQuantity = 90 });
+            var act = () => _sut.RecordItemCountAsync(session.Id, itemId, staff.Id, new RecordCountItemRequest { PhysicalQuantity = 90 });
 
             await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*đã đóng*");
         }

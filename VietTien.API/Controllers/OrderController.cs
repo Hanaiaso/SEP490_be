@@ -197,11 +197,13 @@ namespace VietTien.API.Controllers
 
         [HttpGet("sales-dashboard/drill-down")]
         [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
-        public async Task<ActionResult<List<DashboardOrderDto>>> GetSalesDashboardDrillDown([FromQuery] string metric)
+        public async Task<ActionResult<List<DashboardOrderDto>>> GetSalesDashboardDrillDown([FromQuery] string metric, [FromQuery] Guid? staffId = null)
         {
             try
             {
-                Guid? scopedSalesStaffId = User.IsInRole("SalesStaff") ? GetUserId() : null;
+                // SalesStaff luôn bị scope về chính mình; SalesManager/Admin có thể truyền staffId
+                // để xem drill-down của 1 nhân viên cụ thể (hoặc null = toàn đội).
+                Guid? scopedSalesStaffId = User.IsInRole("SalesStaff") ? GetUserId() : staffId;
                 var result = await _orderService.GetSalesDashboardDrillDownAsync(metric, scopedSalesStaffId);
                 return Ok(result);
             }

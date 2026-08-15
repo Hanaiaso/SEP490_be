@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Moq;
 using VietTien.API.Data;
@@ -23,9 +23,14 @@ namespace VietTien.Tests.Services
 
         public GoodsIssueServiceTests()
         {
-            _sut = new GoodsIssueService(_db, _cloudinary.Object);
-            _staff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
+            _sut = new GoodsIssueService(_db, _cloudinary.Object, TestWarehouseAccessGuard.Create(_db), new NoOpAuditLogService());
             (_warehouse, _location) = TestData.Warehouse();
+            // Phải gán kho cho staff: phiếu xuất kho nay bị chặn theo AssignedWarehouseId (SRS NAC-05).
+            _staff = TestData.User(u =>
+            {
+                u.Role = SystemRole.WarehouseStaff;
+                u.AssignedWarehouseId = _warehouse.Id;
+            });
             _db.Users.Add(_staff);
             _db.Warehouses.Add(_warehouse);
             _db.SaveChanges();
@@ -68,7 +73,7 @@ namespace VietTien.Tests.Services
             var file = new Mock<IFormFile>().Object;
             _cloudinary.Setup(c => c.UploadEvidenceAsync(file, "GoodsIssues")).ReturnsAsync("https://cdn/proof.png");
 
-            var dto = await _sut.UploadProofAsync(issue.Id, file);
+            var dto = await _sut.UploadProofAsync(issue.Id, _staff.Id, file);
 
             _cloudinary.Verify(c => c.UploadEvidenceAsync(file, "GoodsIssues"), Times.Once);
             dto.ImageProofUrl.Should().Be("https://cdn/proof.png");
@@ -158,7 +163,7 @@ namespace VietTien.Tests.Services
         {
             var (issue, _) = await SeedIssueAsync();
 
-            var dto = await _sut.UpdateHandoverInfoAsync(issue.Id, HandoverDto("BB-001"));
+            var dto = await _sut.UpdateHandoverInfoAsync(issue.Id, _staff.Id, HandoverDto("BB-001"));
 
             dto.Status.Should().Be("Draft", "cập nhật bàn giao không làm đổi trạng thái chứng từ");
             _db.ChangeTracker.Clear();
@@ -172,10 +177,10 @@ namespace VietTien.Tests.Services
         public async Task L1_GI_06_UpdateHandover_OnPosted_IsConflict()
         {
             var (issue, _) = await SeedIssueAsync();
-            await _sut.UpdateHandoverInfoAsync(issue.Id, HandoverDto("BB-002"));
+            await _sut.UpdateHandoverInfoAsync(issue.Id, _staff.Id, HandoverDto("BB-002"));
             await _sut.PostGoodsIssueAsync(issue.Id, _staff.Id);
 
-            var act = () => _sut.UpdateHandoverInfoAsync(issue.Id, HandoverDto("BB-002-SUA"));
+            var act = () => _sut.UpdateHandoverInfoAsync(issue.Id, _staff.Id, HandoverDto("BB-002-SUA"));
 
             await act.Should().ThrowAsync<InvalidOperationException>();
             _db.ChangeTracker.Clear();

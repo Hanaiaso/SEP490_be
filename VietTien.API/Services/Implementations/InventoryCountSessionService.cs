@@ -20,15 +20,18 @@ namespace VietTien.API.Services.Implementations
         private readonly ApplicationDbContext _context;
         private readonly ISystemConfigService _systemConfigService;
         private readonly INotificationService _notificationService;
+        private readonly IWarehouseAccessGuard _warehouseAccessGuard;
 
         public InventoryCountSessionService(
             ApplicationDbContext context,
             ISystemConfigService systemConfigService,
-            INotificationService notificationService)
+            INotificationService notificationService,
+            IWarehouseAccessGuard warehouseAccessGuard)
         {
             _context = context;
             _systemConfigService = systemConfigService;
             _notificationService = notificationService;
+            _warehouseAccessGuard = warehouseAccessGuard;
         }
 
         private static InventoryCountSessionItemDto ToItemDto(InventoryCountSessionItem item)
@@ -85,10 +88,10 @@ namespace VietTien.API.Services.Implementations
             var query = BaseQuery();
 
             // WarehouseStaff chỉ thấy phiên của kho mình được gán; CEO/Admin thấy mọi kho.
-            if (callerRole == SystemRole.WarehouseStaff)
+            var scopedWarehouseId = await _warehouseAccessGuard.GetScopedWarehouseIdAsync(callerId);
+            if (scopedWarehouseId.HasValue)
             {
-                var staff = await _context.Users.FindAsync(callerId);
-                query = query.Where(s => s.WarehouseId == (staff != null ? staff.AssignedWarehouseId : null));
+                query = query.Where(s => s.WarehouseId == scopedWarehouseId.Value);
             }
 
             if (warehouseId.HasValue)
@@ -106,7 +109,22 @@ namespace VietTien.API.Services.Implementations
             return sessions.Select(ToDto).ToList();
         }
 
-        public async Task<InventoryCountSessionDto> GetByIdAsync(Guid id)
+        // Danh sách đã lọc theo kho được gán nhưng chi tiết thì chưa, nên chỉ cần đoán được sessionId
+        // là WarehouseStaff xem được phiên kiểm kê của kho khác. Guard theo đúng kho của phiên.
+        public async Task<InventoryCountSessionDto> GetByIdAsync(Guid id, Guid callerId)
+        {
+            var session = await BaseQuery().FirstOrDefaultAsync(s => s.Id == id)
+                ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                callerId, session.WarehouseId,
+                "xem phiên kiểm kê", "InventoryCountSession", session.Id.ToString());
+
+            return ToDto(session);
+        }
+
+        // Đọc lại DTO sau khi thao tác đã được authorize ở trên -> không guard lại lần nữa.
+        private async Task<InventoryCountSessionDto> LoadDtoAsync(Guid id)
         {
             var session = await BaseQuery().FirstOrDefaultAsync(s => s.Id == id)
                 ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");
@@ -118,11 +136,9 @@ namespace VietTien.API.Services.Implementations
             var warehouse = await _context.Warehouses.FindAsync(request.WarehouseId)
                 ?? throw new KeyNotFoundException("Không tìm thấy kho.");
 
-            var staff = await _context.Users.FindAsync(staffId);
-            if (staff != null && staff.Role == SystemRole.WarehouseStaff && staff.AssignedWarehouseId != warehouse.Id)
-            {
-                throw new UnauthorizedAccessException("Bạn không có quyền mở phiên kiểm kê cho kho này.");
-            }
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, warehouse.Id,
+                "mở phiên kiểm kê", "InventoryCountSession", warehouse.Id.ToString());
 
             var hasOpenSession = await _context.InventoryCountingSessions
                 .AnyAsync(s => s.WarehouseId == warehouse.Id && s.Status == InventoryCountSessionStatus.Open);
@@ -171,7 +187,7 @@ namespace VietTien.API.Services.Implementations
                 throw new InvalidOperationException("Kho này đang có một phiên kiểm kê chưa đóng. Hãy đóng phiên hiện tại trước khi mở phiên mới.");
             }
 
-            return await GetByIdAsync(session.Id);
+            return await LoadDtoAsync(session.Id);
         }
 
         // SQL Server error 2601 (unique index) / 2627 (unique constraint) — dùng để phân biệt vi phạm
@@ -180,12 +196,19 @@ namespace VietTien.API.Services.Implementations
         private static bool IsUniqueConstraintViolation(DbUpdateException ex)
             => ex.InnerException is SqlException sqlEx && (sqlEx.Number == 2601 || sqlEx.Number == 2627);
 
-        public async Task<InventoryCountSessionDto> RecordItemCountAsync(Guid sessionId, Guid itemId, RecordCountItemRequest request)
+        public async Task<InventoryCountSessionDto> RecordItemCountAsync(Guid sessionId, Guid itemId, Guid staffId, RecordCountItemRequest request)
         {
             var session = await _context.InventoryCountingSessions
                 .Include(s => s.Items)
                 .FirstOrDefaultAsync(s => s.Id == sessionId)
                 ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");
+
+            // SRS FT-09 NAC-02: dòng kiểm kê nằm ngoài phạm vi kho được uỷ quyền phải bị từ chối.
+            // Trước đây hàm này không hề nhận staffId nên không có gì để đối chiếu — số đếm thực tế
+            // của kho khác bị ghi đè tự do, và chính số này quyết định tồn kho lúc đóng phiên.
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, session.WarehouseId,
+                "ghi số đếm phiên kiểm kê", "InventoryCountSession", session.Id.ToString());
 
             if (session.Status != InventoryCountSessionStatus.Open)
             {
@@ -200,7 +223,7 @@ namespace VietTien.API.Services.Implementations
 
             await _context.SaveChangesAsync();
 
-            return await GetByIdAsync(sessionId);
+            return await LoadDtoAsync(sessionId);
         }
 
         private async Task<int> GetVarianceThresholdAsync()
@@ -211,6 +234,21 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<CloseInventoryCountSessionResultDto> CloseAsync(Guid sessionId, Guid staffId)
         {
+            // Đóng phiên mới là thao tác thật sự ghi đè tồn kho (áp chênh lệch trong ngưỡng + tạo
+            // StockAdjustment cho phần vượt ngưỡng). Trước đây staffId chỉ dùng để đóng dấu người
+            // đóng phiên chứ không hề được đối chiếu -> guard trước, và đặt NGOÀI transaction để
+            // không có transaction nào bị mở rồi rollback chỉ vì một request bị từ chối.
+            var scope = await _context.InventoryCountingSessions
+                .AsNoTracking()
+                .Where(s => s.Id == sessionId)
+                .Select(s => new { s.WarehouseId })
+                .FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Không tìm thấy phiên kiểm kê.");
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, scope.WarehouseId,
+                "đóng phiên kiểm kê", "InventoryCountSession", sessionId.ToString());
+
             await using var transaction = await _context.Database.BeginTransactionAsync();
 
             var session = await _context.InventoryCountingSessions
@@ -331,7 +369,7 @@ namespace VietTien.API.Services.Implementations
                 Console.WriteLine($"[InventoryCountSessionService] Error sending close notifications: {ex.Message}");
             }
 
-            var dto = await GetByIdAsync(session.Id);
+            var dto = await LoadDtoAsync(session.Id);
             return new CloseInventoryCountSessionResultDto
             {
                 Session = dto,

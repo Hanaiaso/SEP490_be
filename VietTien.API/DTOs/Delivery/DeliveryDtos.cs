@@ -216,6 +216,11 @@ namespace VietTien.API.DTOs.Delivery
         public string QuarantineCode { get; set; } = string.Empty;
         public Guid? OrderId { get; set; }
         public string? OrderCode { get; set; }
+        // Phân biệt "cần kiểm tra CL" (hàng nhập từ GoodsReceipt) với "cách ly hàng khách trả"
+        // (gắn với OrderId) — WarehouseDashboardService dùng đúng 2 field GoodsReceiptItemId/OrderId
+        // này để tính KPI QualityCheckPending/ReturnQuarantinePending, nhưng DTO trước đây không trả
+        // GoodsReceiptItemId nên trang chi tiết không lọc được, luôn ra danh sách rỗng.
+        public Guid? GoodsReceiptItemId { get; set; }
         public Guid? ProductId { get; set; }
         public Guid? MaterialId { get; set; }
         public string ItemName { get; set; } = string.Empty;
