@@ -23,7 +23,10 @@ namespace VietTien.API.Services.Implementations
         public async Task<WarehouseDashboardDto> GetDashboardAsync()
         {
             var now = DateTime.UtcNow;
-            var todayStart = now.Date;
+            // "Hôm nay" phải tính theo giờ Việt Nam (UTC+7), không phải theo ngày UTC — nếu không, dữ
+            // liệu phát sinh từ 00:00–06:59 giờ VN (vẫn là ngày UTC hôm trước) sẽ bị tính nhầm sang hôm qua.
+            var localToday = now.AddHours(7).Date;
+            var todayStart = localToday.AddHours(-7);
             var tomorrowStart = todayStart.AddDays(1);
 
             var warehouses = await _context.Warehouses
@@ -71,7 +74,7 @@ namespace VietTien.API.Services.Implementations
                 ActiveWarehouses = warehouses.Count,
             };
 
-            var weeklyVolume = await BuildWeeklyVolumeAsync(todayStart);
+            var weeklyVolume = await BuildWeeklyVolumeAsync(localToday, todayStart);
 
             var stockHealth = lowStockInventories
                 .Take(5)
@@ -173,26 +176,28 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
-        private async Task<List<WarehouseDailyVolumeDto>> BuildWeeklyVolumeAsync(DateTime todayStart)
+        private async Task<List<WarehouseDailyVolumeDto>> BuildWeeklyVolumeAsync(DateTime localToday, DateTime todayStart)
         {
             var rangeStart = todayStart.AddDays(-6);
 
+            // Nhóm theo ngày giờ VN (AddHours(7) trước khi lấy .Date), không phải ngày UTC thô — nếu
+            // không, việc phát sinh vào sáng sớm giờ VN (còn là tối ngày UTC hôm trước) sẽ bị gộp lệch ngày.
             var outboundByDay = await _context.PickTasks
                 .AsNoTracking()
                 .Where(p => p.CompletedAt != null && p.CompletedAt >= rangeStart)
-                .GroupBy(p => p.CompletedAt!.Value.Date)
+                .GroupBy(p => p.CompletedAt!.Value.AddHours(7).Date)
                 .Select(g => new { Date = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.Date, x => x.Count);
 
             var inboundByDay = await _context.GoodsReceipts
                 .AsNoTracking()
                 .Where(gr => gr.Status == GoodsReceiptStatus.Posted && gr.ReceivedDate >= rangeStart)
-                .GroupBy(gr => gr.ReceivedDate.Date)
+                .GroupBy(gr => gr.ReceivedDate.AddHours(7).Date)
                 .Select(g => new { Date = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.Date, x => x.Count);
 
             var result = new List<WarehouseDailyVolumeDto>();
-            for (var d = rangeStart; d <= todayStart; d = d.AddDays(1))
+            for (var d = localToday.AddDays(-6); d <= localToday; d = d.AddDays(1))
             {
                 result.Add(new WarehouseDailyVolumeDto
                 {

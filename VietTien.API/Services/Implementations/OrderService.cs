@@ -823,7 +823,9 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<SalesDashboardStatsDto> GetSalesDashboardStatsAsync(Guid? scopedSalesStaffId = null)
         {
-            var today = DateTime.UtcNow.Date;
+            // "Hôm nay" tính theo giờ Việt Nam (UTC+7), không phải ngày UTC — tránh tính nhầm đơn phát
+            // sinh vào sáng sớm giờ VN (vẫn là ngày UTC hôm trước) sang hôm qua.
+            var today = DateTime.UtcNow.AddHours(7).Date;
 
             // 1. KPI aggregates
             // scopedSalesStaffId = null -> SalesManager/Admin xem toàn hệ thống (giữ nguyên hành vi cũ).
@@ -835,8 +837,8 @@ namespace VietTien.API.Services.Implementations
             var newOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Draft);
             var processingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed);
             var shippingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Processing);
-            var deliveredTodayCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.Date == today);
-            var revenueToday = allOrders.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.Date == today).Sum(o => o.FinalPayment);
+            var deliveredTodayCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.AddHours(7).Date == today);
+            var revenueToday = allOrders.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.AddHours(7).Date == today).Sum(o => o.FinalPayment);
 
             // "Công nợ cần thu" lấy từ sổ công nợ THẬT (CustomerDebts), không phải đơn PaymentStatus=Pending
             // (Pending chỉ là "chờ thanh toán", không phải khoản khách nợ thật).
@@ -967,7 +969,7 @@ namespace VietTien.API.Services.Implementations
 
             // 7. Last 7 Days Revenue
             var revenueDays = new List<DashboardRevenueDayDto>();
-            var sevenDaysAgo = today.AddDays(-6);
+            var sevenDaysAgo = today.AddDays(-6).AddHours(-7); // quy đổi ngày VN về mốc UTC instant để lọc DB
             var paidOrdersIn7Days = await _context.Orders
                 .Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt >= sevenDaysAgo
                             && (scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId))
@@ -991,7 +993,7 @@ namespace VietTien.API.Services.Implementations
                 if (d.Date == today) dayName = "Hôm nay";
 
                 var dailyRevenue = paidOrdersIn7Days
-                    .Where(o => o.CreatedAt.Date == d.Date)
+                    .Where(o => o.CreatedAt.AddHours(7).Date == d.Date)
                     .Sum(o => o.FinalPayment) / 1000000m; // convert to triệu đồng
 
                 revenueDays.Add(new DashboardRevenueDayDto
@@ -1026,7 +1028,8 @@ namespace VietTien.API.Services.Implementations
             if (string.IsNullOrEmpty(metric) || !ValidDashboardDrillDownMetrics.Contains(metric))
                 throw new ArgumentException("Chỉ số không hợp lệ.");
 
-            var today = DateTime.UtcNow.Date;
+            // "Hôm nay" tính theo giờ Việt Nam (UTC+7), không phải ngày UTC.
+            var today = DateTime.UtcNow.AddHours(7).Date;
 
             if (string.Equals(metric, "pendingDebt", StringComparison.OrdinalIgnoreCase))
             {
@@ -1037,8 +1040,11 @@ namespace VietTien.API.Services.Implementations
                 if (scopedSalesStaffId.HasValue)
                     debtQuery = debtQuery.Where(d => d.Order.SalesStaffId == scopedSalesStaffId.Value);
 
+                // OverdueDays lưu trong DB chỉ set 1 lần lúc tạo (luôn = 0), không có job cập nhật —
+                // sắp xếp theo CreatedAt (nợ cũ nhất trước) thay vì tin field đó, cùng lý do với
+                // SalesManagerDashboardService (EF.Functions.DateDiffDay chỉ dịch được sang SQL Server).
                 return await debtQuery
-                    .OrderByDescending(d => d.OverdueDays)
+                    .OrderBy(d => d.CreatedAt)
                     .Select(d => new DashboardOrderDto
                     {
                         Id = d.Order.Id,
@@ -1063,8 +1069,8 @@ namespace VietTien.API.Services.Implementations
                 "neworders" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Draft),
                 "processing" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed),
                 "shipping" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Processing),
-                "deliveredtoday" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.Date == today),
-                "revenuetoday" => ordersQuery.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.Date == today),
+                "deliveredtoday" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.AddHours(7).Date == today),
+                "revenuetoday" => ordersQuery.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.AddHours(7).Date == today),
                 _ => ordersQuery
             };
 
