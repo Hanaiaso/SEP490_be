@@ -16,12 +16,18 @@ namespace VietTien.API.Controllers
     {
         private readonly IWarehouseManagementService _service;
         private readonly ApplicationDbContext _context;
+        private readonly IWarehouseAccessGuard _warehouseAccessGuard;
         private readonly IAuditLogService _auditLogService;
 
-        public WarehouseManagementController(IWarehouseManagementService service, ApplicationDbContext context, IAuditLogService auditLogService)
+        public WarehouseManagementController(
+            IWarehouseManagementService service,
+            ApplicationDbContext context,
+            IWarehouseAccessGuard warehouseAccessGuard,
+            IAuditLogService auditLogService)
         {
             _service = service;
             _context = context;
+            _warehouseAccessGuard = warehouseAccessGuard;
             _auditLogService = auditLogService;
         }
 
@@ -32,6 +38,21 @@ namespace VietTien.API.Controllers
                 throw new UnauthorizedAccessException("Invalid user token.");
             return id;
         }
+
+        /// <summary>
+        /// Id các vị trí lưu trữ thuộc một kho. Lọc tồn kho qua Inventory.WarehouseLocationId (khoá
+        /// ngoại vô hướng) thay vì đi qua navigation Inventory.WarehouseLocation: dữ liệu cũ có dòng
+        /// tồn kho không trỏ tới vị trí hợp lệ, và bám navigation ở đó sẽ âm thầm loại mất bản ghi.
+        /// </summary>
+        private IQueryable<Guid> LocationIdsOfWarehouse(Guid warehouseId)
+            => _context.WarehouseLocations.Where(l => l.WarehouseId == warehouseId).Select(l => l.Id);
+
+        /// <summary>Kho chứa dòng tồn kho này, null nếu dữ liệu cũ không trỏ tới vị trí hợp lệ.</summary>
+        private async Task<Guid?> ResolveWarehouseIdAsync(Guid warehouseLocationId)
+            => await _context.WarehouseLocations
+                .Where(l => l.Id == warehouseLocationId)
+                .Select(l => (Guid?)l.WarehouseId)
+                .FirstOrDefaultAsync();
 
         [HttpGet]
         [Authorize(Roles = "CEO,WarehouseStaff,Admin")]
@@ -122,13 +143,26 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var items = await _context.QuarantineLogs
+                var query = _context.QuarantineLogs
                     .Include(q => q.Order)
                     .Include(q => q.Product)
                     .Include(q => q.ReceivedByUser)
                     .Include(q => q.DispatchedByUser)
                     .Include(q => q.Product)
                     .Include(q => q.Material)
+                    .AsQueryable();
+
+                // Trước đây danh sách trả về toàn bộ lô cách ly của mọi kho. WarehouseStaff chỉ được
+                // thấy lô thuộc kho được phân công; SalesManager/Admin vẫn xem xuyên kho để duyệt.
+                var scopedWarehouseId = await _warehouseAccessGuard.GetScopedWarehouseIdAsync(GetUserId());
+                if (scopedWarehouseId.HasValue)
+                {
+                    var locationIds = LocationIdsOfWarehouse(scopedWarehouseId.Value);
+                    query = query.Where(q =>
+                        q.Inventory != null && locationIds.Contains(q.Inventory.WarehouseLocationId));
+                }
+
+                var items = await query
                     .OrderByDescending(q => q.CreatedAt)
                     .Select(q => new QuarantineListItemDto
                     {
@@ -156,6 +190,10 @@ namespace VietTien.API.Controllers
 
                 return Ok(items);
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -171,12 +209,24 @@ namespace VietTien.API.Controllers
             {
                 var userId = GetUserId();
 
-                // Tìm inventory
-                var inventory = await _context.Inventories
-                    .FirstOrDefaultAsync(i => i.ProductId == dto.ProductId);
+                // Trước đây truy vấn này bỏ qua warehouse hoàn toàn (lấy dòng tồn kho ĐẦU TIÊN của
+                // sản phẩm ở bất kỳ kho nào) -> hàng cách ly có thể bị cộng vào kho khác. Giới hạn
+                // theo kho được phân công của người tiếp nhận.
+                var scopedWarehouseId = await _warehouseAccessGuard.GetScopedWarehouseIdAsync(userId);
+
+                var inventoryQuery = _context.Inventories
+                    .Where(i => i.ProductId == dto.ProductId);
+
+                if (scopedWarehouseId.HasValue)
+                {
+                    var locationIds = LocationIdsOfWarehouse(scopedWarehouseId.Value);
+                    inventoryQuery = inventoryQuery.Where(i => locationIds.Contains(i.WarehouseLocationId));
+                }
+
+                var inventory = await inventoryQuery.FirstOrDefaultAsync();
 
                 if (inventory == null)
-                    return NotFound(new { message = "Không tìm thấy thông tin kho cho sản phẩm này." });
+                    return NotFound(new { message = "Không tìm thấy dòng tồn kho của sản phẩm này trong kho bạn phụ trách." });
 
                 // Đảm bảo order tồn tại
                 var order = await _context.Orders.FindAsync(dto.OrderId);
@@ -238,6 +288,10 @@ namespace VietTien.API.Controllers
 
                 return Ok(new { quarantineCode, message = $"Đã nhập {dto.Quantity} đơn vị vào khu cách ly {quarantineCode}." });
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -265,16 +319,39 @@ namespace VietTien.API.Controllers
                 if (log.Status != QuarantineStatus.Waiting)
                     return BadRequest(new { message = "Bản ghi này đã được xử lý trước đó." });
 
+                // Duyệt lô cách ly làm thay đổi QuarantineQuantity/DamagedQuantity của tồn kho thật,
+                // nên WarehouseStaff chỉ được duyệt lô thuộc kho mình phụ trách.
+                if (log.Inventory != null)
+                {
+                    var logWarehouseId = await ResolveWarehouseIdAsync(log.Inventory.WarehouseLocationId);
+                    if (logWarehouseId.HasValue)
+                    {
+                        await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                            userId, logWarehouseId.Value,
+                            "duyệt lô hàng cách ly", "QuarantineLog", log.Id.ToString());
+                    }
+                }
+
+                var scopedWarehouseId = await _warehouseAccessGuard.GetScopedWarehouseIdAsync(userId);
                 var action = dto.Action?.ToLower() ?? "available";
                 var inventory = log.Inventory;
 
                 if (inventory == null)
                 {
-                    // Auto-healing cho dữ liệu cũ (chưa có liên kết Inventory)
-                    if (log.ProductId != null)
-                        inventory = await _context.Inventories.FirstOrDefaultAsync(i => i.ProductId == log.ProductId);
-                    else if (log.MaterialId != null)
-                        inventory = await _context.Inventories.FirstOrDefaultAsync(i => i.MaterialId == log.MaterialId);
+                    // Auto-healing cho dữ liệu cũ (chưa có liên kết Inventory) — vẫn phải bám đúng
+                    // kho được phân công, nếu không thì nhánh này lại thành đường vòng qua guard.
+                    var healQuery = _context.Inventories
+                        .Where(i => log.ProductId != null
+                            ? i.ProductId == log.ProductId
+                            : i.MaterialId == log.MaterialId);
+
+                    if (scopedWarehouseId.HasValue)
+                    {
+                        var locationIds = LocationIdsOfWarehouse(scopedWarehouseId.Value);
+                        healQuery = healQuery.Where(i => locationIds.Contains(i.WarehouseLocationId));
+                    }
+
+                    inventory = await healQuery.FirstOrDefaultAsync();
 
                     if (inventory != null)
                     {
@@ -338,6 +415,10 @@ namespace VietTien.API.Controllers
 
                 return Ok(new { message = successMsg });
                 }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });

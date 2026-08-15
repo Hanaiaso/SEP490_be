@@ -12,14 +12,16 @@ namespace VietTien.API.Services.Implementations
         private readonly IEmailService _emailService;
         private readonly ICloudinaryService _cloudinaryService;
         private readonly INotificationService _notificationService;
+        private readonly IWarehouseAccessGuard _warehouseAccessGuard;
         private readonly IAuditLogService _auditLogService;
 
-        public StockTransferService(ApplicationDbContext context, IEmailService emailService, ICloudinaryService cloudinaryService, INotificationService notificationService, IAuditLogService auditLogService)
+        public StockTransferService(ApplicationDbContext context, IEmailService emailService, ICloudinaryService cloudinaryService, INotificationService notificationService, IWarehouseAccessGuard warehouseAccessGuard, IAuditLogService auditLogService)
         {
             _context = context;
             _emailService = emailService;
             _cloudinaryService = cloudinaryService;
             _notificationService = notificationService;
+            _warehouseAccessGuard = warehouseAccessGuard;
             _auditLogService = auditLogService;
         }
 
@@ -362,12 +364,9 @@ namespace VietTien.API.Services.Implementations
 
                 // IDOR: WarehouseStaff chỉ được nhận hàng ở đúng kho được gán, không phải kho đích
                 // của phiếu bất kỳ (cùng cơ chế với InventoryService.AdjustInventoryAsync).
-                var staff = await _context.Users.FindAsync(staffId);
-                if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
-                    staff.AssignedWarehouseId != transfer.DestinationWarehouseId)
-                {
-                    throw new UnauthorizedAccessException("Bạn không có quyền nhận hàng cho kho này.");
-                }
+                await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                    staffId, transfer.DestinationWarehouseId,
+                    "nhận hàng điều chuyển", "StockTransfer", transfer.Id.ToString());
 
                 if (transfer.Status != StockTransferStatus.Dispatched)
                     throw new Exception("Chỉ có thể nhận hàng cho phiếu đang ở trạng thái Đang giao (Dispatched).");

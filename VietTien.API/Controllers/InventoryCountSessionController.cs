@@ -66,12 +66,16 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var result = await _service.GetByIdAsync(id);
+                var result = await _service.GetByIdAsync(id, GetUserId());
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -112,12 +116,16 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var result = await _service.RecordItemCountAsync(id, itemId, request);
+                var result = await _service.RecordItemCountAsync(id, itemId, GetUserId(), request);
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (InvalidOperationException ex)
             {
@@ -141,6 +149,10 @@ namespace VietTien.API.Controllers
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (InvalidOperationException ex)
             {

@@ -21,14 +21,28 @@ namespace VietTien.API.Controllers
             _goodsIssueService = goodsIssueService;
         }
 
+        private Guid GetUserId()
+        {
+            var userIdString = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
+            {
+                throw new UnauthorizedAccessException("Invalid user token.");
+            }
+            return userId;
+        }
+
         [HttpGet]
         [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> GetGoodsIssues([FromQuery] string? type)
         {
             try
             {
-                var result = await _goodsIssueService.GetGoodsIssuesAsync(type);
+                var result = await _goodsIssueService.GetGoodsIssuesAsync(type, GetUserId());
                 return Ok(result);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -42,12 +56,16 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var result = await _goodsIssueService.GetGoodsIssueByIdAsync(id);
+                var result = await _goodsIssueService.GetGoodsIssueByIdAsync(id, GetUserId());
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {
@@ -71,6 +89,10 @@ namespace VietTien.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { message = ex.Message });
@@ -88,12 +110,16 @@ namespace VietTien.API.Controllers
                     return BadRequest(new { message = "Vui lòng chọn file chứng từ." });
                 }
 
-                var result = await _goodsIssueService.UploadProofAsync(id, file);
+                var result = await _goodsIssueService.UploadProofAsync(id, GetUserId(), file);
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (InvalidOperationException ex)
             {
@@ -115,12 +141,16 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var result = await _goodsIssueService.UpdateHandoverInfoAsync(id, dto);
+                var result = await _goodsIssueService.UpdateHandoverInfoAsync(id, GetUserId(), dto);
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (InvalidOperationException ex)
             {
@@ -152,6 +182,10 @@ namespace VietTien.API.Controllers
             {
                 return NotFound(new { message = ex.Message });
             }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
             catch (InvalidOperationException ex)
             {
                 return Conflict(new { message = ex.Message });
@@ -181,6 +215,10 @@ namespace VietTien.API.Controllers
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (InvalidOperationException ex)
             {

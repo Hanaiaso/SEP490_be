@@ -13,12 +13,18 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly INotificationService _notificationService;
+        private readonly IWarehouseAccessGuard _warehouseAccessGuard;
         private readonly IAuditLogService _auditLogService;
 
-        public StockAdjustmentService(ApplicationDbContext context, INotificationService notificationService, IAuditLogService auditLogService)
+        public StockAdjustmentService(
+            ApplicationDbContext context,
+            INotificationService notificationService,
+            IWarehouseAccessGuard warehouseAccessGuard,
+            IAuditLogService auditLogService)
         {
             _context = context;
             _notificationService = notificationService;
+            _warehouseAccessGuard = warehouseAccessGuard;
             _auditLogService = auditLogService;
         }
 
@@ -79,10 +85,20 @@ namespace VietTien.API.Services.Implementations
             return items.Select(ToDto).ToList();
         }
 
-        public async Task<StockAdjustmentDto> GetByIdAsync(Guid id)
+        // Trước đây hàm này không nhận danh tính caller: GetListAsync lọc đúng theo ProposedByUserId
+        // nhưng GET /{id} thì không, nên bất kỳ WarehouseStaff nào cũng đọc được đề xuất của kho khác
+        // (lộ tồn lý thuyết/thực tế, chênh lệch, lý do, tên người đề xuất). Áp đúng điều kiện của
+        // GetListAsync để danh sách và chi tiết không còn lệch nhau.
+        public async Task<StockAdjustmentDto> GetByIdAsync(Guid id, Guid callerId, SystemRole callerRole)
         {
             var adjustment = await BaseQuery().FirstOrDefaultAsync(a => a.Id == id)
                 ?? throw new KeyNotFoundException("Không tìm thấy đề xuất điều chỉnh tồn kho.");
+
+            if (callerRole == SystemRole.WarehouseStaff && adjustment.ProposedByUserId != callerId)
+            {
+                throw new UnauthorizedAccessException("Bạn không có quyền xem đề xuất điều chỉnh tồn kho này.");
+            }
+
             return ToDto(adjustment);
         }
 
@@ -95,13 +111,11 @@ namespace VietTien.API.Services.Implementations
                 .FirstOrDefaultAsync(i => i.Id == request.InventoryId)
                 ?? throw new KeyNotFoundException("Không tìm thấy dòng tồn kho.");
 
-            var staff = await _context.Users.FindAsync(staffId);
-            if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
-                staff.AssignedWarehouseId != inventory.WarehouseLocation.WarehouseId)
-            {
-                throw new UnauthorizedAccessException("Bạn không có quyền đề xuất điều chỉnh tồn kho của kho này.");
-            }
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, inventory.WarehouseLocation.WarehouseId,
+                "đề xuất điều chỉnh tồn kho", "StockAdjustment", inventory.Id.ToString());
 
+            var staff = await _context.Users.FindAsync(staffId);
             var systemQty = inventory.OnHandQuantity;
             var adjustment = new StockAdjustment
             {
@@ -136,7 +150,7 @@ namespace VietTien.API.Services.Implementations
                 Console.WriteLine($"[StockAdjustmentService] Error sending pending-approval notification: {ex.Message}");
             }
 
-            return await GetByIdAsync(adjustment.Id);
+            return await GetByIdAsync(adjustment.Id, staffId, SystemRole.WarehouseStaff);
         }
 
         public async Task<StockAdjustmentDto> DecideAsync(Guid adjustmentId, Guid ceoId, StockAdjustmentDecisionRequest request)
@@ -233,7 +247,8 @@ namespace VietTien.API.Services.Implementations
                 Console.WriteLine($"[StockAdjustmentService] Error sending decision-result notification: {ex.Message}");
             }
 
-            return await GetByIdAsync(adjustment.Id);
+            // DecideAsync chỉ mở cho CEO/Admin -> không bị giới hạn phạm vi khi đọc lại DTO.
+            return await GetByIdAsync(adjustment.Id, ceoId, SystemRole.CEO);
         }
     }
 }

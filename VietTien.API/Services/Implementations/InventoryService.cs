@@ -15,12 +15,18 @@ namespace VietTien.API.Services.Implementations
         private readonly ApplicationDbContext _context;
         private readonly IHubContext<WarehouseHub> _warehouseHub;
         private readonly ILogger<InventoryService> _logger;
+        private readonly IWarehouseAccessGuard _warehouseAccessGuard;
 
-        public InventoryService(ApplicationDbContext context, IHubContext<WarehouseHub> warehouseHub, ILogger<InventoryService> logger)
+        public InventoryService(
+            ApplicationDbContext context,
+            IHubContext<WarehouseHub> warehouseHub,
+            ILogger<InventoryService> logger,
+            IWarehouseAccessGuard warehouseAccessGuard)
         {
             _context = context;
             _warehouseHub = warehouseHub;
             _logger = logger;
+            _warehouseAccessGuard = warehouseAccessGuard;
         }
 
         public async Task<PaginatedList<InventoryItemDto>> GetInventoryByWarehouseAsync(Guid warehouseId, string? search, int? minQty, int? maxQty, DateTime? fromDate, DateTime? toDate, int pageNumber, int pageSize)
@@ -112,12 +118,11 @@ namespace VietTien.API.Services.Implementations
                 throw new KeyNotFoundException("Inventory record not found.");
             }
 
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, inventory.WarehouseLocation.WarehouseId,
+                "điều chỉnh tồn kho", "Inventory", inventory.Id.ToString());
+
             var staff = await _context.Users.FindAsync(staffId);
-            if (staff != null && staff.Role == SystemRole.WarehouseStaff &&
-                staff.AssignedWarehouseId != inventory.WarehouseLocation.WarehouseId)
-            {
-                throw new UnauthorizedAccessException("Bạn không có quyền điều chỉnh tồn kho của kho này.");
-            }
 
             // L3-INV-04: chặn điều chỉnh khiến tồn khả dụng THỰC âm — trước đây chỉ chặn newQuantity < 0,
             // nên set OnHand về 0 trong khi Reserved/Allocated/Quarantine còn giữ hàng vẫn được chấp nhận,

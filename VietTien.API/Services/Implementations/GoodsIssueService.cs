@@ -15,16 +15,22 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly ICloudinaryService _cloudinaryService;
+        private readonly IWarehouseAccessGuard _warehouseAccessGuard;
         private readonly IAuditLogService _auditLogService;
 
-        public GoodsIssueService(ApplicationDbContext context, ICloudinaryService cloudinaryService, IAuditLogService auditLogService)
+        public GoodsIssueService(
+            ApplicationDbContext context,
+            ICloudinaryService cloudinaryService,
+            IWarehouseAccessGuard warehouseAccessGuard,
+            IAuditLogService auditLogService)
         {
             _context = context;
             _cloudinaryService = cloudinaryService;
+            _warehouseAccessGuard = warehouseAccessGuard;
             _auditLogService = auditLogService;
         }
 
-        public async Task<IEnumerable<GoodsIssueDto>> GetGoodsIssuesAsync(string? type)
+        public async Task<IEnumerable<GoodsIssueDto>> GetGoodsIssuesAsync(string? type, Guid staffId)
         {
             var query = _context.GoodsIssues
                 .Include(gi => gi.Warehouse)
@@ -32,6 +38,14 @@ namespace VietTien.API.Services.Implementations
                 .Include(gi => gi.Items).ThenInclude(i => i.Product)
                 .Include(gi => gi.Items).ThenInclude(i => i.Material)
                 .AsQueryable();
+
+            // Trước đây danh sách không lọc kho: mọi nhân viên kho đều thấy toàn bộ phiếu xuất của
+            // cả 3 kho. Lọc theo kho được phân công như InventoryCountSessionService.GetListAsync.
+            var scopedWarehouseId = await _warehouseAccessGuard.GetScopedWarehouseIdAsync(staffId);
+            if (scopedWarehouseId.HasValue)
+            {
+                query = query.Where(gi => gi.WarehouseId == scopedWarehouseId.Value);
+            }
 
             if (!string.IsNullOrEmpty(type) && Enum.TryParse<GoodsIssueType>(type, true, out var typeEnum))
             {
@@ -42,7 +56,17 @@ namespace VietTien.API.Services.Implementations
             return issues.Select(MapToDto);
         }
 
-        public async Task<GoodsIssueDto> GetGoodsIssueByIdAsync(Guid id)
+        public async Task<GoodsIssueDto> GetGoodsIssueByIdAsync(Guid id, Guid staffId)
+        {
+            var issue = await LoadIssueAsync(id);
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, issue.WarehouseId, "xem phiếu xuất kho", "GoodsIssue", issue.Id.ToString());
+
+            return MapToDto(issue);
+        }
+
+        private async Task<GoodsIssue> LoadIssueAsync(Guid id)
         {
             var issue = await _context.GoodsIssues
                 .Include(gi => gi.Warehouse)
@@ -53,11 +77,19 @@ namespace VietTien.API.Services.Implementations
 
             if (issue == null) throw new KeyNotFoundException("Không tìm thấy phiếu xuất kho.");
 
-            return MapToDto(issue);
+            return issue;
         }
+
+        // Đọc lại DTO sau khi thao tác đã được authorize -> không guard lại lần nữa.
+        private async Task<GoodsIssueDto> LoadDtoAsync(Guid id) => MapToDto(await LoadIssueAsync(id));
 
         public async Task<GoodsIssueDto> CreateGoodsIssueAsync(CreateGoodsIssueRequestDto request, Guid staffId)
         {
+            // WarehouseId đến thẳng từ request nên phải chặn ngay tại cửa, trước mọi validate khác:
+            // nếu không, nhân viên kho WH-PE tạo được phiếu xuất cho WH-PROD rồi Post để trừ tồn thật.
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, request.WarehouseId, "tạo phiếu xuất kho", "GoodsIssue");
+
             // Ngoại lệ A2: Kiểm tra số biên bản trùng nếu có nhập trước
             if (!string.IsNullOrWhiteSpace(request.PaperDocumentNumber))
             {
@@ -112,13 +144,16 @@ namespace VietTien.API.Services.Implementations
             _context.GoodsIssues.Add(issue);
             await _context.SaveChangesAsync();
 
-            return await GetGoodsIssueByIdAsync(issue.Id);
+            return await LoadDtoAsync(issue.Id);
         }
 
-        public async Task<GoodsIssueDto> UploadProofAsync(Guid issueId, IFormFile file)
+        public async Task<GoodsIssueDto> UploadProofAsync(Guid issueId, Guid staffId, IFormFile file)
         {
             var issue = await _context.GoodsIssues.FirstOrDefaultAsync(gi => gi.Id == issueId);
             if (issue == null) throw new KeyNotFoundException("Không tìm thấy phiếu xuất kho.");
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, issue.WarehouseId, "đính kèm bằng chứng phiếu xuất kho", "GoodsIssue", issue.Id.ToString());
 
             if (issue.Status == GoodsIssueStatus.Posted || issue.Status == GoodsIssueStatus.Cancelled || issue.Status == GoodsIssueStatus.Reversed)
             {
@@ -135,13 +170,16 @@ namespace VietTien.API.Services.Implementations
 
             await _context.SaveChangesAsync();
 
-            return await GetGoodsIssueByIdAsync(issue.Id);
+            return await LoadDtoAsync(issue.Id);
         }
 
-        public async Task<GoodsIssueDto> UpdateHandoverInfoAsync(Guid issueId, UpdateGoodsIssueHandoverDto dto)
+        public async Task<GoodsIssueDto> UpdateHandoverInfoAsync(Guid issueId, Guid staffId, UpdateGoodsIssueHandoverDto dto)
         {
             var issue = await _context.GoodsIssues.FirstOrDefaultAsync(gi => gi.Id == issueId);
             if (issue == null) throw new KeyNotFoundException("Không tìm thấy phiếu xuất kho.");
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, issue.WarehouseId, "sửa thông tin bàn giao phiếu xuất kho", "GoodsIssue", issue.Id.ToString());
 
             if (issue.Status == GoodsIssueStatus.Posted || issue.Status == GoodsIssueStatus.Cancelled || issue.Status == GoodsIssueStatus.Reversed)
             {
@@ -168,11 +206,22 @@ namespace VietTien.API.Services.Implementations
             if (!string.IsNullOrWhiteSpace(dto.UsagePurpose)) issue.UsagePurpose = dto.UsagePurpose.Trim();
 
             await _context.SaveChangesAsync();
-            return await GetGoodsIssueByIdAsync(issue.Id);
+            return await LoadDtoAsync(issue.Id);
         }
 
         public async Task<GoodsIssueDto> PostGoodsIssueAsync(Guid issueId, Guid staffId)
         {
+            // Post là thao tác trừ tồn kho vật lý -> guard NGOÀI transaction, trước khi mở.
+            var issueScope = await _context.GoodsIssues
+                .AsNoTracking()
+                .Where(gi => gi.Id == issueId)
+                .Select(gi => new { gi.WarehouseId })
+                .FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Không tìm thấy phiếu xuất kho.");
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, issueScope.WarehouseId, "Post phiếu xuất kho", "GoodsIssue", issueId.ToString());
+
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
@@ -297,7 +346,9 @@ namespace VietTien.API.Services.Implementations
                     after: new { Status = GoodsIssueStatus.Posted.ToString(), issue.Code, issue.WarehouseId },
                     reason: $"Đăng sổ xuất kho loại {issue.Type}");
 
-                return await GetGoodsIssueByIdAsync(issue.Id);
+                // LoadDtoAsync thay cho GetGoodsIssueByIdAsync: thao tác đã được guard phân quyền kho
+                // ở đầu hàm rồi, đọc lại DTO không cần (và không nên) guard thêm lần nữa.
+                return await LoadDtoAsync(issue.Id);
             }
             catch
             {
@@ -312,6 +363,17 @@ namespace VietTien.API.Services.Implementations
             {
                 throw new Exception("Vui lòng nhập lý do tạo phiếu Reversal đảo chứng từ.");
             }
+
+            // Reversal cộng ngược tồn kho -> guard NGOÀI transaction, trước khi mở.
+            var originalScope = await _context.GoodsIssues
+                .AsNoTracking()
+                .Where(gi => gi.Id == issueId)
+                .Select(gi => new { gi.WarehouseId })
+                .FirstOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Không tìm thấy phiếu xuất gốc.");
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, originalScope.WarehouseId, "đảo phiếu xuất kho", "GoodsIssue", issueId.ToString());
 
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
@@ -430,7 +492,7 @@ namespace VietTien.API.Services.Implementations
                     after: new { Status = "Reversed", originalIssue.Code, ReversalIssueCode = reversalIssue.Code },
                     reason: dto.ReversalReason.Trim());
 
-                return await GetGoodsIssueByIdAsync(reversalIssue.Id);
+                return await LoadDtoAsync(reversalIssue.Id);
             }
             catch
             {

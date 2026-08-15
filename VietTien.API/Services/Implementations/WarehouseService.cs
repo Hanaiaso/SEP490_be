@@ -252,11 +252,18 @@ namespace VietTien.API.Services.Implementations
                 
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
+            // Trạng thái Picking được chấp nhận làm đầu vào (cho phép nhận lại đơn của chính mình),
+            // nên nếu không đối chiếu người sở hữu thì một dialog cũ còn mở sẽ cướp đơn đang được
+            // người khác xử lý mà vẫn trả 200. Dùng đúng pattern của AcceptPickTaskAsync/
+            // ConsolidateOrderAsync/ReportShortageAsync trong chính file này.
+            if (order.WarehouseStaffId.HasValue && order.WarehouseStaffId.Value != staffId)
+                throw new UnauthorizedAccessException("Đơn hàng này đã được nhân viên khác tiếp nhận.");
+
             if (order.FulfillmentStatus != FulfillmentStatus.Allocated && order.FulfillmentStatus != FulfillmentStatus.Unallocated && order.FulfillmentStatus != FulfillmentStatus.Picking)
                 throw new Exception("Đơn hàng chưa được phân bổ hoặc không ở trạng thái hợp lệ, không thể xử lý.");
 
             order.FulfillmentStatus = FulfillmentStatus.Picking;
-            order.WarehouseStaffId = staffId;
+            order.WarehouseStaffId ??= staffId;
             order.PickingStartedAt = DateTime.UtcNow;
 
             // Generate PickTasks if they don't exist (for older orders before the new flow)

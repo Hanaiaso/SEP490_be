@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using VietTien.API.Data;
@@ -49,7 +49,7 @@ namespace VietTien.Tests.Regression
             _db.SaveChanges();
 
             var sut = new InventoryService(_db, MockHubContext.Create<WarehouseHub>().Object,
-                new Mock<ILogger<InventoryService>>().Object);
+                new Mock<ILogger<InventoryService>>().Object, TestWarehouseAccessGuard.Create(_db));
             var act = () => sut.AdjustInventoryAsync(inventoryInW2.Id, 5, "Kiểm kê", staffOfW1.Id);
 
             await act.Should().ThrowAsync<Exception>("nhân viên kho W1 không được sửa tồn của kho W2");
@@ -247,8 +247,13 @@ namespace VietTien.Tests.Regression
         [Fact]
         public async Task L1_REG_12_PostGoodsIssue_PartialFailure_LeavesStockUntouched()
         {
-            var staff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             var (warehouse, location) = TestData.Warehouse();
+            // Phiếu xuất kho nay bị chặn theo AssignedWarehouseId (SRS NAC-05) -> phải gán kho cho staff.
+            var staff = TestData.User(u =>
+            {
+                u.Role = SystemRole.WarehouseStaff;
+                u.AssignedWarehouseId = warehouse.Id;
+            });
             _db.Users.Add(staff);
             _db.Warehouses.Add(warehouse);
             _db.SaveChanges();
@@ -260,7 +265,7 @@ namespace VietTien.Tests.Regression
                 TestData.Inventory(p2.Id, location.Id, 1)); // p2 KHÔNG đủ cho 3 -> phiếu phải hỏng ở dòng 2
             _db.SaveChanges();
 
-            var sut = new GoodsIssueService(_db, new Mock<ICloudinaryService>().Object, new NoOpAuditLogService());
+            var sut = new GoodsIssueService(_db, new Mock<ICloudinaryService>().Object, TestWarehouseAccessGuard.Create(_db), new NoOpAuditLogService());
             var issue = await sut.CreateGoodsIssueAsync(new CreateGoodsIssueRequestDto
             {
                 Type = "Other",

@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
@@ -26,7 +26,7 @@ namespace VietTien.Tests.Services
 
         public StockAdjustmentServiceTests()
         {
-            _sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, new NoOpAuditLogService());
+            _sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, TestWarehouseAccessGuard.Create(_db), new NoOpAuditLogService());
 
             _staff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             _staff2 = TestData.User(u => u.Role = SystemRole.WarehouseStaff);

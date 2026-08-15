@@ -75,6 +75,8 @@ builder.Services.AddScoped<IGoodsReceiptService, GoodsReceiptService>();
 builder.Services.AddScoped<ISalesAllocationService, SalesAllocationService>();
 builder.Services.AddScoped<IManualPaymentService, ManualPaymentService>(); // MGR-05
 builder.Services.AddScoped<ISalesChangeRequestService, SalesChangeRequestService>(); // LUỒNG 7 (WF-07)
+// SRS NAC-05: hàng rào phân quyền theo kho được phân công, dùng chung cho mọi service ghi tồn kho.
+builder.Services.AddScoped<IWarehouseAccessGuard, WarehouseAccessGuard>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddScoped<IGoodsIssueService, GoodsIssueService>();
 builder.Services.AddScoped<IMaterialService, MaterialService>();
