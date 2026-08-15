@@ -6,7 +6,7 @@ namespace VietTien.API.Services.Interfaces
 {
     public interface IOrderService
     {
-        Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId);
+        Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId, List<Guid>? cartItemIds = null);
         Task<OrderResponseDto> PlaceOrderAsync(Guid userId, PlaceOrderRequestDto request);
         Task<DirectOrderResponseDto> PlaceDirectOrderAsync(PlaceDirectOrderRequestDto request, Guid staffId);
         Task<SePayQrResponseDto> GenerateSePayQrAsync(Guid orderId, Guid callerUserId, string callerRole);

@@ -34,12 +34,12 @@ namespace VietTien.API.Controllers
         private string GetUserRole() => User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
 
         [HttpGet("checkout-summary")]
-        public async Task<ActionResult<OrderPreviewDto>> GetCheckoutSummary()
+        public async Task<ActionResult<OrderPreviewDto>> GetCheckoutSummary([FromQuery] List<Guid>? cartItemIds = null)
         {
             try
             {
                 var userId = GetUserId();
-                var preview = await _orderService.GetCheckoutSummaryAsync(userId);
+                var preview = await _orderService.GetCheckoutSummaryAsync(userId, cartItemIds);
                 return Ok(preview);
             }
             catch (QuotationVersionStaleException ex)

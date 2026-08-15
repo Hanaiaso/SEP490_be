@@ -37,7 +37,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetCheckoutSummary_Success_ReturnsOk()
         {
-            _service.Setup(s => s.GetCheckoutSummaryAsync(_userId)).ReturnsAsync(new OrderPreviewDto());
+            _service.Setup(s => s.GetCheckoutSummaryAsync(_userId, null)).ReturnsAsync(new OrderPreviewDto());
 
             (await Build().GetCheckoutSummary()).StatusOf().Should().Be(200);
         }
@@ -45,7 +45,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetCheckoutSummary_WhenCartEmpty_Returns404()
         {
-            _service.Setup(s => s.GetCheckoutSummaryAsync(It.IsAny<Guid>()))
+            _service.Setup(s => s.GetCheckoutSummaryAsync(It.IsAny<Guid>(), It.IsAny<List<Guid>>()))
                 .ThrowsAsync(new KeyNotFoundException("Gio hang trong"));
 
             (await Build().GetCheckoutSummary()).StatusOf().Should().Be(404);

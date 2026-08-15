@@ -353,6 +353,94 @@ namespace VietTien.Tests.Services
             order.FinalPayment.Should().Be(preview.FinalPayment);
         }
 
+        //  ▶ Block: Thanh toán một phần giỏ hàng (CartItemIds)
+
+        /// <summary>Seed giỏ có 2 dòng sản phẩm độc lập, mỗi dòng giá trị 2.000.000đ (dưới ngưỡng
+        /// chiết khấu 10M) để dễ kiểm tra việc chọn đúng dòng không kéo theo dòng còn lại.</summary>
+        private (Cart cart, CartItem item1, CartItem item2) SeedCartWithTwoItems()
+        {
+            var product1 = TestData.SeedProduct(_db, p => p.StandardListedPrice = 2_000_000m);
+            var product2 = TestData.SeedProduct(_db, p => p.StandardListedPrice = 2_000_000m);
+            TestData.SeedInventory(_db, product1.Id, 1_000_000);
+            TestData.SeedInventory(_db, product2.Id, 1_000_000);
+            var cart = TestData.Cart(_profile.Id);
+            _db.Carts.Add(cart);
+            var item1 = TestData.CartItem(cart.Id, product1.Id, 1, 2_000_000m);
+            var item2 = TestData.CartItem(cart.Id, product2.Id, 1, 2_000_000m);
+            _db.CartItems.Add(item1);
+            _db.CartItems.Add(item2);
+            _db.SaveChanges();
+            return (cart, item1, item2);
+        }
+
+        // L1-ORD-11c | EP-Valid | Chỉ chọn 1/2 dòng trong giỏ -> đơn chỉ chứa dòng đã chọn, dòng còn
+        // lại vẫn nằm nguyên trong giỏ để khách thanh toán riêng ở lượt sau.
+        [Fact]
+        public async Task L1_ORD_11c_PlaceOrder_PartialCartSelection_OnlySelectedItemOrdered_OtherItemStaysInCart()
+        {
+            var (_, item1, item2) = SeedCartWithTwoItems();
+
+            var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto
+            {
+                PaymentMethod = PaymentMethod.COD,
+                CartItemIds = new List<Guid> { item1.Id }
+            });
+
+            var order = _db.Orders.Single(o => o.Id == response.OrderId);
+            order.OrderItems.Should().ContainSingle(oi => oi.ProductId == item1.ProductId);
+            order.TotalAmount.Should().Be(2_000_000m);
+
+            _db.CartItems.Count().Should().Be(1);
+            _db.CartItems.Single().Id.Should().Be(item2.Id); // dòng chưa chọn vẫn còn trong giỏ
+        }
+
+        // L1-ORD-11d | EP-Valid | checkout-summary với cartItemIds chỉ tính trên các dòng được chọn
+        [Fact]
+        public async Task L1_ORD_11d_CheckoutSummary_PartialCartSelection_TotalsOnlySelectedItems()
+        {
+            var (_, item1, _) = SeedCartWithTwoItems();
+
+            var summary = await _sut.GetCheckoutSummaryAsync(_customer.Id, new List<Guid> { item1.Id });
+
+            summary.TotalAmount.Should().Be(2_000_000m);
+            summary.Items.Should().ContainSingle();
+        }
+
+        // L1-ORD-11e | EP-Invalid | CartItemIds tham chiếu 1 dòng không còn tồn tại trong giỏ -> báo lỗi,
+        // không tạo đơn (vd khách xoá dòng đó ở tab khác giữa lúc đang thanh toán)
+        [Fact]
+        public async Task L1_ORD_11e_PlaceOrder_SelectedItemNotInCart_Rejected()
+        {
+            SeedCartWithTwoItems();
+
+            var act = () => _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto
+            {
+                PaymentMethod = PaymentMethod.COD,
+                CartItemIds = new List<Guid> { Guid.NewGuid() }
+            });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*không còn trong giỏ*");
+            _db.Orders.Count().Should().Be(0);
+            _db.CartItems.Count().Should().Be(2); // giỏ giữ nguyên khi checkout thất bại
+        }
+
+        // L1-ORD-11f | EP-Invalid | CartItemIds gửi rỗng (không chọn gì) -> báo lỗi thay vì âm thầm
+        // tính cả giỏ
+        [Fact]
+        public async Task L1_ORD_11f_PlaceOrder_EmptySelection_Rejected()
+        {
+            SeedCartWithTwoItems();
+
+            var act = () => _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto
+            {
+                PaymentMethod = PaymentMethod.COD,
+                CartItemIds = new List<Guid>()
+            });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*chọn ít nhất một sản phẩm*");
+            _db.Orders.Count().Should().Be(0);
+        }
+
         //  ▶ Block: GenerateSePayQrAsync()
 
         // L1-ORD-12 | State-Valid | Sinh QR SePay -> URL chứa STK + số tiền + mã đơn làm nội dung CK

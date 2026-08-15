@@ -16,6 +16,10 @@ namespace VietTien.API.DTOs.Order
 
         public bool RequiresRedInvoice { get; set; } = false;
 
+        // Cho phép khách chỉ thanh toán một phần giỏ hàng: null = thanh toán toàn bộ giỏ (hành vi cũ),
+        // danh sách rỗng/không khớp giỏ hiện tại = báo lỗi thay vì âm thầm tính cả giỏ.
+        public List<Guid>? CartItemIds { get; set; }
+
         [Base64Pdf(10)]
         public string? InvoicePdfBase64 { get; set; }
 

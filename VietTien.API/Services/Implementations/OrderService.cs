@@ -147,7 +147,27 @@ namespace VietTien.API.Services.Implementations
                 throw new Exception($"Đơn hàng từ {quotationMinValue:N0}đ trở lên bắt buộc phải có báo giá được duyệt. Vui lòng gửi yêu cầu báo giá trước khi đặt hàng.");
         }
 
-        public async Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId)
+        // Khách có thể chỉ chọn một phần giỏ hàng để thanh toán thay vì bắt buộc cả giỏ:
+        // cartItemIds = null -> lấy toàn bộ giỏ (hành vi cũ, giữ tương thích các luồng khác);
+        // cartItemIds != null -> chỉ lấy đúng các dòng được chọn, báo lỗi nếu chọn rỗng hoặc
+        // có dòng không còn tồn tại trong giỏ (vd bị xoá/thay đổi ở tab khác).
+        private static List<CartItemDto> ResolveSelectedCartItems(List<CartItemDto> items, List<Guid>? cartItemIds)
+        {
+            if (cartItemIds == null) return items;
+
+            var idSet = cartItemIds.ToHashSet();
+            var existingIds = items.Select(i => i.Id).ToHashSet();
+            if (idSet.Any(id => !existingIds.Contains(id)))
+                throw new Exception("Một số sản phẩm đã chọn không còn trong giỏ hàng. Vui lòng tải lại giỏ hàng.");
+
+            var selected = items.Where(i => idSet.Contains(i.Id)).ToList();
+            if (selected.Count == 0)
+                throw new Exception("Vui lòng chọn ít nhất một sản phẩm để thanh toán.");
+
+            return selected;
+        }
+
+        public async Task<OrderPreviewDto> GetCheckoutSummaryAsync(Guid userId, List<Guid>? cartItemIds = null)
         {
             var profile = await GetCustomerProfileAsync(userId);
             var cart = await _cartService.GetCartAsync(userId);
@@ -155,10 +175,12 @@ namespace VietTien.API.Services.Implementations
             if (cart == null || !cart.Items.Any())
                 throw new Exception("Giỏ hàng trống.");
 
-            var baseTotal = cart.Items.Sum(i => i.TotalPrice);
+            var selectedItems = ResolveSelectedCartItems(cart.Items, cartItemIds);
+
+            var baseTotal = selectedItems.Sum(i => i.TotalPrice);
             await EnsureQuotationRequirementMetAsync(baseTotal, profile.Id);
             var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
-                baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
+                baseTotal, profile.Id, selectedItems.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
 
             var totalAfterDiscount = baseTotal - discountAmount;
             var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
@@ -176,7 +198,7 @@ namespace VietTien.API.Services.Implementations
                 FinalPayment = finalPayment,
                 RequiresPhoneOtp = await RequiresFirstOrderPhoneOtpAsync(profile),
                 IsPriceExpired = cart.IsPriceExpired,
-                Items = cart.Items
+                Items = selectedItems
             };
         }
 
@@ -195,10 +217,12 @@ namespace VietTien.API.Services.Implementations
             if (cart == null || !cart.Items.Any() || cartEntity == null)
                 throw new Exception("Giỏ hàng trống.");
 
+            var selectedItems = ResolveSelectedCartItems(cart.Items, request.CartItemIds);
+
             // UC-13/BR-004 + BR-026: chặn TRƯỚC khi giữ tồn, tránh giữ tồn vô ích cho đơn sẽ bị từ chối.
             if (await RequiresFirstOrderPhoneOtpAsync(profile))
                 throw new PhoneVerificationRequiredException("Vui lòng xác thực số điện thoại qua OTP trước khi đặt đơn hàng đầu tiên.");
-            await EnsureQuotationRequirementMetAsync(cart.Items.Sum(i => i.TotalPrice), profile.Id);
+            await EnsureQuotationRequirementMetAsync(selectedItems.Sum(i => i.TotalPrice), profile.Id);
 
             Order order;
 
@@ -209,11 +233,11 @@ namespace VietTien.API.Services.Implementations
             {
                 // Giữ mềm tồn kho để tránh oversell khi nhiều khách đặt đồng thời; ném Exception nếu thiếu hàng.
                 await _inventoryReservationService.ReserveAsync(
-                    cart.Items.Select(i => (i.ProductId, i.Quantity)));
+                    selectedItems.Select(i => (i.ProductId, i.Quantity)));
 
-                var baseTotal = cart.Items.Sum(i => i.TotalPrice);
+                var baseTotal = selectedItems.Sum(i => i.TotalPrice);
                 var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
-                    baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
+                    baseTotal, profile.Id, selectedItems.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
                 var totalAfterDiscount = baseTotal - discountAmount;
                 // Cùng nguồn sự thật với GetCheckoutSummaryAsync: VAT áp theo hồ sơ có MST, KHÔNG theo
                 // cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác việc tính VAT).
@@ -278,7 +302,7 @@ namespace VietTien.API.Services.Implementations
                     ShippingAddress = shippingAddressText
                 };
 
-                foreach (var item in cart.Items)
+                foreach (var item in selectedItems)
                 {
                     order.OrderItems.Add(new OrderItem
                     {
@@ -290,7 +314,21 @@ namespace VietTien.API.Services.Implementations
                 }
 
                 await _unitOfWork.Orders.CreateOrderAsync(order);
-                await _unitOfWork.Carts.ClearCartAsync(cartEntity.Id);
+
+                // Chỉ xoá khỏi giỏ đúng những dòng vừa được đặt — các dòng khách chưa chọn thanh toán
+                // phải còn nguyên trong giỏ để khách thanh toán riêng ở lượt sau.
+                if (request.CartItemIds == null)
+                {
+                    await _unitOfWork.Carts.ClearCartAsync(cartEntity.Id);
+                }
+                else
+                {
+                    var selectedIdSet = selectedItems.Select(i => i.Id).ToHashSet();
+                    foreach (var entityItem in cartEntity.Items.Where(ci => selectedIdSet.Contains(ci.Id)).ToList())
+                    {
+                        _unitOfWork.Carts.RemoveCartItem(entityItem);
+                    }
+                }
                 await _unitOfWork.SaveChangesAsync();
 
                 if (creditApplied > 0)
