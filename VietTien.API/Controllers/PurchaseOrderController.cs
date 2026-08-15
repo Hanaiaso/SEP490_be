@@ -231,7 +231,7 @@ namespace VietTien.API.Controllers
 
         [HttpPost("{id}/resolve-discrepancy")]
         [HttpPost("/api/receiving-discrepancies/{id}/decision")]
-        [Authorize(Roles = "CEO,WarehouseStaff,Admin")]
+        [Authorize(Roles = "CEO,Admin")]
         public async Task<IActionResult> ResolveDiscrepancy(Guid id, [FromBody] DiscrepancyResolutionRequest request)
         {
             try
