@@ -284,7 +284,7 @@ namespace VietTien.API.Services.Implementations
 
             // Simple replace items for draft
             _context.PurchaseOrderItems.RemoveRange(po.Items);
-            po.Items = request.Items.Select(i => new PurchaseOrderItem
+            var newItems = request.Items.Select(i => new PurchaseOrderItem
             {
                 ProductId = i.ProductId,
                 MaterialId = i.MaterialId,
@@ -292,8 +292,19 @@ namespace VietTien.API.Services.Implementations
                 UnitPrice = i.UnitPrice,
                 Unit = i.Unit,
                 Note = i.Note,
-                ReceivedQuantity = 0
+                ReceivedQuantity = 0,
+                PurchaseOrderId = po.Id
             }).ToList();
+
+            // PurchaseOrderItem.Id có default = Guid.NewGuid() ngay trong C# -> nếu chỉ gán
+            // po.Items = newItems (dựa vào navigation fixup tự động của EF trên 1 entity CHA đã
+            // được track sẵn, không phải Add() mới), EF Core thấy Id khác Guid.Empty nên đoán nhầm
+            // đây là bản ghi ĐÃ TỒN TẠI cần UPDATE thay vì bản ghi mới cần INSERT — UPDATE 1 dòng
+            // chưa từng có trong DB thì 0 dòng bị ảnh hưởng, EF báo nhầm thành
+            // DbUpdateConcurrencyException dù chẳng có ai khác đụng vào cả. Phải AddRange() TƯỜNG
+            // MINH để buộc EF đánh dấu đúng trạng thái Added.
+            _context.PurchaseOrderItems.AddRange(newItems);
+            po.Items = newItems;
 
             await _context.SaveChangesAsync();
             return await GetByIdAsync(po.Id);
@@ -301,11 +312,23 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<PurchaseOrderDto> IssueAsync(Guid id, Guid ceoId)
         {
-            var po = await _context.PurchaseOrders.FindAsync(id);
+            var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == id);
             if (po == null) throw new KeyNotFoundException("Purchase Order not found");
 
             if (po.Status != PurchaseOrderStatus.Draft)
                 throw new InvalidOperationException("Can only issue Draft Purchase Orders");
+
+            // GH-10: dòng hàng import từ Excel (SKU không khớp) hoặc từ ảnh OCR (mô tả không fuzzy-match
+            // được sản phẩm/nguyên liệu nào) vẫn được thêm vào PO Draft với ProductId/MaterialId = null
+            // (hiển thị "N/A" ở FE) để CEO còn cơ hội sửa tay trước khi phát hành — nhưng trước đây
+            // không có gì chặn phát hành PO còn dòng "N/A" này, nên nó trôi thẳng tới Issued ->
+            // SentToWarehouse -> màn hình nhập kho, nơi Kho không có sản phẩm thật nào để ghi nhận số
+            // lượng đã nhận. Chặn ngay tại bước phát hành, buộc phải sửa PO Draft trước.
+            var unmatchedCount = po.Items.Count(i => i.ProductId == null && i.MaterialId == null);
+            if (unmatchedCount > 0)
+                throw new InvalidOperationException(
+                    $"PO còn {unmatchedCount} dòng hàng chưa khớp được sản phẩm/nguyên liệu nào trong hệ thống (hiển thị N/A). " +
+                    "Vui lòng sửa PO Draft để gán đúng sản phẩm/nguyên liệu (hoặc xoá dòng đó) trước khi phát hành.");
 
             po.Status = PurchaseOrderStatus.Issued;
             po.IssuedAt = DateTime.UtcNow;
@@ -368,6 +391,8 @@ namespace VietTien.API.Services.Implementations
                 Code = p.Code,
                 Status = p.Status.ToString(),
                 CreatedAt = p.CreatedAt,
+                IssuedAt = p.IssuedAt,
+                ExpectedDeliveryDate = p.ExpectedDeliveryDate,
                 SupplierName = p.Supplier.Name,
                 WarehouseName = p.Warehouse.Name,
                 TotalItems = p.Items.Count,
