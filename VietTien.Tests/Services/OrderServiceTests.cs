@@ -407,6 +407,99 @@ namespace VietTien.Tests.Services
             order.FinalPayment.Should().Be(110_000_000m);
         }
 
+        // L1-ORD-11i | EP-Valid | Khách có 2 báo giá CustomerAccepted còn hạn cùng lúc (đàm phán 2 đợt
+        // khác nhau, mỗi đợt 1 SKU riêng). Đợt SAU (mới hơn) không liên quan tới SKU đang mua lần này,
+        // nhưng đợt TRƯỚC (cũ hơn, vẫn còn hạn 7 ngày) khớp đúng SKU đang mua -> vẫn phải áp giá đàm
+        // phán của đợt CŨ, không được bỏ qua chỉ vì nó không phải báo giá mới nhất.
+        [Fact]
+        public async Task L1_ORD_11i_PlaceOrder_OlderStillValidQuotationMatchesCart_NegotiatedPriceStillApplied()
+        {
+            var productA = TestData.SeedProduct(_db, p => p.StandardListedPrice = 105_000m);
+            var productB = TestData.SeedProduct(_db, p => p.StandardListedPrice = 220_000m);
+            TestData.SeedInventory(_db, productA.Id, 1_000_000);
+            TestData.SeedInventory(_db, productB.Id, 1_000_000);
+
+            // Đợt đàm phán CŨ (2 giờ trước): SKU A, chấp nhận giá 60.000đ/sp (thay vì niêm yết 105.000đ).
+            var oldQuotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 105_000_000m,
+                RequestDate = DateTime.UtcNow.AddHours(-2),
+                ValidUntil = DateTime.UtcNow.AddDays(6), // còn hạn
+            };
+            var oldVersion = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = oldQuotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 60_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            oldVersion.Items.Add(new QuotationVersionItem
+            {
+                QuotationVersionId = oldVersion.Id,
+                ProductId = productA.Id,
+                Quantity = 1000,
+                OriginalUnitPrice = 105_000m,
+                ProposedUnitPrice = 60_000m,
+            });
+            oldQuotation.AcceptedVersionId = oldVersion.Id;
+            oldQuotation.Versions.Add(oldVersion);
+            _db.Quotations.Add(oldQuotation);
+
+            // Đợt đàm phán MỚI HƠN (vừa duyệt): SKU B — không liên quan gì tới SKU A ở trên.
+            var newQuotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 137_500_000m,
+                RequestDate = DateTime.UtcNow,
+                ValidUntil = DateTime.UtcNow.AddDays(7),
+            };
+            var newVersion = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = newQuotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 134_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            newVersion.Items.Add(new QuotationVersionItem
+            {
+                QuotationVersionId = newVersion.Id,
+                ProductId = productB.Id,
+                Quantity = 1000,
+                OriginalUnitPrice = 220_000m,
+                ProposedUnitPrice = 134_000m,
+            });
+            newQuotation.AcceptedVersionId = newVersion.Id;
+            newQuotation.Versions.Add(newVersion);
+            _db.Quotations.Add(newQuotation);
+            _db.SaveChanges();
+
+            // Khách giờ mua LẠI đúng SKU A (khớp báo giá CŨ, không khớp báo giá mới) với số lượng đủ >100M.
+            var cart = TestData.Cart(_profile.Id);
+            _db.Carts.Add(cart);
+            _db.CartItems.Add(TestData.CartItem(cart.Id, productA.Id, 1000, 105_000m));
+            _db.SaveChanges();
+
+            var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            var orderItem = _db.OrderItems.Single(oi => oi.OrderId == response.OrderId);
+            orderItem.PriceSnapshot.Should().Be(60_000m); // giá đàm phán của báo giá CŨ vẫn phải áp dụng
+            orderItem.PriceSnapshot.Should().NotBe(105_000m); // không được rơi về giá niêm yết
+
+            var order = _db.Orders.Single(o => o.Id == response.OrderId);
+            order.FinalPayment.Should().Be(60_000_000m);
+        }
+
         //  ▶ Block: Thanh toán một phần giỏ hàng (CartItemIds)
 
         /// <summary>Seed giỏ có 2 dòng sản phẩm độc lập, mỗi dòng giá trị 2.000.000đ (dưới ngưỡng

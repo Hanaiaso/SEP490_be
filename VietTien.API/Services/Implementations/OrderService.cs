@@ -96,18 +96,24 @@ namespace VietTien.API.Services.Implementations
             if (totalAmount >= quotationMinValue)
             {
                 // BR-007: ưu tiên áp giá đàm phán nếu khách có báo giá đã duyệt (CustomerAccepted) còn hạn.
-                var acceptedVersion = await _context.QuotationVersions
+                // Khách có thể có NHIỀU báo giá đã duyệt còn hiệu lực cùng lúc (đàm phán nhiều đợt khác
+                // nhau, mỗi đợt cho 1 bộ SKU riêng) — trước đây chỉ lấy đúng báo giá MỚI NHẤT rồi bỏ
+                // cuộc ngay nếu nó không khớp giỏ hàng hiện tại, dù có báo giá CŨ HƠN (còn hạn 7 ngày)
+                // khớp hoàn toàn. Hệ quả: giá đàm phán "biến mất" ở lần mua sau nếu giữa 2 lần mua khách
+                // lỡ tạo/duyệt thêm 1 báo giá khác không liên quan. Giờ duyệt qua TẤT CẢ báo giá còn hạn,
+                // ưu tiên báo giá mới nhất trong số những báo giá khớp đủ mọi dòng trong giỏ hiện tại.
+                var acceptedVersions = await _context.QuotationVersions
                     .Include(v => v.Items)
                     .Where(v => v.Quotation.CustomerProfileId == customerProfileId
                         && v.Quotation.Status == QuotationStatus.CustomerAccepted
                         && v.Id == v.Quotation.AcceptedVersionId
                         && (v.Quotation.ValidUntil == null || v.Quotation.ValidUntil >= DateTime.UtcNow))
                     .OrderByDescending(v => v.Quotation.RequestDate)
-                    .FirstOrDefaultAsync();
+                    .ToListAsync();
 
-                if (acceptedVersion != null)
+                var cartLineList = cartLines.ToList();
+                foreach (var acceptedVersion in acceptedVersions)
                 {
-                    var cartLineList = cartLines.ToList();
                     var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
 
                     // DEF-L3-003: giá đàm phán là ĐƠN GIÁ theo SKU, không gắn với số lượng đã duyệt — chỉ
