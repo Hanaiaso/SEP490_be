@@ -170,6 +170,7 @@ namespace VietTien.API.Controllers
                         QuarantineCode = q.QuarantineCode,
                         OrderId = q.OrderId,
                         OrderCode = q.Order != null ? q.Order.OrderCode : null,
+                        GoodsReceiptItemId = q.GoodsReceiptItemId,
                         ProductId = q.ProductId,
                         MaterialId = q.MaterialId,
                         ItemName = q.Product != null ? q.Product.Name : q.Material != null ? q.Material.Name : "N/A",
