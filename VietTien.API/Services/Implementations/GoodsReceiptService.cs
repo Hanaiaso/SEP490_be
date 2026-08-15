@@ -390,6 +390,7 @@ namespace VietTien.API.Services.Implementations
         private async Task<GoodsReceiptDto> GetReceiptDtoAsync(Guid id)
         {
             var r = await _context.GoodsReceipts
+                .Include(gr => gr.PurchaseOrder)
                 .Include(gr => gr.ReceivedByUser)
                 .Include(gr => gr.Items).ThenInclude(i => i.PurchaseOrderItem).ThenInclude(poi => poi.Product)
                 .Include(gr => gr.Items).ThenInclude(i => i.PurchaseOrderItem).ThenInclude(poi => poi.Material)
@@ -401,6 +402,7 @@ namespace VietTien.API.Services.Implementations
             {
                 Id = r.Id,
                 PurchaseOrderId = r.PurchaseOrderId,
+                PurchaseOrderCode = r.PurchaseOrder.Code,
                 ReceivedByUserId = r.ReceivedByUserId,
                 ReceivedByUserName = r.ReceivedByUser.FullName,
                 Code = r.Code,
