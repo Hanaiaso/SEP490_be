@@ -8,7 +8,6 @@ namespace VietTien.API.DTOs.Warehouse
         public WarehouseInboundKpiDto Inbound { get; set; } = new();
         public WarehouseInventoryKpiDto InventoryOps { get; set; } = new();
         public List<WarehouseDailyVolumeDto> WeeklyVolume { get; set; } = new();
-        public List<StockHealthItemDto> StockHealth { get; set; } = new();
         public List<RecentPickTaskDto> RecentPickTasks { get; set; } = new();
         public List<PendingPurchaseOrderDto> PendingPurchaseOrders { get; set; } = new();
         public List<LowStockItemDto> LowStockAlerts { get; set; } = new();
@@ -52,14 +51,6 @@ namespace VietTien.API.DTOs.Warehouse
         public DateTime Date { get; set; }
         public int Outbound { get; set; }
         public int Inbound { get; set; }
-    }
-
-    public class StockHealthItemDto
-    {
-        public string Name { get; set; } = string.Empty;
-        public int OnHand { get; set; }
-        public int Threshold { get; set; }
-        public string Unit { get; set; } = string.Empty;
     }
 
     public class RecentPickTaskDto

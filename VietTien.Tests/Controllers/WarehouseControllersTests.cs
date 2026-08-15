@@ -782,7 +782,7 @@ namespace VietTien.Tests.Controllers
         private readonly Guid _userId = Guid.NewGuid();
 
         public WarehouseManagementControllerTests()
-            => _sut = new WarehouseManagementController(_service.Object, _db).WithUser(_userId, "WarehouseStaff");
+            => _sut = new WarehouseManagementController(_service.Object, _db, new NoOpAuditLogService()).WithUser(_userId, "WarehouseStaff");
 
         // ── CRUD kho ─────────────────────────────────────────────────────────
 

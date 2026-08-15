@@ -23,7 +23,7 @@ namespace VietTien.Tests.Services
 
         public GoodsIssueServiceTests()
         {
-            _sut = new GoodsIssueService(_db, _cloudinary.Object);
+            _sut = new GoodsIssueService(_db, _cloudinary.Object, new NoOpAuditLogService());
             _staff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             (_warehouse, _location) = TestData.Warehouse();
             _db.Users.Add(_staff);

@@ -27,13 +27,16 @@ namespace VietTien.API.Services.Implementations
         public async Task<CeoDashboardDto> GetDashboardAsync(DateTime from, DateTime to)
         {
             var orgKpi = await _kpiService.GetSnapshotAsync(null, from, to);
+            var pendingCeoQuotationCount = await _context.Quotations
+                .CountAsync(q => q.Status == QuotationStatus.PendingCeo);
 
             return new CeoDashboardDto
             {
                 OrgKpi = orgKpi,
                 Inventory = await GetInventorySummaryAsync(),
                 PurchaseOrders = await GetPurchaseOrderSummaryAsync(),
-                Discrepancy = await GetDiscrepancySummaryAsync(from, to)
+                Discrepancy = await GetDiscrepancySummaryAsync(from, to),
+                PendingCeoQuotationCount = pendingCeoQuotationCount
             };
         }
 

@@ -50,6 +50,12 @@ namespace VietTien.API.DTOs.Admin
         public List<PaymentExceptionDto> OpenExceptions { get; set; } = new();
         public List<CustomerDebtDto> OverdueDebts { get; set; } = new();
         public int CodSlaBreachCountToday { get; set; } // đơn COD bị hủy do quá 35' trong hôm nay (nguồn: JobRun/OrderSlaJob)
+
+        // Việc đang chờ Sales Manager xử lý — trước đây không hiện trên dashboard, phải tự vào từng trang mới biết.
+        public int PendingQuotationApprovalCount { get; set; } // Quotation.Status == PendingManager
+        public int PendingSalesChangeRequestCount { get; set; } // SalesChangeRequest.Status == Pending
+        public int PendingDeliveryConflictCount { get; set; } // DeliveryScheduleConflict.Status == Pending
+        public int PendingMarketingApprovalCount { get; set; } // MarketingPost.Status == Submitted
     }
 
     public class PaymentExceptionDto
@@ -83,6 +89,7 @@ namespace VietTien.API.DTOs.Admin
         public InventorySummaryDto Inventory { get; set; } = new();
         public PurchaseOrderSummaryDto PurchaseOrders { get; set; } = new();
         public DiscrepancySummaryDto Discrepancy { get; set; } = new();
+        public int PendingCeoQuotationCount { get; set; } // Quotation.Status == PendingCeo, chờ CEO duyệt giá
     }
 
     public class InventorySummaryDto

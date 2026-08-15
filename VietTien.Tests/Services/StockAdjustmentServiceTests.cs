@@ -26,7 +26,7 @@ namespace VietTien.Tests.Services
 
         public StockAdjustmentServiceTests()
         {
-            _sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object);
+            _sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, new NoOpAuditLogService());
 
             _staff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             _staff2 = TestData.User(u => u.Role = SystemRole.WarehouseStaff);

@@ -13,11 +13,13 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly INotificationService _notificationService;
+        private readonly IAuditLogService _auditLogService;
 
-        public StockAdjustmentService(ApplicationDbContext context, INotificationService notificationService)
+        public StockAdjustmentService(ApplicationDbContext context, INotificationService notificationService, IAuditLogService auditLogService)
         {
             _context = context;
             _notificationService = notificationService;
+            _auditLogService = auditLogService;
         }
 
         private static StockAdjustmentDto ToDto(StockAdjustment a)
@@ -198,6 +200,20 @@ namespace VietTien.API.Services.Implementations
 
             await _context.SaveChangesAsync();
             await transaction.CommitAsync();
+
+            // BR-022: quyết định CEO là "critical change" tác động thẳng tới OnHandQuantity -> bắt
+            // buộc audit trail append-only.
+            var ceo = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == ceoId);
+            await _auditLogService.LogAsync(
+                entityName: "StockAdjustment",
+                entityId: adjustment.Id.ToString(),
+                action: adjustment.Status == StockAdjustmentStatus.Approved ? "APPROVE" : "REJECT",
+                actorUserId: ceoId,
+                actorEmail: ceo?.Email,
+                actorRole: "CEO",
+                before: new { Status = "Pending", adjustment.SystemQuantity, adjustment.PhysicalQuantity, adjustment.Variance },
+                after: new { Status = adjustment.Status.ToString(), adjustment.SystemQuantity, adjustment.PhysicalQuantity, adjustment.Variance },
+                reason: adjustment.DecisionNote);
 
             try
             {
