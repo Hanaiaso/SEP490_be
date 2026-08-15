@@ -42,12 +42,20 @@ namespace VietTien.API.Services.Implementations
 
             var slowMovingItems = await _inventoryService.GetSlowMovingItemsAsync(null, SlowMovingDaysThreshold);
 
+            // Các công thức KPI dưới đây PHẢI khớp chính xác điều kiện lọc mà trang bấm-xem-chi-tiết
+            // tương ứng đang dùng (WarehouseService.GetOrdersForWarehouseAsync/GetPickTasksAsync) —
+            // trước đây bị sửa lệch nhau (vd ConsolidationArea đổi sang chỉ đếm "Consolidated" trong
+            // khi tab "Consolidation" vẫn lọc "Ready|Consolidating") khiến số trên KPI card và số
+            // trong modal chi tiết không khớp.
             var outbound = new WarehouseOutboundKpiDto
             {
-                PendingOrders = await _context.Orders.CountAsync(o => o.FulfillmentStatus == FulfillmentStatus.Allocated),
-                PickingInProgress = await _context.PickTasks.CountAsync(p => p.Status == PickTaskStatus.Picking),
-                ConsolidationArea = await _context.Orders.CountAsync(o => o.FulfillmentStatus == FulfillmentStatus.Consolidated),
-                CompletedToday = await _context.PickTasks.CountAsync(p => p.CompletedAt != null && p.CompletedAt >= todayStart && p.CompletedAt < tomorrowStart),
+                PendingOrders = await _context.Orders.CountAsync(o =>
+                    o.OrderStatus == OrderStatus.Confirmed && o.FulfillmentStatus <= FulfillmentStatus.Allocated && !o.IsExternalOrder),
+                PickingInProgress = await _context.PickTasks.CountAsync(p => p.Status == PickTaskStatus.Picking || p.Status == PickTaskStatus.Exception),
+                ConsolidationArea = await _context.Orders.CountAsync(o =>
+                    o.FulfillmentStatus == FulfillmentStatus.Ready || o.FulfillmentStatus == FulfillmentStatus.Consolidating),
+                CompletedToday = await _context.PickTasks.CountAsync(p =>
+                    p.Status == PickTaskStatus.Completed && p.CompletedAt != null && p.CompletedAt >= todayStart && p.CompletedAt < tomorrowStart),
             };
 
             var inbound = new WarehouseInboundKpiDto

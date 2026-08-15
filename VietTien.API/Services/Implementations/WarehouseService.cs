@@ -385,6 +385,17 @@ namespace VietTien.API.Services.Implementations
             {
                 query = query.Where(pt => pt.Status == PickTaskStatus.Completed);
             }
+            else if (tabType == "Completed")
+            {
+                // Khớp đúng định nghĩa "Hoàn tất hôm nay" của WarehouseDashboardService (CompletedToday) —
+                // trước đây tabType này không được nhận diện (rơi vào default, không lọc gì cả) nên
+                // dashboard bấm vào KPI "Hoàn tất hôm nay" lại hiện danh sách pick task không liên quan.
+                var localToday = DateTime.UtcNow.AddHours(7).Date;
+                var todayStart = localToday.AddHours(-7);
+                var tomorrowStart = todayStart.AddDays(1);
+                query = query.Where(pt => pt.Status == PickTaskStatus.Completed
+                    && pt.CompletedAt != null && pt.CompletedAt >= todayStart && pt.CompletedAt < tomorrowStart);
+            }
 
             query = query.OrderBy(pt => pt.CreatedAt);
 

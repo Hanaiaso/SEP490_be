@@ -1018,7 +1018,7 @@ namespace VietTien.API.Services.Implementations
 
         private static readonly HashSet<string> ValidDashboardDrillDownMetrics = new(StringComparer.OrdinalIgnoreCase)
         {
-            "newOrders", "processing", "shipping", "deliveredToday", "revenueToday", "pendingDebt"
+            "newOrders", "processing", "shipping", "deliveredToday", "revenueToday", "pendingDebt", "completedOrders", "codSlaBreach"
         };
 
         // Dùng LẠI đúng điều kiện lọc của GetSalesDashboardStatsAsync để số hiển thị và danh sách
@@ -1030,6 +1030,37 @@ namespace VietTien.API.Services.Implementations
 
             // "Hôm nay" tính theo giờ Việt Nam (UTC+7), không phải ngày UTC.
             var today = DateTime.UtcNow.AddHours(7).Date;
+
+            if (string.Equals(metric, "codSlaBreach", StringComparison.OrdinalIgnoreCase))
+            {
+                var todayStart = DateTime.UtcNow.AddHours(7).Date.AddHours(-7);
+                var breachedOrderIds = await _context.Notifications
+                    .AsNoTracking()
+                    .Where(n => n.Type == NotificationType.SYS_04_CodUnconfirmed30m && n.CreatedAt >= todayStart && n.ReferenceId != null)
+                    .Select(n => n.ReferenceId!.Value)
+                    .Distinct()
+                    .ToListAsync();
+
+                var breachQuery = _context.Orders.Include(o => o.CustomerProfile).Where(o => breachedOrderIds.Contains(o.Id));
+                if (scopedSalesStaffId.HasValue)
+                    breachQuery = breachQuery.Where(o => o.SalesStaffId == scopedSalesStaffId.Value);
+
+                return await breachQuery
+                    .OrderByDescending(o => o.CreatedAt)
+                    .Select(o => new DashboardOrderDto
+                    {
+                        Id = o.Id,
+                        OrderCode = o.OrderCode,
+                        CustomerName = o.CustomerProfile.Representative ?? o.CustomerProfile.CompanyName ?? "Khách lẻ",
+                        CreatedAt = o.CreatedAt,
+                        FinalPayment = o.FinalPayment,
+                        PaymentMethod = o.PaymentMethod,
+                        PaymentStatus = o.PaymentStatus,
+                        OrderStatus = o.OrderStatus,
+                        InvoicePdfUrl = o.InvoicePdfUrl
+                    })
+                    .ToListAsync();
+            }
 
             if (string.Equals(metric, "pendingDebt", StringComparison.OrdinalIgnoreCase))
             {
@@ -1071,6 +1102,7 @@ namespace VietTien.API.Services.Implementations
                 "shipping" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Processing),
                 "deliveredtoday" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.AddHours(7).Date == today),
                 "revenuetoday" => ordersQuery.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.AddHours(7).Date == today),
+                "completedorders" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Completed),
                 _ => ordersQuery
             };
 
