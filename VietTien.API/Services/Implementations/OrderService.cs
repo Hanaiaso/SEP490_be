@@ -83,7 +83,10 @@ namespace VietTien.API.Services.Implementations
                 throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
         }
 
-        private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(
+        // Trả kèm negotiatedUnitPrices (null nếu không áp giá đàm phán) để caller snapshot ĐÚNG đơn giá
+        // đàm phán vào từng OrderItem — trước đây chỉ trả về tổng chiết khấu nên OrderItem.PriceSnapshot
+        // luôn lấy giá niêm yết trong giỏ, khiến chi tiết đơn hàng hiển thị sai giá dù tổng tiền vẫn đúng.
+        private async Task<(decimal discountAmount, decimal discountPercentage, Dictionary<Guid, decimal>? negotiatedUnitPrices)> CalculateDiscountAsync(
             decimal totalAmount, Guid customerProfileId, IEnumerable<(Guid ProductId, int Quantity, decimal UnitPrice)> cartLines)
         {
             // Ngưỡng chuyển sang luồng báo giá B2B (CR-01), cấu hình qua QUOTATION_MIN_VALUE, mặc định 100 triệu.
@@ -114,11 +117,11 @@ namespace VietTien.API.Services.Implementations
 
                     if (allLinesNegotiated)
                     {
-                        var negotiatedTotal = cartLineList.Sum(line =>
-                            negotiatedByProduct[line.ProductId].ProposedUnitPrice * line.Quantity);
+                        var negotiatedUnitPrices = negotiatedByProduct.ToDictionary(kv => kv.Key, kv => kv.Value.ProposedUnitPrice);
+                        var negotiatedTotal = cartLineList.Sum(line => negotiatedUnitPrices[line.ProductId] * line.Quantity);
                         var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
                         var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
-                        return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage);
+                        return (Math.Round(negotiatedDiscount, 0, MidpointRounding.AwayFromZero), negotiatedPercentage, negotiatedUnitPrices);
                     }
                 }
             }
@@ -126,7 +129,7 @@ namespace VietTien.API.Services.Implementations
             var discountPercentage = await _discountTierService.GetApplicableDiscountPercentAsync(totalAmount);
             var discountAmount = Math.Round(totalAmount * discountPercentage, 0, MidpointRounding.AwayFromZero);
 
-            return (discountAmount, discountPercentage);
+            return (discountAmount, discountPercentage, null);
         }
 
         // BR-026: đơn ≥ ngưỡng báo giá B2B mà chưa có báo giá được duyệt thì không được đặt thẳng theo
@@ -179,7 +182,7 @@ namespace VietTien.API.Services.Implementations
 
             var baseTotal = selectedItems.Sum(i => i.TotalPrice);
             await EnsureQuotationRequirementMetAsync(baseTotal, profile.Id);
-            var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
+            var (discountAmount, discountPercentage, _) = await CalculateDiscountAsync(
                 baseTotal, profile.Id, selectedItems.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
 
             var totalAfterDiscount = baseTotal - discountAmount;
@@ -236,7 +239,7 @@ namespace VietTien.API.Services.Implementations
                     selectedItems.Select(i => (i.ProductId, i.Quantity)));
 
                 var baseTotal = selectedItems.Sum(i => i.TotalPrice);
-                var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
+                var (discountAmount, discountPercentage, negotiatedUnitPrices) = await CalculateDiscountAsync(
                     baseTotal, profile.Id, selectedItems.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
                 var totalAfterDiscount = baseTotal - discountAmount;
                 // Cùng nguồn sự thật với GetCheckoutSummaryAsync: VAT áp theo hồ sơ có MST, KHÔNG theo
@@ -304,11 +307,18 @@ namespace VietTien.API.Services.Implementations
 
                 foreach (var item in selectedItems)
                 {
+                    // Snapshot đúng đơn giá đàm phán (nếu áp dụng) thay vì luôn lấy giá niêm yết trong
+                    // giỏ — nếu không, chi tiết đơn hàng sẽ hiển thị sai giá dù tổng tiền đơn vẫn đúng
+                    // (do DiscountAmount đã được tính đúng ở cấp tổng đơn).
+                    var unitPrice = negotiatedUnitPrices != null && negotiatedUnitPrices.TryGetValue(item.ProductId, out var negotiatedPrice)
+                        ? negotiatedPrice
+                        : item.UnitPrice;
+
                     order.OrderItems.Add(new OrderItem
                     {
                         ProductId = item.ProductId,
                         Quantity = item.Quantity,
-                        PriceSnapshot = item.UnitPrice,
+                        PriceSnapshot = unitPrice,
                         CostSnapshot = 0
                     });
                 }
