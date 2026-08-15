@@ -7,7 +7,6 @@ namespace VietTien.API.DTOs.Warehouse
         public WarehouseOutboundKpiDto Outbound { get; set; } = new();
         public WarehouseInboundKpiDto Inbound { get; set; } = new();
         public WarehouseInventoryKpiDto InventoryOps { get; set; } = new();
-        public List<WarehouseDailyVolumeDto> WeeklyVolume { get; set; } = new();
         public List<RecentPickTaskDto> RecentPickTasks { get; set; } = new();
         public List<PendingPurchaseOrderDto> PendingPurchaseOrders { get; set; } = new();
         public List<LowStockItemDto> LowStockAlerts { get; set; } = new();
@@ -44,13 +43,6 @@ namespace VietTien.API.DTOs.Warehouse
         public int SlowMovingCount { get; set; }
         public int TransfersInTransit { get; set; }
         public int ActiveWarehouses { get; set; }
-    }
-
-    public class WarehouseDailyVolumeDto
-    {
-        public DateTime Date { get; set; }
-        public int Outbound { get; set; }
-        public int Inbound { get; set; }
     }
 
     public class RecentPickTaskDto
