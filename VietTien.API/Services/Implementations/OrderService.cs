@@ -56,9 +56,7 @@ namespace VietTien.API.Services.Implementations
             return profile;
         }
 
-        // UC-13/BR-004: khách chưa từng có đơn hàng nào (đơn đầu tiên) VÀ số điện thoại chưa được
-        // xác thực OTP -> bắt buộc verify trước khi cho đặt hàng. Đa số khách sẽ vướng điều kiện này
-        // vì IsPhoneVerified mặc định false, chỉ true sau khi hoàn tất UC-09 (đổi SĐT) ít nhất 1 lần.
+        // UC-13/BR-004: đơn đầu tiên của khách + SĐT chưa xác thực OTP -> bắt buộc verify trước khi đặt hàng.
         private async Task<bool> RequiresFirstOrderPhoneOtpAsync(CustomerProfile profile)
         {
             if (profile.User.IsPhoneVerified) return false;
@@ -88,15 +86,13 @@ namespace VietTien.API.Services.Implementations
         private async Task<(decimal discountAmount, decimal discountPercentage)> CalculateDiscountAsync(
             decimal totalAmount, Guid customerProfileId, IEnumerable<(Guid ProductId, int Quantity, decimal UnitPrice)> cartLines)
         {
-            // Ngưỡng chuyển sang luồng báo giá B2B (CR-01) — đọc từ Admin System Config (Phase 1),
-            // cùng key QUOTATION_MIN_VALUE đã seed sẵn 100 triệu, fallback nếu chưa cấu hình.
+            // Ngưỡng chuyển sang luồng báo giá B2B (CR-01), cấu hình qua QUOTATION_MIN_VALUE, mặc định 100 triệu.
             var quotationMinValueRaw = await _systemConfigService.GetEffectiveValueAsync("QUOTATION_MIN_VALUE");
             var quotationMinValue = decimal.TryParse(quotationMinValueRaw, out var parsedMinValue) ? parsedMinValue : 100_000_000m;
 
             if (totalAmount >= quotationMinValue)
             {
-                // BR-007 (Quotation Version Immutability) + SRS FT-02 AC-05/NAC-04: nếu khách hàng có báo giá
-                // đã duyệt (CustomerAccepted) và còn hạn thì ưu tiên áp dụng giá đàm phán của báo giá đó.
+                // BR-007: ưu tiên áp giá đàm phán nếu khách có báo giá đã duyệt (CustomerAccepted) còn hạn.
                 var acceptedVersion = await _context.QuotationVersions
                     .Include(v => v.Items)
                     .Where(v => v.Quotation.CustomerProfileId == customerProfileId
@@ -111,11 +107,8 @@ namespace VietTien.API.Services.Implementations
                     var cartLineList = cartLines.ToList();
                     var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
 
-                    // DEF-L3-003: trước đây đòi khớp TUYỆT ĐỐI cả số lượng từng dòng — khách chỉ cần đổi
-                    // số lượng sau khi báo giá đã duyệt là mất trắng toàn bộ ưu đãi đàm phán, quay về giá
-                    // niêm yết. Giá đã đàm phán là ĐƠN GIÁ trên từng SKU, không gắn với đúng số lượng tại
-                    // thời điểm duyệt — nên chỉ cần mọi dòng trong giỏ đều thuộc tập SKU đã đàm phán là áp
-                    // đơn giá đó nhân với số lượng THỰC TẾ trong giỏ, không quan tâm số lượng đã đổi.
+                    // DEF-L3-003: giá đàm phán là ĐƠN GIÁ theo SKU, không gắn với số lượng đã duyệt — chỉ
+                    // cần mọi dòng trong giỏ thuộc tập SKU đã đàm phán là áp dụng, bất kể số lượng đã đổi.
                     var allLinesNegotiated = cartLineList.Count > 0
                         && cartLineList.All(line => negotiatedByProduct.ContainsKey(line.ProductId));
 
@@ -131,17 +124,13 @@ namespace VietTien.API.Services.Implementations
             }
 
             var discountPercentage = await _discountTierService.GetApplicableDiscountPercentAsync(totalAmount);
-
-            // VND không có đơn vị nhỏ hơn 1 đồng — làm tròn về đồng nguyên trước khi lưu/đẩy sang SePay.
             var discountAmount = Math.Round(totalAmount * discountPercentage, 0, MidpointRounding.AwayFromZero);
 
             return (discountAmount, discountPercentage);
         }
 
-        // BR-026: đơn ≥ ngưỡng báo giá B2B (mặc định 100 triệu, cấu hình qua QUOTATION_MIN_VALUE) mà
-        // khách chưa có báo giá được duyệt (CustomerAccepted, còn hạn) thì không được đặt thẳng theo
-        // giá niêm yết — phải đi qua Sales duyệt giá trước. Trước đây chỉ chặn ở FE (Cart.jsx disable
-        // nút đặt hàng), BE không hề kiểm tra -> gọi thẳng API là bypass được hoàn toàn.
+        // BR-026: đơn ≥ ngưỡng báo giá B2B mà chưa có báo giá được duyệt thì không được đặt thẳng theo
+        // giá niêm yết — phải qua Sales duyệt giá trước (chặn ở BE để FE không thể bypass).
         private async Task EnsureQuotationRequirementMetAsync(decimal totalAmount, Guid customerProfileId)
         {
             var quotationMinValueRaw = await _systemConfigService.GetEffectiveValueAsync("QUOTATION_MIN_VALUE");
@@ -172,8 +161,6 @@ namespace VietTien.API.Services.Implementations
                 baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
 
             var totalAfterDiscount = baseTotal - discountAmount;
-
-            // VAT 10% sau chiết khấu nếu khách hàng có cấu hình MST trong hồ sơ
             var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
             decimal vatPercentage = requiresVat ? 0.10m : 0m;
             decimal vatAmount = Math.Round(totalAfterDiscount * vatPercentage, 0, MidpointRounding.AwayFromZero);
@@ -198,9 +185,8 @@ namespace VietTien.API.Services.Implementations
             var profile = await GetCustomerProfileAsync(userId);
             var cartEntity = await _unitOfWork.Carts.GetCartByCustomerIdAsync(profile.Id);
 
-            // GH-08/BR-025: chặn đặt hàng khi giỏ đã giữ giá quá 24h. GetCartAsync không còn tự làm mới
-            // giá/UpdatedAt khi đọc (xem CartService.GetCartAsync) — khách phải bấm làm mới giá tường
-            // minh (RefreshCartPricesAsync) trước, nên đọc cartEntity.UpdatedAt trực tiếp ở đây là đủ tin cậy.
+            // GH-08/BR-025: chặn đặt hàng khi giỏ đã giữ giá quá 24h — khách phải bấm làm mới giá
+            // (RefreshCartPricesAsync) trước, GetCartAsync không tự làm mới UpdatedAt khi đọc.
             if (cartEntity != null && (DateTime.UtcNow - cartEntity.UpdatedAt).TotalHours > 24)
                 throw new Exception("Giá trong giỏ hàng đã hết hạn giữ (quá 24h). Vui lòng xem lại giỏ hàng để cập nhật giá mới trước khi đặt hàng.");
 
@@ -209,26 +195,19 @@ namespace VietTien.API.Services.Implementations
             if (cart == null || !cart.Items.Any() || cartEntity == null)
                 throw new Exception("Giỏ hàng trống.");
 
-            // UC-13/BR-004: chặn TRƯỚC khi giữ tồn (ReserveAsync) — không giữ tồn vô ích cho một đơn
-            // sẽ bị từ chối ngay vì thiếu xác thực OTP.
+            // UC-13/BR-004 + BR-026: chặn TRƯỚC khi giữ tồn, tránh giữ tồn vô ích cho đơn sẽ bị từ chối.
             if (await RequiresFirstOrderPhoneOtpAsync(profile))
                 throw new PhoneVerificationRequiredException("Vui lòng xác thực số điện thoại qua OTP trước khi đặt đơn hàng đầu tiên.");
-
-            // BR-026: chặn TRƯỚC khi giữ tồn — đơn ≥ ngưỡng báo giá B2B mà chưa có báo giá được duyệt
-            // thì không được đặt thẳng theo giá niêm yết, phải đi qua Sales duyệt giá trước.
             await EnsureQuotationRequirementMetAsync(cart.Items.Sum(i => i.TotalPrice), profile.Id);
 
             Order order;
 
-            // Gộp giữ tồn (Reserve) + tạo Order + ghi CreditTransaction vào 1 transaction duy nhất:
-            // trước đây ReserveAsync tự commit độc lập, nên nếu bước ghi CreditTransaction phía sau
-            // thất bại thì Order/cart đã tạo (SaveChanges lần 1) không được rollback theo, để lại đơn
-            // "ma" không có ledger Credit khớp. Nay rollback 1 lần duy nhất undo toàn bộ, kể cả tồn đã giữ.
+            // Giữ tồn + tạo Order + ghi CreditTransaction trong 1 transaction duy nhất để rollback được
+            // toàn bộ (kể cả tồn đã giữ) nếu bước sau thất bại — ReserveAsync không tự commit riêng nữa.
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // Giữ mềm tồn kho ngay tại checkout để tránh oversell khi nhiều khách đặt đồng thời.
-                // Ném Exception (không đủ tồn) nếu bất kỳ SKU nào hết hàng — chặn đơn trước khi tạo.
+                // Giữ mềm tồn kho để tránh oversell khi nhiều khách đặt đồng thời; ném Exception nếu thiếu hàng.
                 await _inventoryReservationService.ReserveAsync(
                     cart.Items.Select(i => (i.ProductId, i.Quantity)));
 
@@ -236,22 +215,19 @@ namespace VietTien.API.Services.Implementations
                 var (discountAmount, discountPercentage) = await CalculateDiscountAsync(
                     baseTotal, profile.Id, cart.Items.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
                 var totalAfterDiscount = baseTotal - discountAmount;
-                // Cùng nguồn sự thật với GetCheckoutSummaryAsync (preview): VAT áp dụng theo hồ sơ có MST,
-                // KHÔNG theo cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác với việc tính VAT).
+                // Cùng nguồn sự thật với GetCheckoutSummaryAsync: VAT áp theo hồ sơ có MST, KHÔNG theo
+                // cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác việc tính VAT).
                 var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
                 decimal vatAmount = requiresVat ? Math.Round(totalAfterDiscount * 0.10m, 0, MidpointRounding.AwayFromZero) : 0m;
                 decimal finalPayment = totalAfterDiscount + vatAmount;
 
-                // --- Xử lý áp dụng Credit ---
                 decimal creditApplied = 0m;
                 if (profile.AvailableCredit > 0)
                 {
                     creditApplied = Math.Min(finalPayment, profile.AvailableCredit);
                     profile.AvailableCredit -= creditApplied;
                     finalPayment -= creditApplied;
-
-                    // Cập nhật CustomerProfile
-                    _unitOfWork.Users.Update(profile.User); // Nếu Entity tracking, hoặc gọi phương thức repo update profile
+                    _unitOfWork.Users.Update(profile.User);
                 }
 
                 var orderCode = $"VT{DateTime.UtcNow:yyyyMMddHHmmss}{new Random().Next(100, 999)}";
@@ -274,13 +250,12 @@ namespace VietTien.API.Services.Implementations
                 var fulfillmentStatus = request.PaymentMethod == PaymentMethod.COD ? FulfillmentStatus.Reserved : FulfillmentStatus.Unallocated;
                 DateTime? confirmedAt = null;
 
-                // Nếu thanh toán toàn bộ bằng Credit
+                // Trả đủ toàn bộ bằng Credit -> coi như đã thanh toán/xác nhận ngay, bỏ qua Draft/PendingConfirmation.
                 if (finalPayment == 0)
                 {
                     paymentStatus = PaymentStatus.Paid;
-                    orderStatus = OrderStatus.Confirmed; // Bỏ qua Draft/PendingConfirmation vì đã trả đủ
+                    orderStatus = OrderStatus.Confirmed;
                     confirmedAt = DateTime.UtcNow;
-                    // Nếu là SePay/COD nhưng trả 100% credit thì coi như COD đã xác nhận hoặc SePay đã thanh toán
                 }
 
                 order = new Order
@@ -335,18 +310,13 @@ namespace VietTien.API.Services.Implementations
             }
             catch
             {
-                // Rollback nguyên tử: undo cả phần giữ tồn (ReserveAsync đã tham gia transaction này,
-                // không tự commit riêng nữa) lẫn Order/CreditTransaction — không cần gọi
-                // ReleaseReservedAsync thủ công như trước.
+                // Rollback nguyên tử: undo cả tồn đã giữ (ReserveAsync tham gia cùng transaction) lẫn Order/CreditTransaction.
                 await transaction.RollbackAsync();
                 throw;
             }
 
-            // Notify assigned sales staff (SYS-02)
-            if (profile.AssignedSalesStaffId.HasValue)
             try
             {
-                // Notify assigned sales staff (SYS-02)
                 if (profile.AssignedSalesStaffId.HasValue)
                 {
                     await _notificationService.CreateNotificationAsync(
@@ -445,10 +415,8 @@ namespace VietTien.API.Services.Implementations
 
             if (order.OrderStatus == OrderStatus.Cancelled || order.OrderStatus == OrderStatus.CancelledReallocated)
             {
-                // Đơn đã bị hủy (vd. hết hạn giữ chỗ 15') trước khi tiền về — tồn kho có thể đã được
-                // giải phóng/bán cho đơn khác. KHÔNG áp dụng thanh toán (không set Paid, không tạo
-                // PaymentTransaction) để tránh vừa "Cancelled" vừa "Paid" và không làm sai lệch báo cáo
-                // doanh thu theo PaymentStatus. Chỉ mở ngoại lệ để nhân viên đối soát/hoàn tiền thủ công.
+                // Đơn đã hủy trước khi tiền về (vd. hết hạn giữ chỗ) -> KHÔNG set Paid/tạo PaymentTransaction
+                // (tránh vừa Cancelled vừa Paid), chỉ mở ngoại lệ để đối soát/hoàn tiền thủ công.
                 var cancelledAnomalyMessage = $"Webhook SePay báo nhận {payload.transferAmount:N0}đ (mã đối soát: {refCode ?? "N/A"}) cho đơn {order.OrderCode} nhưng đơn đã ở trạng thái {order.OrderStatus} trước đó.";
                 await CreateOrUpdatePaymentExceptionAsync(order, "PAID_AFTER_CANCELLATION", cancelledAnomalyMessage);
                 await _unitOfWork.SaveChangesAsync();
@@ -457,10 +425,8 @@ namespace VietTien.API.Services.Implementations
             }
 
             order.PaymentStatus = PaymentStatus.Paid;
-            // Đã khớp CHÍNH XÁC với FinalPayment ở check phía trên -> ghi nhận đã thu đủ. Thiếu dòng
-            // này khiến AmountPaid vẫn = 0 dù PaymentStatus = Paid: lúc giao hàng RecordDeliveryResultAsync
-            // tính công nợ dựa trên AmountPaid nên sẽ coi đơn CHƯA trả 1 đồng nào, tạo nợ = cả FinalPayment
-            // dù khách đã chuyển khoản đủ qua SePay từ trước.
+            // Thiếu dòng này thì AmountPaid vẫn = 0 dù đã Paid: lúc giao hàng, tính công nợ dựa trên
+            // AmountPaid sẽ coi đơn chưa trả đồng nào, tạo nợ oan = cả FinalPayment.
             order.AmountPaid = payload.transferAmount;
 
             var transaction = new PaymentTransaction
@@ -498,7 +464,6 @@ namespace VietTien.API.Services.Implementations
             await _unitOfWork.Orders.UpdateOrderAsync(order);
             await _unitOfWork.SaveChangesAsync();
 
-            // Load full details for email invoice notification
             try
             {
                 var fullOrder = await _context.Orders
@@ -510,7 +475,6 @@ namespace VietTien.API.Services.Implementations
 
                 if (fullOrder != null)
                 {
-                    // Send confirmation email to Customer
                     var customerEmail = fullOrder.CustomerProfile?.User?.Email ?? fullOrder.CustomerProfile?.InvoiceEmail;
                     var customerName = fullOrder.CustomerProfile?.Representative ?? fullOrder.CustomerProfile?.CompanyName ?? "Khách hàng";
                     if (!string.IsNullOrEmpty(customerEmail))
@@ -518,11 +482,9 @@ namespace VietTien.API.Services.Implementations
                         await _emailService.SendOrderInvoiceEmailAsync(customerEmail, customerName, fullOrder, isSalesNotify: false);
                     }
 
-                    // Send notification email to Sales/Admin
                     var salesEmail = _configuration["EmailSettings:SenderEmail"] ?? "sales@viettien.vn";
                     await _emailService.SendOrderInvoiceEmailAsync(salesEmail, "Bộ phận Bán hàng VietTien", fullOrder, isSalesNotify: true);
 
-                    // Notify assigned sales staff (SYS-05)
                     if (fullOrder.CustomerProfile?.AssignedSalesStaffId != null)
                     {
                         await _notificationService.CreateNotificationAsync(
@@ -770,10 +732,8 @@ namespace VietTien.API.Services.Implementations
                 VatAmount = request.VatAmount,
                 FinalPayment = request.FinalPayment,
                 PaymentMethod = request.PaymentMethod,
-                // Cash tại quầy KHÔNG được coi là đã thanh toán ngay lúc tạo đơn: nhân viên phải bấm
-                // "Xác nhận đã nhận tiền mặt" sau khi thực thu tiền từ khách (ConfirmDirectOrderPaymentAsync
-                // mới set Paid). Trước đây set Paid ngay tại đây khiến bước xác nhận đó luôn bị chặn bởi
-                // guard "đơn hàng đã được xác nhận thanh toán trước đó" -> nút xác nhận không bao giờ chạy được.
+                // Cash tại quầy chưa coi là đã thanh toán ngay — chỉ Paid sau khi nhân viên bấm
+                // "Xác nhận đã nhận tiền mặt" (ConfirmDirectOrderPaymentAsync).
                 PaymentStatus = PaymentStatus.Pending,
                 OrderStatus = request.PaymentMethod == PaymentMethod.COD ? OrderStatus.PendingConfirmation : OrderStatus.Draft,
                 FulfillmentStatus = request.PaymentMethod == PaymentMethod.COD ? FulfillmentStatus.Reserved : FulfillmentStatus.Unallocated,
@@ -863,7 +823,9 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<SalesDashboardStatsDto> GetSalesDashboardStatsAsync(Guid? scopedSalesStaffId = null)
         {
-            var today = DateTime.UtcNow.Date;
+            // "Hôm nay" tính theo giờ Việt Nam (UTC+7), không phải ngày UTC — tránh tính nhầm đơn phát
+            // sinh vào sáng sớm giờ VN (vẫn là ngày UTC hôm trước) sang hôm qua.
+            var today = DateTime.UtcNow.AddHours(7).Date;
 
             // 1. KPI aggregates
             // scopedSalesStaffId = null -> SalesManager/Admin xem toàn hệ thống (giữ nguyên hành vi cũ).
@@ -875,13 +837,11 @@ namespace VietTien.API.Services.Implementations
             var newOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Draft);
             var processingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed);
             var shippingOrdersCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Processing);
-            var deliveredTodayCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.Date == today);
-            var revenueToday = allOrders.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.Date == today).Sum(o => o.FinalPayment);
+            var deliveredTodayCount = allOrders.Count(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.AddHours(7).Date == today);
+            var revenueToday = allOrders.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.AddHours(7).Date == today).Sum(o => o.FinalPayment);
 
-            // "Công nợ cần thu" phải lấy từ sổ công nợ THẬT (CustomerDebts, sinh ra khi khách trả
-            // thiếu qua COD lúc giao hàng), KHÔNG phải đơn PaymentStatus=Pending — Pending chỉ là
-            // "đơn đang chờ thanh toán" (kể cả đơn đã bị hủy do hết hạn giữ chỗ), không phải khoản
-            // khách nợ. Trộn 2 khái niệm này khiến dashboard hiện "nợ" ảo dù sổ công nợ thật = 0đ.
+            // "Công nợ cần thu" lấy từ sổ công nợ THẬT (CustomerDebts), không phải đơn PaymentStatus=Pending
+            // (Pending chỉ là "chờ thanh toán", không phải khoản khách nợ thật).
             var pendingDebtQuery = _context.CustomerDebts.Where(d => d.Status == DebtStatus.InDebt);
             if (scopedSalesStaffId.HasValue)
                 pendingDebtQuery = pendingDebtQuery.Where(d => d.Order.SalesStaffId == scopedSalesStaffId.Value);
@@ -1009,7 +969,7 @@ namespace VietTien.API.Services.Implementations
 
             // 7. Last 7 Days Revenue
             var revenueDays = new List<DashboardRevenueDayDto>();
-            var sevenDaysAgo = today.AddDays(-6);
+            var sevenDaysAgo = today.AddDays(-6).AddHours(-7); // quy đổi ngày VN về mốc UTC instant để lọc DB
             var paidOrdersIn7Days = await _context.Orders
                 .Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt >= sevenDaysAgo
                             && (scopedSalesStaffId == null || o.SalesStaffId == scopedSalesStaffId))
@@ -1033,7 +993,7 @@ namespace VietTien.API.Services.Implementations
                 if (d.Date == today) dayName = "Hôm nay";
 
                 var dailyRevenue = paidOrdersIn7Days
-                    .Where(o => o.CreatedAt.Date == d.Date)
+                    .Where(o => o.CreatedAt.AddHours(7).Date == d.Date)
                     .Sum(o => o.FinalPayment) / 1000000m; // convert to triệu đồng
 
                 revenueDays.Add(new DashboardRevenueDayDto
@@ -1054,6 +1014,82 @@ namespace VietTien.API.Services.Implementations
                 TopProducts = topProductsList,
                 Last7DaysRevenue = revenueDays
             };
+        }
+
+        private static readonly HashSet<string> ValidDashboardDrillDownMetrics = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "newOrders", "processing", "shipping", "deliveredToday", "revenueToday", "pendingDebt"
+        };
+
+        // Dùng LẠI đúng điều kiện lọc của GetSalesDashboardStatsAsync để số hiển thị và danh sách
+        // khi bấm vào luôn khớp nhau tuyệt đối.
+        public async Task<List<DashboardOrderDto>> GetSalesDashboardDrillDownAsync(string metric, Guid? scopedSalesStaffId = null)
+        {
+            if (string.IsNullOrEmpty(metric) || !ValidDashboardDrillDownMetrics.Contains(metric))
+                throw new ArgumentException("Chỉ số không hợp lệ.");
+
+            // "Hôm nay" tính theo giờ Việt Nam (UTC+7), không phải ngày UTC.
+            var today = DateTime.UtcNow.AddHours(7).Date;
+
+            if (string.Equals(metric, "pendingDebt", StringComparison.OrdinalIgnoreCase))
+            {
+                var debtQuery = _context.CustomerDebts
+                    .Include(d => d.Order)
+                    .Include(d => d.CustomerProfile)
+                    .Where(d => d.Status == DebtStatus.InDebt);
+                if (scopedSalesStaffId.HasValue)
+                    debtQuery = debtQuery.Where(d => d.Order.SalesStaffId == scopedSalesStaffId.Value);
+
+                // OverdueDays lưu trong DB chỉ set 1 lần lúc tạo (luôn = 0), không có job cập nhật —
+                // sắp xếp theo CreatedAt (nợ cũ nhất trước) thay vì tin field đó, cùng lý do với
+                // SalesManagerDashboardService (EF.Functions.DateDiffDay chỉ dịch được sang SQL Server).
+                return await debtQuery
+                    .OrderBy(d => d.CreatedAt)
+                    .Select(d => new DashboardOrderDto
+                    {
+                        Id = d.Order.Id,
+                        OrderCode = d.Order.OrderCode,
+                        CustomerName = d.CustomerProfile.Representative ?? d.CustomerProfile.CompanyName ?? "Khách lẻ",
+                        CreatedAt = d.CreatedAt,
+                        FinalPayment = d.DebtAmount,
+                        PaymentMethod = d.Order.PaymentMethod,
+                        PaymentStatus = d.Order.PaymentStatus,
+                        OrderStatus = d.Order.OrderStatus,
+                        InvoicePdfUrl = d.Order.InvoicePdfUrl
+                    })
+                    .ToListAsync();
+            }
+
+            var ordersQuery = _context.Orders.Include(o => o.CustomerProfile).AsQueryable();
+            if (scopedSalesStaffId.HasValue)
+                ordersQuery = ordersQuery.Where(o => o.SalesStaffId == scopedSalesStaffId.Value);
+
+            ordersQuery = metric.ToLowerInvariant() switch
+            {
+                "neworders" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Draft),
+                "processing" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Draft || o.OrderStatus == OrderStatus.Confirmed),
+                "shipping" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Processing),
+                "deliveredtoday" => ordersQuery.Where(o => o.OrderStatus == OrderStatus.Completed && o.CreatedAt.AddHours(7).Date == today),
+                "revenuetoday" => ordersQuery.Where(o => o.PaymentStatus == PaymentStatus.Paid && o.CreatedAt.AddHours(7).Date == today),
+                _ => ordersQuery
+            };
+
+            return await ordersQuery
+                .OrderByDescending(o => o.CreatedAt)
+                .Take(200)
+                .Select(o => new DashboardOrderDto
+                {
+                    Id = o.Id,
+                    OrderCode = o.OrderCode,
+                    CustomerName = o.CustomerProfile.Representative ?? o.CustomerProfile.CompanyName ?? "Khách lẻ",
+                    CreatedAt = o.CreatedAt,
+                    FinalPayment = o.FinalPayment,
+                    PaymentMethod = o.PaymentMethod,
+                    PaymentStatus = o.PaymentStatus,
+                    OrderStatus = o.OrderStatus,
+                    InvoicePdfUrl = o.InvoicePdfUrl
+                })
+                .ToListAsync();
         }
 
         public async Task ConfirmDirectOrderPaymentAsync(Guid orderId)
@@ -1084,11 +1120,8 @@ namespace VietTien.API.Services.Implementations
             {
                 try
                 {
-                    // Luu tren Cloudinary thay vi dia phuong: Azure App Service (Linux container) khong
-                    // dam bao Directory.GetCurrentDirectory() trung voi WebRootPath ma UseStaticFiles() dang
-                    // serve, va file ghi vao dia mat khi container restart/redeploy -> URL /invoices/xxx.pdf
-                    // tra 404 du ghi file "thanh cong" khong loi. Dung chung ha tang upload voi cac loai
-                    // file khac trong he thong (chu ky, anh bang chung...).
+                    // Lưu trên Cloudinary thay vì local: container Azure không đảm bảo file ghi vào đĩa
+                    // còn tồn tại sau restart/redeploy, khiến URL /invoices/xxx.pdf trả 404.
                     var pdfUrl = await _cloudinaryService.UploadBase64ImageAsync(
                         pdfBase64,
                         "invoices",
@@ -1099,7 +1132,6 @@ namespace VietTien.API.Services.Implementations
                     await _unitOfWork.Orders.UpdateOrderAsync(order);
                     await _unitOfWork.SaveChangesAsync();
 
-                    // If COD, send email immediately after uploading the invoice
                     if (order.PaymentMethod == PaymentMethod.COD)
                     {
                         var fullOrder = await _context.Orders
@@ -1257,8 +1289,7 @@ namespace VietTien.API.Services.Implementations
                 LineTotal    = oi.PriceSnapshot * oi.Quantity,
             }).ToList();
 
-            // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
-            // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+            // Ưu tiên địa chỉ đã snapshot tại thời điểm đặt hàng; null (đơn cũ) mới fallback về địa chỉ mặc định hiện tại.
             string? addressString = order.ShippingAddress;
             if (string.IsNullOrEmpty(addressString))
             {
@@ -1356,7 +1387,7 @@ namespace VietTien.API.Services.Implementations
 
             var order = await _context.Orders
                 .AsNoTracking()
-                .AsSplitQuery() // Tách query cho từng Include collection (Addresses, OrderItems, ReturnExchangeRequests...) để tránh nhân bản dòng kiểu tích Descartes khi JOIN nhiều bảng 1-nhiều cùng lúc
+                .AsSplitQuery() // tránh nhân bản dòng (tích Descartes) khi JOIN nhiều collection 1-nhiều cùng lúc
                 .Include(o => o.CustomerProfile).ThenInclude(cp => cp.User)
                 .Include(o => o.CustomerProfile.Addresses)
                 .Include(o => o.OrderItems).ThenInclude(oi => oi.Product)
@@ -1388,8 +1419,7 @@ namespace VietTien.API.Services.Implementations
                 LineTotal = oi.PriceSnapshot * oi.Quantity,
             }).ToList();
 
-            // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
-            // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+            // Ưu tiên địa chỉ đã snapshot tại thời điểm đặt hàng; null (đơn cũ) mới fallback về địa chỉ mặc định hiện tại.
             string addressString = order.ShippingAddress ?? "---";
             if (string.IsNullOrEmpty(order.ShippingAddress))
             {
@@ -1469,11 +1499,8 @@ namespace VietTien.API.Services.Implementations
         public async Task RequestVatInvoiceAsync(Guid userId, Guid orderId)
         {
             var profile = await GetCustomerProfileAsync(userId);
-            // Dùng GetOrderByIdAsync (tracked, không Include CustomerProfile) thay vì
-            // GetOrderDetailForCustomerAsync (AsNoTracking + Include CustomerProfile) để tránh
-            // EF double-tracking: profile ở trên đã được track, còn order.CustomerProfile từ query
-            // AsNoTracking là một instance khác cùng khóa chính, khiến UpdateOrderAsync() bên dưới
-            // ném InvalidOperationException khi track lại (Defect VT-01).
+            // GetOrderByIdAsync (tracked) thay vì bản AsNoTracking+Include CustomerProfile để tránh
+            // EF double-tracking với profile đã track ở trên (Defect VT-01).
             var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
 
             if (order == null || order.CustomerProfileId != profile.Id)
@@ -1553,8 +1580,7 @@ namespace VietTien.API.Services.Implementations
                     PaymentStatus = o.PaymentStatus.ToString(),
                     OrderStatus = o.OrderStatus.ToString(),
                     FulfillmentStatus = o.FulfillmentStatus.ToString(),
-                    // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
-                    // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+                    // Ưu tiên địa chỉ đã snapshot tại thời điểm đặt hàng, fallback về mặc định hiện tại.
                     ShippingAddress = !string.IsNullOrEmpty(o.ShippingAddress)
                         ? o.ShippingAddress
                         : (o.CustomerProfile.Addresses.Where(a => a.IsDefault)
@@ -1604,13 +1630,11 @@ namespace VietTien.API.Services.Implementations
 
             if (salesStaffId.HasValue && order.SalesStaffId != salesStaffId.Value)
             {
-                // Chặn IDOR: cùng cơ chế scope theo snapshot (o.SalesStaffId) đã dùng ở
-                // GetSalesOrdersAsync — Sale khác không được xem chi tiết đơn không phải của mình.
+                // Chặn IDOR: cùng cơ chế scope theo snapshot SalesStaffId đã dùng ở GetSalesOrdersAsync.
                 throw new UnauthorizedAccessException("Bạn không có quyền truy cập đơn hàng này.");
             }
 
-            // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
-            // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+            // Ưu tiên địa chỉ đã snapshot tại thời điểm đặt hàng; null (đơn cũ) mới fallback về địa chỉ mặc định hiện tại.
             string addressString = order.ShippingAddress ?? "---";
             if (string.IsNullOrEmpty(order.ShippingAddress))
             {
@@ -1709,11 +1733,8 @@ namespace VietTien.API.Services.Implementations
             if (order.PaymentMethod == PaymentMethod.SePay && order.PaymentStatus != PaymentStatus.Paid)
                 throw new InvalidOperationException("Đơn hàng SePay phải được thanh toán trước khi xác nhận.");
 
-            // Gộp release+allocate tồn kho + tạo pick task + cập nhật OrderStatus vào 1 transaction duy
-            // nhất: trước đây ReleaseReservedAsync/AllocateAsync tự commit riêng và không có try/catch
-            // bọc quanh -> nếu AllocateAsync throw (vd hết hàng do giao dịch khác chen ngang giữa lúc
-            // checkout và lúc confirm), tồn đã release (mất bảo vệ) nhưng Order vẫn "PendingConfirmation"
-            // trong DB vì exception ném ra trước khi SaveChanges chạy tới — không có cách khôi phục.
+            // Gộp release+allocate tồn kho + tạo pick task + cập nhật OrderStatus vào 1 transaction để
+            // rollback được nếu AllocateAsync throw (vd hết hàng do giao dịch khác chen ngang).
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
@@ -1728,8 +1749,6 @@ namespace VietTien.API.Services.Implementations
                     await _inventoryReservationService.ReleaseReservedAsync(orderItemQuantities);
                     await _inventoryReservationService.AllocateAsync(orderItemQuantities);
 
-                    // --- GENERATE PICK TASKS ---
-                    // Get WH-DEFAULT
                     var defaultWarehouse = await _context.Warehouses.FirstOrDefaultAsync(w => w.Code == "WH-DEFAULT");
                     if (defaultWarehouse == null) throw new Exception("Không tìm thấy kho mặc định (WH-DEFAULT).");
 
@@ -1758,7 +1777,6 @@ namespace VietTien.API.Services.Implementations
                     {
                         var quantityRemaining = item.Quantity;
 
-                        // 1. Check WH-DEFAULT first
                         var defaultInv = await _context.Inventories
                             .Include(inv => inv.WarehouseLocation)
                             .ThenInclude(wl => wl.Warehouse)
@@ -1776,18 +1794,15 @@ namespace VietTien.API.Services.Implementations
                                 PickedQuantity = 0
                             });
                             quantityRemaining -= takeQty;
-                            // To be perfectly accurate in a high-concurrency environment, we might want to deduct allocated quantity from inventory.
-                            // But since we just generate tasks, we assume staff will pick based on tasks.
                         }
 
-                        // 2. If still remaining, check other warehouses
                         if (quantityRemaining > 0)
                         {
                             var otherInvs = await _context.Inventories
                                 .Include(inv => inv.WarehouseLocation)
                                 .ThenInclude(wl => wl.Warehouse)
                                 .Where(inv => inv.ProductId == item.ProductId && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Id != defaultWarehouse.Id && inv.OnHandQuantity > 0)
-                                .OrderByDescending(inv => inv.OnHandQuantity) // Greedily take from largest stock
+                                .OrderByDescending(inv => inv.OnHandQuantity)
                                 .ToListAsync();
 
                             foreach (var inv in otherInvs)
@@ -1808,7 +1823,7 @@ namespace VietTien.API.Services.Implementations
 
                             if (quantityRemaining > 0)
                             {
-                                // Edge case: if absolutely not enough stock everywhere, we still put the remainder in WH-DEFAULT to let them figure it out (or shortage alert).
+                                // Không đủ tồn ở bất kỳ kho nào -> vẫn dồn phần thiếu vào WH-DEFAULT để cảnh báo thiếu hàng.
                                 var task = GetOrCreateTask(defaultWarehouse.Id);
                                 var existingItem = task.Items.FirstOrDefault(i => i.ProductId == item.ProductId);
                                 if (existingItem != null) {
@@ -1854,13 +1869,10 @@ namespace VietTien.API.Services.Implementations
             if (order.OrderStatus != OrderStatus.PendingConfirmation)
                 throw new InvalidOperationException("Chỉ đơn hàng đang 'Chờ xác nhận' mới có thể bị từ chối.");
 
-            // Gộp release tồn + cập nhật OrderStatus vào 1 transaction duy nhất (cùng pattern đã áp
-            // dụng cho ConfirmOrderAsync/PlaceOrderAsync...): ReleaseReservedAsync giờ tham gia
-            // transaction này thay vì tự commit riêng -> rollback nguyên tử nếu SaveChanges thất bại.
+            // Gộp release tồn + cập nhật OrderStatus vào 1 transaction để rollback nguyên tử nếu SaveChanges thất bại.
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
-                // Đơn ở PendingConfirmation luôn còn đang giữ mềm (Reserved) từ lúc checkout — trả lại.
                 await _inventoryReservationService.ReleaseReservedAsync(
                     order.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)));
 
@@ -1900,8 +1912,7 @@ namespace VietTien.API.Services.Implementations
             await _unitOfWork.Orders.UpdateOrderAsync(order);
             await _unitOfWork.SaveChangesAsync();
 
-            // Đơn đã chuyển CancelRequested và commit thành công ở trên -> lỗi gửi thông báo cho Sale
-            // không được làm request báo lỗi cho khách (yêu cầu hủy đã ghi nhận thật), chỉ log để theo dõi.
+            // Đã commit CancelRequested ở trên -> lỗi gửi thông báo không được báo lỗi cho khách, chỉ log.
             if (customerProfile.AssignedSalesStaffId.HasValue)
             {
                 try
@@ -1936,16 +1947,13 @@ namespace VietTien.API.Services.Implementations
             var profile = await _context.CustomerProfiles.FindAsync(order.CustomerProfileId);
             var customerUserId = profile?.UserId ?? Guid.Empty;
 
-            // Thông báo cho khách được gửi SAU khi transaction dưới đây commit thành công (không phải
-            // giữa chừng như trước) — lỗi gửi thông báo không được làm hỏng việc hủy/từ chối hủy đã
-            // ghi nhận thật. Biến local dưới đây chỉ để chuẩn bị nội dung, gửi thật ở cuối method.
+            // Thông báo cho khách chỉ gửi SAU khi transaction dưới đây commit thành công — biến local
+            // này chỉ chuẩn bị nội dung, gửi thật ở cuối method.
             string notificationTitle;
             string notificationMessage;
 
-            // Gộp release tồn (nếu duyệt hủy) + hoàn Credit + cập nhật OrderStatus vào 1 transaction
-            // duy nhất: trước đây ReleaseAllocatedAsync/ReleaseReservedAsync tự commit riêng, tách biệt
-            // với SaveChanges cập nhật status/hoàn Credit ngay sau đó -> lỗi SaveChanges để lại tồn đã
-            // thả nhưng đơn/CreditTransaction không khớp.
+            // Gộp release tồn (nếu duyệt hủy) + hoàn Credit + cập nhật OrderStatus vào 1 transaction để
+            // rollback nguyên tử nếu SaveChanges thất bại.
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
@@ -1957,7 +1965,7 @@ namespace VietTien.API.Services.Implementations
                     else if (order.PaymentMethod == PaymentMethod.COD && order.FulfillmentStatus == FulfillmentStatus.Unallocated)
                         order.OrderStatus = OrderStatus.PendingConfirmation;
                     else if (order.FulfillmentStatus != FulfillmentStatus.Unallocated)
-                        order.OrderStatus = OrderStatus.Processing; // hoặc Confirmed tùy logic, lấy chung là Confirmed
+                        order.OrderStatus = OrderStatus.Processing;
                     else
                         order.OrderStatus = OrderStatus.Confirmed;
 
@@ -1981,7 +1989,7 @@ namespace VietTien.API.Services.Implementations
                     decimal amountToRefund = 0m;
                     if (order.PaymentStatus == PaymentStatus.Paid || order.PaymentStatus == PaymentStatus.PartiallyPaid)
                     {
-                        amountToRefund += order.FinalPayment; // Nếu mới thanh toán một phần thì đáng ra cần check amount paid thực tế, ở đây tạm dùng FinalPayment
+                        amountToRefund += order.FinalPayment; // TODO: PartiallyPaid nên hoàn theo AmountPaid thực tế, tạm dùng FinalPayment
                     }
                     amountToRefund += order.CreditApplied;
 
@@ -2082,9 +2090,8 @@ namespace VietTien.API.Services.Implementations
                 }
             }
 
-            // UC-34: kiểm tra xung đột xe + ca + NGÀY — tính cả chuyến đã Scheduled (chưa chạy) chứ
-            // không chỉ InDelivery như trước, đúng yêu cầu "tối đa 1 chuyến / xe / ngày / ca". Khi
-            // trùng, KHÔNG chặn cứng nữa mà tạo hàng đợi cho Sales Manager chủ động xử lý.
+            // UC-34: kiểm tra xung đột xe + ca + ngày (tính cả chuyến Scheduled, không chỉ InDelivery).
+            // Khi trùng, không chặn cứng mà tạo hàng đợi cho Sales Manager chủ động xử lý.
             var conflictingOrderIds = await _context.Orders
                 .Where(o => o.DeliveryVehicleId == dto.VehicleId
                          && o.DeliveryShift == dto.Shift
@@ -2094,9 +2101,8 @@ namespace VietTien.API.Services.Implementations
                 .Select(o => o.Id)
                 .ToListAsync();
 
-            // BUGFIX: trùng lịch xe/ca/ngày trước đây chỉ so với Orders -> khi payload chỉ gồm
-            // StockTransfer (điều chuyển nội bộ), điều kiện trên không có gì để so khớp nên bỏ sót
-            // hoàn toàn các phiếu điều chuyển đã xếp xe (TransportArranged) trùng xe/ca/ngày.
+            // Trùng lịch xe/ca/ngày phải so cả với StockTransfer (điều chuyển nội bộ) đã xếp xe, không
+            // chỉ Orders — nếu không sẽ bỏ sót xung đột khi payload chỉ gồm StockTransfer.
             var conflictingTransferIds = await _context.StockTransfers
                 .Where(st => st.DeliveryVehicleId == dto.VehicleId
                           && st.DeliveryShift == dto.Shift
@@ -2239,8 +2245,7 @@ namespace VietTien.API.Services.Implementations
                         (o.DeliveryStatus == DeliveryStatus.InDelivery || o.DeliveryStatus == DeliveryStatus.Scheduled) &&
                         !orderIds.Contains(o.Id));
 
-                    // BUGFIX: cũng phải kiểm tra trùng với StockTransfer (điều chuyển nội bộ) đã xếp xe,
-                    // không chỉ Orders — cùng lỗi gốc với ScheduleDeliveryAsync ở trên.
+                    // Cùng lý do với ScheduleDeliveryAsync: phải kiểm tra trùng cả với StockTransfer đã xếp xe.
                     if (!stillConflicting)
                     {
                         stillConflicting = await _context.StockTransfers.AnyAsync(st =>
@@ -2272,10 +2277,8 @@ namespace VietTien.API.Services.Implementations
                     order.DeliveryStatus = DeliveryStatus.Scheduled;
                 }
 
-                // BUGFIX: trước đây chỉ áp lại lịch cho Order, StockTransfer (điều chuyển nội bộ) trong
-                // cùng lô xung đột bị bỏ quên vĩnh viễn ở trạng thái TransportRequested — nhân viên kho
-                // không có cách nào yêu cầu lại xe (RequestTransportAsync chỉ nhận trạng thái Draft).
-                // Nay áp lại lịch cho cả StockTransfer, giống hệt Order.
+                // Áp lại lịch cho cả StockTransfer trong lô xung đột (không chỉ Order), tránh bị kẹt
+                // vĩnh viễn ở TransportRequested vì RequestTransportAsync chỉ nhận trạng thái Draft.
                 var stockTransfersInConflict = await _context.StockTransfers
                     .Where(st => orderIds.Contains(st.Id) && st.Status == StockTransferStatus.TransportRequested)
                     .ToListAsync();
@@ -2336,7 +2339,7 @@ namespace VietTien.API.Services.Implementations
         {
             var orders = await _context.Orders
                 .AsNoTracking()
-                .AsSplitQuery() // Tách query cho từng Include collection (Addresses, OrderItems) để tránh nhân bản dòng kiểu tích Descartes khi JOIN nhiều bảng 1-nhiều cùng lúc
+                .AsSplitQuery() // tránh nhân bản dòng khi JOIN nhiều collection 1-nhiều cùng lúc
                 .Include(o => o.CustomerProfile)
                     .ThenInclude(cp => cp.User)
                 .Include(o => o.CustomerProfile.Addresses)
@@ -2359,8 +2362,7 @@ namespace VietTien.API.Services.Implementations
 
             var result = orders.Select(o =>
             {
-                // Ưu tiên địa chỉ đã chốt (snapshot) tại thời điểm đặt hàng; đơn tạo trước khi có
-                // snapshot (null) mới fallback về địa chỉ mặc định hiện tại của khách như cách cũ.
+                // Ưu tiên địa chỉ đã snapshot tại thời điểm đặt hàng, fallback về mặc định hiện tại.
                 string address;
                 if (!string.IsNullOrEmpty(o.ShippingAddress))
                 {
@@ -2512,10 +2514,8 @@ namespace VietTien.API.Services.Implementations
 
             if (outcome == "delivered" || outcome == "partially_delivered")
             {
-                // ─ Cập nhật tiền thu — CỘNG DỒN vào số đã thu trước đó (vd. đã trả trước qua SePay),
-                // không GHI ĐÈ. Ghi đè sẽ xóa mất AmountPaid đã ghi nhận từ SePay/xác nhận thủ công,
-                // khiến đơn đã thanh toán đủ nhưng thu COD thêm 0đ lúc giao hàng bị tính nhầm thành nợ
-                // toàn bộ FinalPayment (cùng pattern với DeliveryTripService.RecordCollectionAsync).
+                // CỘNG DỒN vào AmountPaid đã có (vd. trả trước qua SePay), không ghi đè — ghi đè sẽ
+                // tính nhầm thành nợ toàn bộ FinalPayment dù đơn đã thanh toán đủ từ trước.
                 order.AmountPaid += dto.AmountCollected;
                 order.DeliveredAt = DateTime.UtcNow;
                 
@@ -2862,8 +2862,6 @@ namespace VietTien.API.Services.Implementations
             _context.ReturnExchangeRequests.Add(request);
             await _context.SaveChangesAsync();
 
-            // Yêu cầu đã được lưu thành công ở trên -> lỗi gửi notification không được làm fail
-            // request tạo yêu cầu đổi/trả, chỉ log để theo dõi.
             try
             {
                 await _notificationService.CreateRoleNotificationAsync(
@@ -3032,7 +3030,7 @@ namespace VietTien.API.Services.Implementations
             // Trả về danh sách ReturnExchangeRequest đã duyệt nhưng chưa lấy xong
             var requests = await _context.ReturnExchangeRequests
                 .AsNoTracking()
-                .AsSplitQuery() // Tách query cho Addresses và ReturnItems.Product (2 collection Include cùng cấp) để tránh nhân bản dòng
+                .AsSplitQuery() // tránh nhân bản dòng khi JOIN nhiều collection 1-nhiều cùng lúc
                 .Include(r => r.Order)
                 .Include(r => r.CustomerProfile)
                     .ThenInclude(c => c.User)
@@ -3119,12 +3117,8 @@ namespace VietTien.API.Services.Implementations
 
             req.PickupStatus = PickupStatus.PickedUp;
 
-            // BR-019: hàng thu hồi từ khách phải vào khu cách ly (Quarantine), KHÔNG được cộng thẳng
-            // vào tồn khả dụng — chờ kiểm tra chất lượng trước khi nhập lại kho hoặc huỷ.
-            // QuarantineQuantity đã được cộng bởi WarehouseManagementController.ReceiveToQuarantine
-            // (bước "Tiếp nhận xe hoàn" ở kho, gọi trước Confirm này cho từng item + tạo QuarantineLog
-            // để QA duyệt sau) — cộng lại ở đây sẽ bị trùng, vì QuarantineLog chỉ trừ lại đúng 1 lần
-            // khi QA dispatch, khiến khả dụng bị báo thấp hơn thực tế vĩnh viễn.
+            // BR-019: QuarantineQuantity đã được cộng bởi ReceiveToQuarantine (bước "Tiếp nhận xe hoàn"
+            // ở kho, chạy trước Confirm này) — không cộng lại ở đây, chỉ cộng OnHand bên dưới.
             var defaultLocationId = await _context.Warehouses
                 .Where(w => w.Code == "WH-DEFAULT")
                 .SelectMany(w => w.Locations)
@@ -3140,8 +3134,6 @@ namespace VietTien.API.Services.Implementations
                     inventory = new Inventory { ProductId = item.ProductId, WarehouseLocationId = defaultLocationId };
                     _context.Inventories.Add(inventory);
                 }
-                // Hàng đã vật lý về lại kho (đã pickup) nên cộng OnHand; Quarantine đã được cộng ở
-                // bước tiếp nhận, không cộng lại ở đây.
                 inventory.OnHandQuantity += item.Quantity;
 
                 _context.StockTransactions.Add(new StockTransaction
@@ -3188,8 +3180,6 @@ namespace VietTien.API.Services.Implementations
             await _unitOfWork.Orders.UpdateOrderAsync(order);
             await _unitOfWork.SaveChangesAsync();
 
-            // Đơn đã chuyển trạng thái CancelRequested và commit thành công ở trên -> lỗi gửi
-            // notification không được làm fail request, chỉ log để theo dõi.
             try
             {
                 await _notificationService.CreateRoleNotificationAsync(
@@ -3333,12 +3323,10 @@ namespace VietTien.API.Services.Implementations
                 throw;
             }
         }
-        // L3-AS-02/AS-07: entry point độc lập cho payment reallocation — khác với
-        // ApproveCancelAndCreateReplacementAsync (bundle luôn việc dựng đơn thay thế từ Items), ở đây
-        // caller chỉ định thẳng SỐ TIỀN muốn phân bổ sang 1 đơn khác của CÙNG khách, hoặc để trống
-        // TargetOrderId để chuyển vào ví Credit. "remaining" tính lại từ tổng các lần đã phân bổ
-        // trước đó cho cùng OriginalOrderId, nên gọi lại với cùng số tiền (double-allocation) hoặc
-        // vượt phần còn lại đều tự động bị chặn bởi cùng một invariant.
+        // L3-AS-02/AS-07: entry point độc lập cho payment reallocation, khác với
+        // ApproveCancelAndCreateReplacementAsync — caller chỉ định thẳng SỐ TIỀN muốn phân bổ sang 1
+        // đơn khác của cùng khách (hoặc để trống TargetOrderId để chuyển vào ví Credit). "remaining"
+        // tính lại từ tổng đã phân bổ trước đó nên tự chặn được double-allocation.
         public async Task<PaymentReallocationResponseDto> CreatePaymentReallocationAsync(
             Guid callerUserId, CreatePaymentReallocationRequestDto request)
         {

@@ -13,6 +13,7 @@ namespace VietTien.API.Services.Interfaces
         Task ProcessSePayWebhookAsync(SePayWebhookDto payload, string providedToken);
         Task<PaymentStatusResponseDto> GetPaymentStatusAsync(Guid orderId, Guid callerUserId, string callerRole);
         Task<SalesDashboardStatsDto> GetSalesDashboardStatsAsync(Guid? scopedSalesStaffId = null);
+        Task<List<DashboardOrderDto>> GetSalesDashboardDrillDownAsync(string metric, Guid? scopedSalesStaffId = null);
         Task ConfirmDirectOrderPaymentAsync(Guid orderId);
         Task UploadInvoicePdfAsync(Guid orderId, string pdfBase64, Guid callerUserId, string callerRole);
 

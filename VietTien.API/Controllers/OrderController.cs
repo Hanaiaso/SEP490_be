@@ -195,6 +195,22 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpGet("sales-dashboard/drill-down")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<ActionResult<List<DashboardOrderDto>>> GetSalesDashboardDrillDown([FromQuery] string metric)
+        {
+            try
+            {
+                Guid? scopedSalesStaffId = User.IsInRole("SalesStaff") ? GetUserId() : null;
+                var result = await _orderService.GetSalesDashboardDrillDownAsync(metric, scopedSalesStaffId);
+                return Ok(result);
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("{orderId}/confirm-payment")]
         [Authorize(Roles = "SalesStaff,Admin")]
         public async Task<IActionResult> ConfirmPayment(Guid orderId)
