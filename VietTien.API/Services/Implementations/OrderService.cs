@@ -2530,12 +2530,14 @@ namespace VietTien.API.Services.Implementations
             if (dto.CustomerRejected && string.IsNullOrWhiteSpace(dto.RejectionReasonCode))
                 throw new InvalidOperationException("Vui lòng chọn lý do khi khách từ chối nhận hàng.");
 
-            // Ràng buộc: Không cho phép giao hàng trước ngày hẹn dự kiến
+            // Ràng buộc: cho phép giao hàng SỚM hơn ngày hẹn (khách nhận trước vẫn hợp lệ), chỉ chặn
+            // xác nhận SAU ngày hẹn — đổi ngược lại so với trước đây (trước đây chặn giao sớm, cho
+            // qua giao trễ).
             var localNow = DateTime.UtcNow.AddHours(7);
             var localToday = localNow.Date;
-            if (order.ScheduledDeliveryDate.HasValue && order.ScheduledDeliveryDate.Value.Date > localToday)
+            if (order.ScheduledDeliveryDate.HasValue && order.ScheduledDeliveryDate.Value.Date < localToday)
             {
-                throw new InvalidOperationException($"Đơn hàng này có lịch hẹn giao vào ngày {order.ScheduledDeliveryDate.Value.ToString("dd/MM/yyyy")}. Không thể xác nhận giao hàng trước ngày hẹn.");
+                throw new InvalidOperationException($"Đơn hàng này có lịch hẹn giao vào ngày {order.ScheduledDeliveryDate.Value.ToString("dd/MM/yyyy")}. Không thể xác nhận giao hàng sau ngày hẹn.");
             }
 
             var outcome = dto.DeliveryOutcome?.ToLower() ?? "delivered";

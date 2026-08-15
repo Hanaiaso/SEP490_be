@@ -1186,6 +1186,78 @@ namespace VietTien.Tests.Services
             _db.CustomerDebts.Count().Should().Be(0);
         }
 
+        // L1-ORD-42b | BC-FALSE | Ngày hẹn giao ở TƯƠNG LAI (giao sớm hơn lịch hẹn) -> vẫn xác nhận
+        // giao hàng được bình thường, không còn bị chặn như trước.
+        [Fact]
+        public async Task L1_ORD_42b_RecordDelivery_BeforeScheduledDate_Allowed()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.PaymentMethod = PaymentMethod.COD;
+                o.OrderStatus = OrderStatus.Processing;
+                o.DeliveryStatus = DeliveryStatus.InDelivery;
+                o.FinalPayment = 5_000_000m;
+                o.ScheduledDeliveryDate = DateTime.UtcNow.AddHours(7).Date.AddDays(3); // hẹn 3 ngày nữa
+            });
+
+            var result = await _sut.RecordDeliveryResultAsync(order.Id, _salesStaff.Id, new RecordDeliveryResultDto
+            {
+                DeliveryOutcome = "delivered",
+                AmountCollected = 5_000_000m
+            });
+
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.DeliveryStatus.Should().Be(DeliveryStatus.Delivered);
+            updated.OrderStatus.Should().Be(OrderStatus.Completed);
+            result.DebtRecordCreated.Should().BeFalse();
+        }
+
+        // L1-ORD-42c | BC-TRUE | Ngày hẹn giao đã ở QUÁ KHỨ (giao trễ hơn lịch hẹn) -> vẫn bị khoá
+        // như hành vi cũ.
+        [Fact]
+        public async Task L1_ORD_42c_RecordDelivery_AfterScheduledDate_StillBlocked()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.PaymentMethod = PaymentMethod.COD;
+                o.OrderStatus = OrderStatus.Processing;
+                o.DeliveryStatus = DeliveryStatus.InDelivery;
+                o.FinalPayment = 5_000_000m;
+                o.ScheduledDeliveryDate = DateTime.UtcNow.AddHours(7).Date.AddDays(-2); // hẹn đã qua 2 ngày
+            });
+
+            var act = () => _sut.RecordDeliveryResultAsync(order.Id, _salesStaff.Id, new RecordDeliveryResultDto
+            {
+                DeliveryOutcome = "delivered",
+                AmountCollected = 5_000_000m
+            });
+
+            await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*sau ngày hẹn*");
+            _db.Orders.Single(o => o.Id == order.Id).DeliveryStatus.Should().Be(DeliveryStatus.InDelivery);
+        }
+
+        // L1-ORD-42d | BVA | Ngày hẹn giao ĐÚNG hôm nay -> vẫn xác nhận được (biên giữ nguyên).
+        [Fact]
+        public async Task L1_ORD_42d_RecordDelivery_OnScheduledDate_Allowed()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.PaymentMethod = PaymentMethod.COD;
+                o.OrderStatus = OrderStatus.Processing;
+                o.DeliveryStatus = DeliveryStatus.InDelivery;
+                o.FinalPayment = 5_000_000m;
+                o.ScheduledDeliveryDate = DateTime.UtcNow.AddHours(7).Date; // đúng hôm nay
+            });
+
+            var result = await _sut.RecordDeliveryResultAsync(order.Id, _salesStaff.Id, new RecordDeliveryResultDto
+            {
+                DeliveryOutcome = "delivered",
+                AmountCollected = 5_000_000m
+            });
+
+            _db.Orders.Single(o => o.Id == order.Id).DeliveryStatus.Should().Be(DeliveryStatus.Delivered);
+        }
+
         // L1-ORD-43 | EP-Invalid | Đơn đã thanh toán qua SePay -> chặn thu COD, không thu tiền lần 2.
         // ĐÃ SỬA: trước đây không có guard 'PAID - DO NOT COLLECT'.
         [Fact]
