@@ -88,6 +88,8 @@ namespace VietTien.API.DTOs.PurchaseOrder
         public string Code { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; }
+        public DateTime? IssuedAt { get; set; }
+        public DateTime? ExpectedDeliveryDate { get; set; }
         public string SupplierName { get; set; } = string.Empty;
         public string WarehouseName { get; set; } = string.Empty;
         public int TotalItems { get; set; }

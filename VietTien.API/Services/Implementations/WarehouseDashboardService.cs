@@ -74,8 +74,6 @@ namespace VietTien.API.Services.Implementations
                 ActiveWarehouses = warehouses.Count,
             };
 
-            var weeklyVolume = await BuildWeeklyVolumeAsync(localToday, todayStart);
-
             var recentPickTasks = await _context.PickTasks
                 .AsNoTracking()
                 .Include(p => p.Order).ThenInclude(o => o.CustomerProfile).ThenInclude(cp => cp.User)
@@ -159,46 +157,12 @@ namespace VietTien.API.Services.Implementations
                 Outbound = outbound,
                 Inbound = inbound,
                 InventoryOps = inventoryOps,
-                WeeklyVolume = weeklyVolume,
                 RecentPickTasks = recentPickTasks,
                 PendingPurchaseOrders = pendingPurchaseOrders,
                 LowStockAlerts = lowStockAlerts,
                 InTransitTransfers = inTransitTransfers,
                 RecentMaterialIssues = recentMaterialIssues,
             };
-        }
-
-        private async Task<List<WarehouseDailyVolumeDto>> BuildWeeklyVolumeAsync(DateTime localToday, DateTime todayStart)
-        {
-            var rangeStart = todayStart.AddDays(-6);
-
-            // Nhóm theo ngày giờ VN (AddHours(7) trước khi lấy .Date), không phải ngày UTC thô — nếu
-            // không, việc phát sinh vào sáng sớm giờ VN (còn là tối ngày UTC hôm trước) sẽ bị gộp lệch ngày.
-            var outboundByDay = await _context.PickTasks
-                .AsNoTracking()
-                .Where(p => p.CompletedAt != null && p.CompletedAt >= rangeStart)
-                .GroupBy(p => p.CompletedAt!.Value.AddHours(7).Date)
-                .Select(g => new { Date = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.Date, x => x.Count);
-
-            var inboundByDay = await _context.GoodsReceipts
-                .AsNoTracking()
-                .Where(gr => gr.Status == GoodsReceiptStatus.Posted && gr.ReceivedDate >= rangeStart)
-                .GroupBy(gr => gr.ReceivedDate.AddHours(7).Date)
-                .Select(g => new { Date = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.Date, x => x.Count);
-
-            var result = new List<WarehouseDailyVolumeDto>();
-            for (var d = localToday.AddDays(-6); d <= localToday; d = d.AddDays(1))
-            {
-                result.Add(new WarehouseDailyVolumeDto
-                {
-                    Date = d,
-                    Outbound = outboundByDay.TryGetValue(d, out var o) ? o : 0,
-                    Inbound = inboundByDay.TryGetValue(d, out var i) ? i : 0,
-                });
-            }
-            return result;
         }
 
         private static string PickTaskStatusLabel(PickTaskStatus status) => status switch

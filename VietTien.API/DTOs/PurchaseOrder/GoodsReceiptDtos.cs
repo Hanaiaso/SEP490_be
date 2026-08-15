@@ -70,6 +70,7 @@ namespace VietTien.API.DTOs.PurchaseOrder
     {
         public Guid Id { get; set; }
         public Guid PurchaseOrderId { get; set; }
+        public string PurchaseOrderCode { get; set; } = string.Empty;
         public Guid ReceivedByUserId { get; set; }
         public string ReceivedByUserName { get; set; } = string.Empty;
         public string Code { get; set; } = string.Empty;
