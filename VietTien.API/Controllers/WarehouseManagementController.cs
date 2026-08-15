@@ -16,11 +16,13 @@ namespace VietTien.API.Controllers
     {
         private readonly IWarehouseManagementService _service;
         private readonly ApplicationDbContext _context;
+        private readonly IAuditLogService _auditLogService;
 
-        public WarehouseManagementController(IWarehouseManagementService service, ApplicationDbContext context)
+        public WarehouseManagementController(IWarehouseManagementService service, ApplicationDbContext context, IAuditLogService auditLogService)
         {
             _service = service;
             _context = context;
+            _auditLogService = auditLogService;
         }
 
         private Guid GetUserId()
@@ -180,6 +182,17 @@ namespace VietTien.API.Controllers
                 var order = await _context.Orders.FindAsync(dto.OrderId);
                 if (order == null) return NotFound(new { message = "Không tìm thấy đơn hàng." });
 
+                // Idempotency: FE gửi 1 request/sản phẩm bằng Promise.all cho cả lô hàng thu hồi. Nếu 1
+                // request trong lô lỗi mạng giữa chừng và nhân viên bấm lại nút xác nhận, các sản phẩm
+                // đã nhập cách ly thành công ở lần trước sẽ bị gửi lại y hệt -> cộng trùng QuarantineQuantity
+                // nếu không chặn. Coi 1 (OrderId, ProductId) đang ở trạng thái Waiting là đã nhập rồi.
+                var existingLog = await _context.QuarantineLogs
+                    .FirstOrDefaultAsync(q => q.OrderId == dto.OrderId && q.ProductId == dto.ProductId && q.Status == QuarantineStatus.Waiting);
+                if (existingLog != null)
+                {
+                    return Ok(new { quarantineCode = existingLog.QuarantineCode, message = $"Sản phẩm đã được nhập cách ly trước đó (mã {existingLog.QuarantineCode}) — không hạch toán trùng." });
+                }
+
                 // Sinh mã cách ly
                 var quarantineCode = $"QZ-{DateTime.UtcNow:yyyyMMdd}-{new Random().Next(1000, 9999)}";
 
@@ -209,6 +222,19 @@ namespace VietTien.API.Controllers
                 {
                     return Conflict(new { message = "Dữ liệu tồn kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
                 }
+
+                // BR-022: nhập cách ly làm tăng QuarantineQuantity thật -> bắt buộc audit trail.
+                var receiveActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+                await _auditLogService.LogAsync(
+                    entityName: "QuarantineLog",
+                    entityId: log.Id.ToString(),
+                    action: "RECEIVE",
+                    actorUserId: userId,
+                    actorEmail: receiveActor?.Email,
+                    actorRole: "WarehouseStaff",
+                    before: null,
+                    after: new { log.QuarantineCode, log.OrderId, log.ProductId, log.Quantity },
+                    reason: dto.Reason);
 
                 return Ok(new { quarantineCode, message = $"Đã nhập {dto.Quantity} đơn vị vào khu cách ly {quarantineCode}." });
             }
@@ -297,6 +323,18 @@ namespace VietTien.API.Controllers
                 var successMsg = action == "available"
                     ? $"Duyệt thành công: {log.Quantity} đơn vị đã được chuyển về kho khả dụng."
                     : $"Duyệt thành công: {log.Quantity} đơn vị đã được chuyển vào kho hư hỏng (Damaged).";
+
+                var dispatchActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
+                await _auditLogService.LogAsync(
+                    entityName: "QuarantineLog",
+                    entityId: log.Id.ToString(),
+                    action: "DISPATCH",
+                    actorUserId: userId,
+                    actorEmail: dispatchActor?.Email,
+                    actorRole: "WarehouseStaff",
+                    before: new { Status = "Waiting", log.Quantity },
+                    after: new { Status = log.Status.ToString(), log.Quantity },
+                    reason: dto.Notes);
 
                 return Ok(new { message = successMsg });
                 }

@@ -23,7 +23,7 @@ namespace VietTien.Tests.Services
 
         public GoodsReceiptServiceTests()
         {
-            _sut = new GoodsReceiptService(_db, new Mock<INotificationService>().Object, new Mock<ICloudinaryService>().Object, new Mock<ILogger<GoodsReceiptService>>().Object);
+            _sut = new GoodsReceiptService(_db, new Mock<INotificationService>().Object, new Mock<ICloudinaryService>().Object, new Mock<ILogger<GoodsReceiptService>>().Object, new NoOpAuditLogService());
             _whStaff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             (_warehouse, _location) = TestData.Warehouse();
             _db.Users.Add(_whStaff);
@@ -238,7 +238,7 @@ namespace VietTien.Tests.Services
         {
             var cloudinary = new Mock<ICloudinaryService>();
             var sut = new GoodsReceiptService(_db, new Mock<INotificationService>().Object, cloudinary.Object,
-                new Mock<ILogger<GoodsReceiptService>>().Object);
+                new Mock<ILogger<GoodsReceiptService>>().Object, new NoOpAuditLogService());
             var receipt = await SeedDraftReceiptAsync();
             var file = new Mock<Microsoft.AspNetCore.Http.IFormFile>().Object;
             cloudinary.Setup(c => c.UploadEvidenceAsync(file, It.IsAny<string>())).ReturnsAsync("https://cdn/receipt-proof.png");

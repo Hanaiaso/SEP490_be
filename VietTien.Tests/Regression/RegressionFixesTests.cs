@@ -260,7 +260,7 @@ namespace VietTien.Tests.Regression
                 TestData.Inventory(p2.Id, location.Id, 1)); // p2 KHÔNG đủ cho 3 -> phiếu phải hỏng ở dòng 2
             _db.SaveChanges();
 
-            var sut = new GoodsIssueService(_db, new Mock<ICloudinaryService>().Object);
+            var sut = new GoodsIssueService(_db, new Mock<ICloudinaryService>().Object, new NoOpAuditLogService());
             var issue = await sut.CreateGoodsIssueAsync(new CreateGoodsIssueRequestDto
             {
                 Type = "Other",

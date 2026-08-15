@@ -305,7 +305,11 @@ namespace VietTien.API.Services.Implementations
 
         public async Task<InventoryReportDto> GetInventoryReportAsync(Guid? warehouseId, DateTime? fromDate, DateTime? toDate)
         {
-            var to = toDate ?? DateTime.UtcNow;
+            // FE gửi toDate dạng chỉ-có-ngày (vd "2026-08-15" -> parse thành 00:00:00 UTC). Nếu dùng
+            // thẳng làm mốc so sánh "<= to" thì mọi StockTransaction phát sinh sau nửa đêm hôm đó (tức
+            // hầu như toàn bộ giao dịch trong ngày) sẽ bị loại khỏi biểu đồ -> "hôm nay" luôn ra 0.
+            // Đẩy mốc kết thúc tới cuối ngày đó, giống cách GetInventoryByWarehouseAsync đã xử lý.
+            var to = toDate.HasValue ? toDate.Value.Date.AddDays(1).AddTicks(-1) : DateTime.UtcNow;
             var from = fromDate ?? to.AddDays(-30);
             if (from > to)
                 throw new ArgumentException("Khoảng thời gian không hợp lệ: 'fromDate' phải nhỏ hơn hoặc bằng 'toDate'.");
@@ -332,8 +336,11 @@ namespace VietTien.API.Services.Implementations
                 .Where(i => i.ProductId != null && i.Product != null)
                 .Sum(i => i.OnHandQuantity * i.Product!.StandardListedPrice);
 
+            // "<=" khớp với ngưỡng đã dùng ở GetLowStockAlertsAsync (nguồn xác thực cho trang Cảnh
+            // báo tồn thấp) và đúng với SRS FT-12 ("crossing to or below the threshold") — trước đây
+            // dùng "<" cho Product nên một sản phẩm chạm đúng ngưỡng bị đếm khác nhau giữa 2 màn hình.
             bool IsLow(Inventory i) =>
-                (i.ProductId != null && i.ReorderThreshold != null && i.AvailableQuantity < i.ReorderThreshold.Value) ||
+                (i.ProductId != null && i.ReorderThreshold != null && i.AvailableQuantity <= i.ReorderThreshold.Value) ||
                 (i.MaterialId != null && i.Material != null && i.AvailableQuantity <= i.Material.SafetyThreshold);
 
             var lowStockItems = inventories.Where(IsLow).ToList();
@@ -401,12 +408,20 @@ namespace VietTien.API.Services.Implementations
                 });
             }
 
+            // Khi xem báo cáo toàn công ty (không lọc theo kho), dùng thẳng số liệu từ
+            // GetLowStockAlertsAsync (nguồn xác thực duy nhất, đã gộp cả Material qua mọi kho) để khớp
+            // tuyệt đối với trang Cảnh báo tồn thấp. Khi lọc theo 1 kho cụ thể, phương thức đó không hỗ
+            // trợ phạm vi từng kho nên vẫn phải tính cục bộ — nhưng nay đã dùng chung ngưỡng "<=".
+            var lowStockCount = warehouseId.HasValue
+                ? lowStockItems.Count
+                : (await GetLowStockAlertsAsync()).Count;
+
             return new InventoryReportDto
             {
                 TotalSkus = totalSkus,
                 TotalInventoryValue = totalInventoryValue,
                 TotalWarehouses = totalWarehouses,
-                LowStockCount = lowStockItems.Count,
+                LowStockCount = lowStockCount,
                 CategoryBreakdown = categoryBreakdown,
                 StockMovement = stockMovement,
                 TopLowStockItems = topLowStockItems
@@ -523,6 +538,7 @@ namespace VietTien.API.Services.Implementations
                 WarehouseName = inv.WarehouseLocation?.Warehouse?.Name,
                 AvailableQuantity = inv.AvailableQuantity,
                 Threshold = inv.ReorderThreshold!.Value,
+                Unit = inv.Product?.Unit,
                 SuggestedAction = "Tạo Purchase Order bổ sung hàng"
             }));
 
@@ -546,6 +562,7 @@ namespace VietTien.API.Services.Implementations
                     WarehouseName = null,
                     AvailableQuantity = calculatedStock,
                     Threshold = material.SafetyThreshold,
+                    Unit = material.Unit,
                     SuggestedAction = "Đặt mua thêm nguyên vật liệu"
                 });
             }

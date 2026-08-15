@@ -97,13 +97,26 @@ namespace VietTien.API.Services.Implementations
                 .Distinct()
                 .CountAsync();
 
+            var pendingQuotationApprovalCount = await _context.Quotations
+                .CountAsync(q => q.Status == QuotationStatus.PendingManager);
+            var pendingSalesChangeRequestCount = await _context.SalesChangeRequests
+                .CountAsync(r => r.Status == SalesChangeRequestStatus.Pending);
+            var pendingDeliveryConflictCount = await _context.DeliveryScheduleConflicts
+                .CountAsync(c => c.Status == DeliveryConflictStatus.Pending);
+            var pendingMarketingApprovalCount = await _context.MarketingPosts
+                .CountAsync(p => p.Status == MarketingPostStatus.Submitted);
+
             return new SalesManagerDashboardDto
             {
                 TeamKpi = teamKpi,
                 StaffBreakdown = staffBreakdown,
                 OpenExceptions = openExceptions,
                 OverdueDebts = overdueDebts,
-                CodSlaBreachCountToday = codSlaBreachCountToday
+                CodSlaBreachCountToday = codSlaBreachCountToday,
+                PendingQuotationApprovalCount = pendingQuotationApprovalCount,
+                PendingSalesChangeRequestCount = pendingSalesChangeRequestCount,
+                PendingDeliveryConflictCount = pendingDeliveryConflictCount,
+                PendingMarketingApprovalCount = pendingMarketingApprovalCount
             };
         }
     }

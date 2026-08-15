@@ -15,11 +15,13 @@ namespace VietTien.API.Services.Implementations
     {
         private readonly ApplicationDbContext _context;
         private readonly ICloudinaryService _cloudinaryService;
+        private readonly IAuditLogService _auditLogService;
 
-        public GoodsIssueService(ApplicationDbContext context, ICloudinaryService cloudinaryService)
+        public GoodsIssueService(ApplicationDbContext context, ICloudinaryService cloudinaryService, IAuditLogService auditLogService)
         {
             _context = context;
             _cloudinaryService = cloudinaryService;
+            _auditLogService = auditLogService;
         }
 
         public async Task<IEnumerable<GoodsIssueDto>> GetGoodsIssuesAsync(string? type)
@@ -274,11 +276,26 @@ namespace VietTien.API.Services.Implementations
                     _context.StockTransactions.Add(tx);
                 }
 
+                var statusBeforePost = issue.Status;
                 issue.Status = GoodsIssueStatus.Posted;
                 issue.IssueDate = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
+
+                // BR-022: biến động tồn kho là "critical change" bắt buộc có audit trail — trước đây
+                // toàn bộ nghiệp vụ kho (xuất/nhập/điều chỉnh/chuyển kho) không ghi AuditLog nào cả.
+                var actor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == staffId);
+                await _auditLogService.LogAsync(
+                    entityName: "GoodsIssue",
+                    entityId: issue.Id.ToString(),
+                    action: "POST",
+                    actorUserId: staffId,
+                    actorEmail: actor?.Email,
+                    actorRole: "WarehouseStaff",
+                    before: new { Status = statusBeforePost.ToString(), issue.Code },
+                    after: new { Status = GoodsIssueStatus.Posted.ToString(), issue.Code, issue.WarehouseId },
+                    reason: $"Đăng sổ xuất kho loại {issue.Type}");
 
                 return await GetGoodsIssueByIdAsync(issue.Id);
             }
@@ -400,6 +417,18 @@ namespace VietTien.API.Services.Implementations
                 await _context.SaveChangesAsync();
 
                 await transaction.CommitAsync();
+
+                var reversalActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == staffId);
+                await _auditLogService.LogAsync(
+                    entityName: "GoodsIssue",
+                    entityId: originalIssue.Id.ToString(),
+                    action: "REVERSAL",
+                    actorUserId: staffId,
+                    actorEmail: reversalActor?.Email,
+                    actorRole: "WarehouseStaff",
+                    before: new { Status = "Posted", originalIssue.Code },
+                    after: new { Status = "Reversed", originalIssue.Code, ReversalIssueCode = reversalIssue.Code },
+                    reason: dto.ReversalReason.Trim());
 
                 return await GetGoodsIssueByIdAsync(reversalIssue.Id);
             }
