@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -111,13 +111,24 @@ namespace VietTien.Tests.Controllers
         }
 
         [Fact]
-        public async Task AcceptOrder_WithoutUserClaim_Returns400()
+        public async Task AcceptOrder_WithoutUserClaim_Returns403()
         {
             _sut.WithAnonymousUser();
 
-            // GetUserId() ném UnauthorizedAccessException, action này chỉ có catch(Exception) -> 400.
-            (await _sut.AcceptOrder(Guid.NewGuid())).StatusOf().Should().Be(400);
+            // GetUserId() ném UnauthorizedAccessException. Từ khi action bắt riêng exception này để
+            // trả 403 cho trường hợp đơn đã thuộc nhân viên khác, token không hợp lệ cũng ra 403
+            // (thay vì 400 như trước) — đúng ngữ nghĩa hơn cho lỗi thiếu/không hợp lệ danh tính.
+            (await _sut.AcceptOrder(Guid.NewGuid())).StatusOf().Should().Be(403);
             _service.Verify(s => s.AcceptOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task AcceptOrder_WhenOrderOwnedByAnotherStaff_Returns403()
+        {
+            _service.Setup(s => s.AcceptOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
+                .ThrowsAsync(new UnauthorizedAccessException("Đơn hàng này đã được nhân viên khác tiếp nhận."));
+
+            (await _sut.AcceptOrder(Guid.NewGuid())).StatusOf().Should().Be(403);
         }
 
         [Fact]
@@ -483,16 +494,16 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetGoodsIssues_PassesTypeFilter()
         {
-            _service.Setup(s => s.GetGoodsIssuesAsync("Reversal")).ReturnsAsync(new List<GoodsIssueDto>());
+            _service.Setup(s => s.GetGoodsIssuesAsync("Reversal", _staffId)).ReturnsAsync(new List<GoodsIssueDto>());
 
             (await _sut.GetGoodsIssues("Reversal")).StatusOf().Should().Be(200);
-            _service.Verify(s => s.GetGoodsIssuesAsync("Reversal"), Times.Once);
+            _service.Verify(s => s.GetGoodsIssuesAsync("Reversal", _staffId), Times.Once);
         }
 
         [Fact]
         public async Task GetGoodsIssues_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.GetGoodsIssuesAsync(It.IsAny<string?>())).ThrowsAsync(new Exception("loi"));
+            _service.Setup(s => s.GetGoodsIssuesAsync(It.IsAny<string?>(), It.IsAny<Guid>())).ThrowsAsync(new Exception("loi"));
 
             (await _sut.GetGoodsIssues(null)).StatusOf().Should().Be(400);
         }
@@ -500,7 +511,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetGoodsIssueById_Success_ReturnsOk()
         {
-            _service.Setup(s => s.GetGoodsIssueByIdAsync(It.IsAny<Guid>())).ReturnsAsync(new GoodsIssueDto());
+            _service.Setup(s => s.GetGoodsIssueByIdAsync(It.IsAny<Guid>(), It.IsAny<Guid>())).ReturnsAsync(new GoodsIssueDto());
 
             (await _sut.GetGoodsIssueById(Guid.NewGuid())).StatusOf().Should().Be(200);
         }
@@ -508,7 +519,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetGoodsIssueById_WhenMissing_Returns404()
         {
-            _service.Setup(s => s.GetGoodsIssueByIdAsync(It.IsAny<Guid>()))
+            _service.Setup(s => s.GetGoodsIssueByIdAsync(It.IsAny<Guid>(), It.IsAny<Guid>()))
                 .ThrowsAsync(new KeyNotFoundException("x"));
 
             (await _sut.GetGoodsIssueById(Guid.NewGuid())).StatusOf().Should().Be(404);
@@ -517,7 +528,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetGoodsIssueById_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.GetGoodsIssueByIdAsync(It.IsAny<Guid>())).ThrowsAsync(new Exception("loi"));
+            _service.Setup(s => s.GetGoodsIssueByIdAsync(It.IsAny<Guid>(), It.IsAny<Guid>())).ThrowsAsync(new Exception("loi"));
 
             (await _sut.GetGoodsIssueById(Guid.NewGuid())).StatusOf().Should().Be(400);
         }
@@ -564,7 +575,7 @@ namespace VietTien.Tests.Controllers
         public async Task UploadProof_WhenNoFile_Returns400WithoutCallingService()
         {
             (await _sut.UploadProof(Guid.NewGuid(), null!)).StatusOf().Should().Be(400);
-            _service.Verify(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<IFormFile>()), Times.Never);
+            _service.Verify(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<IFormFile>()), Times.Never);
         }
 
         [Fact]
@@ -576,7 +587,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UploadProof_Success_ReturnsOk()
         {
-            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<IFormFile>()))
+            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<IFormFile>()))
                 .ReturnsAsync(new GoodsIssueDto());
 
             (await _sut.UploadProof(Guid.NewGuid(), FakeFile())).StatusOf().Should().Be(200);
@@ -585,7 +596,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UploadProof_WhenIssueMissing_Returns404()
         {
-            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<IFormFile>()))
+            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<IFormFile>()))
                 .ThrowsAsync(new KeyNotFoundException("x"));
 
             (await _sut.UploadProof(Guid.NewGuid(), FakeFile())).StatusOf().Should().Be(404);
@@ -594,7 +605,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UploadProof_WhenIssueAlreadyPosted_Returns409()
         {
-            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<IFormFile>()))
+            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<IFormFile>()))
                 .ThrowsAsync(new InvalidOperationException("Phieu da phat hanh"));
 
             (await _sut.UploadProof(Guid.NewGuid(), FakeFile())).StatusOf().Should().Be(409);
@@ -603,7 +614,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UploadProof_WhenConcurrent_Returns409()
         {
-            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<IFormFile>()))
+            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<IFormFile>()))
                 .ThrowsAsync(new DbUpdateConcurrencyException());
 
             (await _sut.UploadProof(Guid.NewGuid(), FakeFile())).StatusOf().Should().Be(409);
@@ -612,7 +623,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UploadProof_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<IFormFile>()))
+            _service.Setup(s => s.UploadProofAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<IFormFile>()))
                 .ThrowsAsync(new Exception("loi"));
 
             (await _sut.UploadProof(Guid.NewGuid(), FakeFile())).StatusOf().Should().Be(400);
@@ -621,7 +632,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateHandoverInfo_Success_ReturnsOk()
         {
-            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
+            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
                 .ReturnsAsync(new GoodsIssueDto());
 
             (await _sut.UpdateHandoverInfo(Guid.NewGuid(), new UpdateGoodsIssueHandoverDto())).StatusOf().Should().Be(200);
@@ -630,7 +641,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateHandoverInfo_WhenMissing_Returns404()
         {
-            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
+            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
                 .ThrowsAsync(new KeyNotFoundException("x"));
 
             (await _sut.UpdateHandoverInfo(Guid.NewGuid(), new UpdateGoodsIssueHandoverDto())).StatusOf().Should().Be(404);
@@ -639,7 +650,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateHandoverInfo_WhenWrongState_Returns409()
         {
-            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
+            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
                 .ThrowsAsync(new InvalidOperationException("sai trang thai"));
 
             (await _sut.UpdateHandoverInfo(Guid.NewGuid(), new UpdateGoodsIssueHandoverDto())).StatusOf().Should().Be(409);
@@ -648,7 +659,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateHandoverInfo_WhenConcurrent_Returns409()
         {
-            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
+            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
                 .ThrowsAsync(new DbUpdateConcurrencyException());
 
             (await _sut.UpdateHandoverInfo(Guid.NewGuid(), new UpdateGoodsIssueHandoverDto())).StatusOf().Should().Be(409);
@@ -657,7 +668,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateHandoverInfo_WhenServiceThrows_Returns400()
         {
-            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
+            _service.Setup(s => s.UpdateHandoverInfoAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<UpdateGoodsIssueHandoverDto>()))
                 .ThrowsAsync(new Exception("loi"));
 
             (await _sut.UpdateHandoverInfo(Guid.NewGuid(), new UpdateGoodsIssueHandoverDto())).StatusOf().Should().Be(400);
@@ -782,7 +793,8 @@ namespace VietTien.Tests.Controllers
         private readonly Guid _userId = Guid.NewGuid();
 
         public WarehouseManagementControllerTests()
-            => _sut = new WarehouseManagementController(_service.Object, _db).WithUser(_userId, "WarehouseStaff");
+            => _sut = new WarehouseManagementController(_service.Object, _db, TestWarehouseAccessGuard.Create(_db))
+                .WithUser(_userId, "WarehouseStaff");
 
         // ── CRUD kho ─────────────────────────────────────────────────────────
 
@@ -982,11 +994,13 @@ namespace VietTien.Tests.Controllers
         }
 
         [Fact]
-        public async Task ReceiveToQuarantine_WithoutUserClaim_Returns400()
+        public async Task ReceiveToQuarantine_WithoutUserClaim_Returns403()
         {
             _sut.WithAnonymousUser();
 
-            (await _sut.ReceiveToQuarantine(new QuarantineReceiveDto())).StatusOf().Should().Be(400);
+            // Action nay bắt riêng UnauthorizedAccessException để trả 403 khi thao tác ngoài kho
+            // được phân công; token thiếu claim cũng đi vào nhánh đó thay vì rơi xuống 400.
+            (await _sut.ReceiveToQuarantine(new QuarantineReceiveDto())).StatusOf().Should().Be(403);
         }
 
         [Fact]
@@ -1140,11 +1154,11 @@ namespace VietTien.Tests.Controllers
         }
 
         [Fact]
-        public async Task DispatchQuarantine_WithoutUserClaim_Returns400()
+        public async Task DispatchQuarantine_WithoutUserClaim_Returns403()
         {
             _sut.WithAnonymousUser();
 
-            (await _sut.DispatchQuarantine(Guid.NewGuid(), new QuarantineDispatchDto())).StatusOf().Should().Be(400);
+            (await _sut.DispatchQuarantine(Guid.NewGuid(), new QuarantineDispatchDto())).StatusOf().Should().Be(403);
         }
 
         [Fact]

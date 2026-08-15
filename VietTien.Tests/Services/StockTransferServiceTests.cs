@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
@@ -28,7 +28,7 @@ namespace VietTien.Tests.Services
 
         public StockTransferServiceTests()
         {
-            _sut = new StockTransferService(_db, _email.Object, new Mock<ICloudinaryService>().Object, _notification.Object);
+            _sut = new StockTransferService(_db, _email.Object, new Mock<ICloudinaryService>().Object, _notification.Object, TestWarehouseAccessGuard.Create(_db));
             _staff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             _db.Users.Add(_staff);
             (_w1, _loc1) = TestData.Warehouse();

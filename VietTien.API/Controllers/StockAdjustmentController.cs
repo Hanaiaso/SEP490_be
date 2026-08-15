@@ -65,12 +65,16 @@ namespace VietTien.API.Controllers
         {
             try
             {
-                var result = await _stockAdjustmentService.GetByIdAsync(id);
+                var result = await _stockAdjustmentService.GetByIdAsync(id, GetUserId(), GetUserRole());
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
             catch (Exception ex)
             {

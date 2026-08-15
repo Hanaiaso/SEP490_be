@@ -87,11 +87,15 @@ namespace VietTien.API.Controllers
             // nghĩa "sửa snapshot đã chốt" -> luôn 409 (đúng hành vi L3-INV-01 mong đợi).
             try
             {
-                await _inventoryCountSessionService.GetByIdAsync(id);
+                await _inventoryCountSessionService.GetByIdAsync(id, GetUserId());
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
 
             throw new CountSnapshotStateInvalidException(
@@ -107,17 +111,22 @@ namespace VietTien.API.Controllers
 
             try
             {
-                var session = await _inventoryCountSessionService.GetByIdAsync(id);
+                var staffId = GetUserId();
+                var session = await _inventoryCountSessionService.GetByIdAsync(id, staffId);
                 var item = session.Items.FirstOrDefault(i => i.InventoryId == dto.InventoryId)
                     ?? throw new KeyNotFoundException("Dòng tồn kho này không nằm trong phiên kiểm kê.");
 
                 var result = await _inventoryCountSessionService.RecordItemCountAsync(
-                    id, item.Id, new RecordCountItemRequest { PhysicalQuantity = dto.ActualQuantity });
+                    id, item.Id, staffId, new RecordCountItemRequest { PhysicalQuantity = dto.ActualQuantity });
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
             }
         }
 

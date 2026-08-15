@@ -6,9 +6,9 @@ namespace VietTien.API.Services.Interfaces
     public interface IInventoryCountSessionService
     {
         Task<List<InventoryCountSessionDto>> GetListAsync(Guid callerId, SystemRole callerRole, Guid? warehouseId, string? status);
-        Task<InventoryCountSessionDto> GetByIdAsync(Guid id);
+        Task<InventoryCountSessionDto> GetByIdAsync(Guid id, Guid callerId);
         Task<InventoryCountSessionDto> OpenAsync(Guid staffId, OpenInventoryCountSessionRequest request);
-        Task<InventoryCountSessionDto> RecordItemCountAsync(Guid sessionId, Guid itemId, RecordCountItemRequest request);
+        Task<InventoryCountSessionDto> RecordItemCountAsync(Guid sessionId, Guid itemId, Guid staffId, RecordCountItemRequest request);
         Task<CloseInventoryCountSessionResultDto> CloseAsync(Guid sessionId, Guid staffId);
     }
 }
