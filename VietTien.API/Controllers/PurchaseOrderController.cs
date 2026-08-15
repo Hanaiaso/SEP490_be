@@ -347,6 +347,33 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPut("{id}/receipts/{rId}")]
+        [Authorize(Roles = "WarehouseStaff")]
+        public async Task<IActionResult> UpdateReceipt(Guid id, Guid rId, [FromBody] UpdateGoodsReceiptRequest request)
+        {
+            try
+            {
+                var result = await _receiptService.UpdateDraftReceiptAsync(rId, GetUserId(), request);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Phiếu nhận hàng đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("{id}/receipts/{rId}/upload-proof")]
         [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> UploadReceiptProof(Guid id, Guid rId, Microsoft.AspNetCore.Http.IFormFile file)

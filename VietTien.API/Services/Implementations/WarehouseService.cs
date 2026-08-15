@@ -15,13 +15,15 @@ namespace VietTien.API.Services.Implementations
         private readonly IHubContext<SalesHub> _salesHub;
         private readonly INotificationService _notificationService;
         private readonly ILogger<WarehouseService> _logger;
+        private readonly IInventoryReservationService _inventoryReservationService;
 
-        public WarehouseService(ApplicationDbContext context, IHubContext<SalesHub> salesHub, INotificationService notificationService, ILogger<WarehouseService> logger)
+        public WarehouseService(ApplicationDbContext context, IHubContext<SalesHub> salesHub, INotificationService notificationService, ILogger<WarehouseService> logger, IInventoryReservationService inventoryReservationService)
         {
             _context = context;
             _salesHub = salesHub;
             _notificationService = notificationService;
             _logger = logger;
+            _inventoryReservationService = inventoryReservationService;
         }
 
         public async Task<List<WarehouseOrderListDto>> GetOrdersForWarehouseAsync(string tabType, int pageNumber, int pageSize)
@@ -838,30 +840,49 @@ namespace VietTien.API.Services.Implementations
                 
                 foreach (var item in order.OrderItems)
                 {
-                    var inventory = await _context.Inventories
+                    // BUGFIX: trước đây chỉ tìm 1 dòng Inventory DUY NHẤT có đủ OnHandQuantity cho toàn bộ
+                    // item.Quantity — nhưng tồn ở WH-DEFAULT được phép trải trên nhiều vị trí (bin), y hệt
+                    // cách StockTransferService/InventoryReservationService đã xử lý ở nơi khác. Một đơn hoàn
+                    // toàn hợp lệ (đủ tổng tồn) vẫn bị chặn nếu số lượng đó nằm rải rác ở >1 vị trí. Nay gom
+                    // tất cả các dòng tồn của sản phẩm tại WH-DEFAULT, trừ dần từ dòng lớn nhất, ghi 1
+                    // StockTransaction cho mỗi dòng thực sự bị trừ để vết audit khớp đúng vị trí vật lý.
+                    var rows = await _context.Inventories
                         .Include(inv => inv.WarehouseLocation)
                         .ThenInclude(wl => wl.Warehouse)
-                        .FirstOrDefaultAsync(inv => inv.ProductId == item.ProductId && inv.OnHandQuantity >= item.Quantity && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Code == "WH-DEFAULT");
-                    
-                    if (inventory == null)
+                        .Where(inv => inv.ProductId == item.ProductId && inv.OnHandQuantity > 0 && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Code == "WH-DEFAULT")
+                        .OrderByDescending(inv => inv.OnHandQuantity)
+                        .ToListAsync();
+
+                    var totalOnHand = rows.Sum(r => r.OnHandQuantity);
+                    if (totalOnHand < item.Quantity)
                         throw new Exception($"Không đủ tồn kho khả dụng cho sản phẩm {item.ProductId} tại kho tập kết (WH-DEFAULT). Vui lòng kiểm tra lại điều chuyển nội bộ.");
 
-                    inventory.OnHandQuantity -= item.Quantity;
-                    _context.Inventories.Update(inventory);
-
-                    // Log biến động tồn kho StockTransaction — thiếu bước này khiến báo cáo xuất/nhập và
-                    // "hàng chậm luân chuyển" (đọc từ StockTransaction) không thấy được các đơn đã xuất thật qua luồng này.
-                    _context.StockTransactions.Add(new StockTransaction
+                    var remaining = item.Quantity;
+                    foreach (var inventory in rows)
                     {
-                        InventoryId = inventory.Id,
-                        ProductId = item.ProductId,
-                        WarehouseLocationId = inventory.WarehouseLocationId,
-                        QuantityChange = -item.Quantity,
-                        TransactionType = TransactionType.GoodsIssue,
-                        ReferenceId = goodsIssue.Id,
-                        CreatedByUserId = staffId,
-                        CreatedAt = DateTime.UtcNow
-                    });
+                        if (remaining <= 0) break;
+                        var take = Math.Min(remaining, inventory.OnHandQuantity);
+                        if (take <= 0) continue;
+
+                        inventory.OnHandQuantity -= take;
+                        _context.Inventories.Update(inventory);
+
+                        // Log biến động tồn kho StockTransaction — thiếu bước này khiến báo cáo xuất/nhập và
+                        // "hàng chậm luân chuyển" (đọc từ StockTransaction) không thấy được các đơn đã xuất thật qua luồng này.
+                        _context.StockTransactions.Add(new StockTransaction
+                        {
+                            InventoryId = inventory.Id,
+                            ProductId = item.ProductId,
+                            WarehouseLocationId = inventory.WarehouseLocationId,
+                            QuantityChange = -take,
+                            TransactionType = TransactionType.GoodsIssue,
+                            ReferenceId = goodsIssue.Id,
+                            CreatedByUserId = staffId,
+                            CreatedAt = DateTime.UtcNow
+                        });
+
+                        remaining -= take;
+                    }
 
                     goodsIssue.Items.Add(new GoodsIssueItem { GoodsIssueId = goodsIssue.Id, ProductId = item.ProductId, Quantity = item.Quantity });
                 }
@@ -869,6 +890,16 @@ namespace VietTien.API.Services.Implementations
                 _context.GoodsIssues.Add(goodsIssue);
                 _context.Orders.Update(order);
                 await _context.SaveChangesAsync();
+
+                // BUGFIX: hàng đã thật sự rời kho ở trên (trừ OnHandQuantity) nhưng phần AllocatedQuantity
+                // được giữ chắc lúc Sales xác nhận đơn (OrderService.PlaceOrderAsync -> AllocateAsync) chưa
+                // từng được giải phóng — mỗi đơn xuất kho qua luồng này để lại 1 khoản "giữ chỗ" ảo vĩnh
+                // viễn, khiến AvailableQuantity (OnHand - Reserved - Allocated - Damaged - Quarantine) bị
+                // thu hẹp dần theo thời gian dù tồn vật lý đã đúng. Giải phóng ngay sau khi trừ OnHand,
+                // cùng transaction (InventoryReservationService tự tham gia transaction đang mở trên _context).
+                await _inventoryReservationService.ReleaseAllocatedAsync(
+                    order.OrderItems.Select(i => (i.ProductId, i.Quantity)));
+
                 await transaction.CommitAsync();
             }
             catch

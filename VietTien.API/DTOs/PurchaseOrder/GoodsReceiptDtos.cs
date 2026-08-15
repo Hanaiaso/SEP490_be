@@ -41,6 +41,31 @@ namespace VietTien.API.DTOs.PurchaseOrder
         public string? Note { get; set; }
     }
 
+    // Sửa số lượng của phiếu nhập CÒN Ở TRẠNG THÁI DRAFT (trước khi Post). Chỉ nhận 3 số liệu nhân
+    // viên thực sự đếm được — Đạt/Hỏng/Sai loại; Thừa/Thiếu tự tính lại ở server theo đúng công thức
+    // đã dùng khi tạo phiếu (CreateFromPOAsync), tránh client tính sai lệch dẫn tới bị từ chối oan.
+    public class UpdateGoodsReceiptRequest
+    {
+        [Required]
+        [MinLength(1, ErrorMessage = "Phiếu nhập kho phải có ít nhất 1 mặt hàng.")]
+        public List<UpdateGoodsReceiptItemRequest> Items { get; set; } = new List<UpdateGoodsReceiptItemRequest>();
+    }
+
+    public class UpdateGoodsReceiptItemRequest
+    {
+        [Required]
+        public Guid PurchaseOrderItemId { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Số lượng chấp nhận phải lớn hơn hoặc bằng 0")]
+        public int AcceptedQuantity { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Số lượng hư hỏng phải lớn hơn hoặc bằng 0")]
+        public int DamagedQuantity { get; set; }
+
+        [Range(0, int.MaxValue, ErrorMessage = "Số lượng sai hàng phải lớn hơn hoặc bằng 0")]
+        public int WrongItemQuantity { get; set; }
+    }
+
     public class GoodsReceiptDto
     {
         public Guid Id { get; set; }

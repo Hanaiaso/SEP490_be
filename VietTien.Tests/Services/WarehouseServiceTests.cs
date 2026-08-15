@@ -29,7 +29,7 @@ namespace VietTien.Tests.Services
 
         public WarehouseServiceTests()
         {
-            _sut = new WarehouseService(_db, MockHubContext.Create<SalesHub>().Object, _noti.Object, new Mock<ILogger<WarehouseService>>().Object);
+            _sut = new WarehouseService(_db, MockHubContext.Create<SalesHub>().Object, _noti.Object, new Mock<ILogger<WarehouseService>>().Object, new FakeInventoryReservationService(_db));
             (_, _profile) = TestData.SeedCustomer(_db);
             _whStaff = TestData.User(u => u.Role = SystemRole.WarehouseStaff);
             _db.Users.Add(_whStaff);
@@ -270,6 +270,51 @@ namespace VietTien.Tests.Services
             _db.Inventories.Single(i => i.ProductId == _p1.Id).OnHandQuantity.Should().Be(6);
             _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.Fulfilled);
             _db.GoodsIssues.Should().ContainSingle(gi => gi.ReferenceId == order.Id && gi.Status == GoodsIssueStatus.Posted);
+        }
+
+        // L1-WH-11c | State-Valid | Tồn kho trải nhiều vị trí (bin) trong WH-DEFAULT vẫn xuất được, trừ dần
+        // qua từng dòng thay vì đòi 1 dòng duy nhất đủ số lượng. BUGFIX: trước đây chỉ tìm 1 dòng Inventory
+        // có OnHandQuantity >= toàn bộ số lượng cần xuất -> đơn hoàn toàn hợp lệ (đủ tổng tồn) bị chặn nhầm
+        // nếu tồn của sản phẩm bị chia nhỏ ở nhiều vị trí (kết quả của điều chuyển nội bộ nhiều đợt...).
+        [Fact]
+        public async Task L1_WH_11c_PostGoodsIssue_StockSplitAcrossMultipleBins_StillSucceeds()
+        {
+            var (w, loc1) = TestData.Warehouse(x => x.Code = "WH-DEFAULT");
+            _db.Warehouses.Add(w);
+            var loc2 = new WarehouseLocation { WarehouseId = w.Id, Name = "Khu B", Type = "Normal" };
+            _db.WarehouseLocations.Add(loc2);
+            // Tồn chia 2 dòng: 5 ở loc1, 5 ở loc2 — tổng 10, không dòng nào riêng lẻ đủ cho đơn cần 8.
+            _db.Inventories.Add(TestData.Inventory(_p1.Id, loc1.Id, 5));
+            _db.Inventories.Add(TestData.Inventory(_p1.Id, loc2.Id, 5));
+            _db.SaveChanges();
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.HandedOver, _whStaff.Id, qty: 8);
+
+            await _sut.PostGoodsIssueAsync(order.Id, _whStaff.Id);
+
+            _db.Inventories.Where(i => i.ProductId == _p1.Id).Sum(i => i.OnHandQuantity).Should().Be(2, "10 tồn ban đầu - 8 xuất, bất kể nằm ở dòng nào");
+            _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.Fulfilled);
+            _db.StockTransactions.Where(t => t.ProductId == _p1.Id && t.TransactionType == TransactionType.GoodsIssue)
+                .Sum(t => t.QuantityChange).Should().Be(-8, "tổng vết audit phải khớp đúng số lượng đã xuất, dù ghi thành nhiều dòng");
+        }
+
+        // L1-WH-11b | State-Valid | Xuất kho -> giải phóng AllocatedQuantity đã giữ lúc Sales xác nhận đơn.
+        // BUGFIX: trước đây PostGoodsIssueAsync chỉ trừ OnHand, chưa từng giải phóng Allocated -> để lại
+        // 1 khoản giữ chỗ ảo vĩnh viễn trên Inventory, khiến AvailableQuantity (OnHand - Reserved -
+        // Allocated - Damaged - Quarantine) bị thu hẹp dần theo thời gian dù tồn vật lý đã đúng.
+        [Fact]
+        public async Task L1_WH_11b_PostGoodsIssue_ReleasesAllocatedQuantity()
+        {
+            var (w, loc) = TestData.Warehouse(x => x.Code = "WH-DEFAULT");
+            _db.Warehouses.Add(w);
+            _db.Inventories.Add(TestData.Inventory(_p1.Id, loc.Id, 10, inv => inv.AllocatedQuantity = 4));
+            _db.SaveChanges();
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.HandedOver, _whStaff.Id, qty: 4);
+
+            await _sut.PostGoodsIssueAsync(order.Id, _whStaff.Id);
+
+            var inv = _db.Inventories.Single(i => i.ProductId == _p1.Id);
+            inv.OnHandQuantity.Should().Be(6);
+            inv.AllocatedQuantity.Should().Be(0, "hàng đã thật sự rời kho, khoản giữ chỗ Allocated phải được giải phóng theo");
         }
 
         // L1-WH-12 | EP-Invalid | Xuất kho khi 1 SKU thiếu tồn -> chặn toàn bộ, KHÔNG trừ một phần (all-or-nothing)

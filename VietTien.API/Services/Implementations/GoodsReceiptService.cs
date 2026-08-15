@@ -105,6 +105,55 @@ namespace VietTien.API.Services.Implementations
             return await GetReceiptDtoAsync(receipt.Id);
         }
 
+        // BUGFIX: trước đây màn hình "Chi tiết phiếu nhập" (WarehouseGoodsReceipt.tsx) cho phép sửa số
+        // lượng Đạt/Hỏng/Từ chối/Thực tế nhưng "Lưu nháp" chỉ đổi state React cục bộ — không hề gọi API
+        // nào, nên mọi chỉnh sửa biến mất ngay khi tải lại trang, và "Hoàn tất nhập hàng" vẫn ghi sổ theo
+        // đúng số liệu lúc TẠO phiếu ban đầu. Nay có endpoint thật để lưu chỉnh sửa khi phiếu còn Draft.
+        // Thừa/Thiếu KHÔNG nhận trực tiếp từ client — tự tính lại theo đúng công thức CreateFromPOAsync
+        // đã dùng, để không thể lệch do client tính sai.
+        public async Task<GoodsReceiptDto> UpdateDraftReceiptAsync(Guid id, Guid warehouseStaffId, UpdateGoodsReceiptRequest request)
+        {
+            var receipt = await _context.GoodsReceipts
+                .Include(r => r.Items)
+                .ThenInclude(i => i.PurchaseOrderItem)
+                .FirstOrDefaultAsync(r => r.Id == id);
+
+            if (receipt == null) throw new KeyNotFoundException("Goods Receipt not found");
+            if (receipt.Status != GoodsReceiptStatus.Draft)
+                throw new InvalidOperationException("Chỉ có thể sửa phiếu nhập khi còn ở trạng thái Nháp.");
+
+            var errors = new List<string>();
+            foreach (var itemReq in request.Items)
+            {
+                var receiptItem = receipt.Items.FirstOrDefault(i => i.PurchaseOrderItemId == itemReq.PurchaseOrderItemId);
+                if (receiptItem == null)
+                {
+                    errors.Add($"Không tìm thấy dòng hàng {itemReq.PurchaseOrderItemId} trong phiếu này.");
+                    continue;
+                }
+
+                // Cùng bất biến với CreateFromPOAsync: Thực nhận = Đạt + Hỏng + Sai loại.
+                var poItem = receiptItem.PurchaseOrderItem;
+                int actualReceived = itemReq.AcceptedQuantity + itemReq.DamagedQuantity + itemReq.WrongItemQuantity;
+                int remaining = Math.Max(0, poItem.ExpectedQuantity - poItem.ReceivedQuantity);
+
+                receiptItem.AcceptedQuantity = itemReq.AcceptedQuantity;
+                receiptItem.DamagedQuantity = itemReq.DamagedQuantity;
+                receiptItem.WrongItemQuantity = itemReq.WrongItemQuantity;
+                receiptItem.ExcessQuantity = Math.Max(0, actualReceived - remaining);
+                receiptItem.ShortQuantity = Math.Max(0, remaining - actualReceived);
+            }
+
+            if (errors.Count > 0)
+            {
+                throw new Exception("Dữ liệu kiểm đếm không hợp lệ:\n" + string.Join("\n", errors));
+            }
+
+            await _context.SaveChangesAsync();
+
+            return await GetReceiptDtoAsync(receipt.Id);
+        }
+
         public async Task<GoodsReceiptDto> PostReceiptAsync(Guid id, Guid warehouseStaffId)
         {
             var receipt = await _context.GoodsReceipts
@@ -162,6 +211,14 @@ namespace VietTien.API.Services.Implementations
                         inventory = await _context.Inventories.FirstOrDefaultAsync(inv => inv.MaterialId == item.PurchaseOrderItem.MaterialId && inv.WarehouseLocationId == defaultLocation.Id);
                     }
 
+                    // BUGFIX: OnHandQuantity phải là TỔNG số lượng vật lý đã nhận (kể cả hàng đang cách ly
+                    // chờ QA), vì AvailableQuantity = OnHand - Reserved - Allocated - Damaged - Quarantine
+                    // coi Quarantine/Damaged là các "khoản giữ" trừ bớt từ OnHand, không phải cộng thêm.
+                    // DispatchQuarantine (WarehouseManagementController) xác nhận đúng hợp đồng này: khi QA
+                    // duyệt hàng cách ly là "còn dùng được", nó CHỈ giảm QuarantineQuantity (comment gốc:
+                    // "AvailableQuantity tự động tăng") — không cộng gì vào OnHand. Trước đây chỉ cộng
+                    // AcceptedQuantity vào OnHand, bỏ sót totalDefective, nên số hàng cách ly được duyệt
+                    // "còn dùng được" biến mất khỏi hệ thống vĩnh viễn dù vẫn nằm thật trên kệ.
                     if (inventory == null)
                     {
                         inventory = new Inventory
@@ -169,34 +226,36 @@ namespace VietTien.API.Services.Implementations
                             ProductId = item.PurchaseOrderItem.ProductId,
                             MaterialId = item.PurchaseOrderItem.MaterialId,
                             WarehouseLocationId = defaultLocation.Id,
-                            OnHandQuantity = item.AcceptedQuantity,
+                            OnHandQuantity = item.AcceptedQuantity + totalDefective,
                             QuarantineQuantity = totalDefective
                         };
                         _context.Inventories.Add(inventory);
                     }
                     else
                     {
-                        inventory.OnHandQuantity += item.AcceptedQuantity;
+                        inventory.OnHandQuantity += item.AcceptedQuantity + totalDefective;
                         inventory.QuarantineQuantity += totalDefective;
                     }
 
-                    if (item.AcceptedQuantity > 0)
+                    // Log StockTransaction — QuantityChange phải khớp đúng phần OnHandQuantity vừa cộng ở
+                    // trên (AcceptedQuantity + totalDefective), không chỉ AcceptedQuantity, nếu không vết
+                    // audit (báo cáo xuất/nhập, "hàng chậm luân chuyển") sẽ thiếu đúng phần hàng cách ly.
+                    // Điều kiện cũ "if (AcceptedQuantity > 0)" bỏ sót cả trường hợp nguyên lô đều lỗi/sai
+                    // (AcceptedQuantity = 0) dù OnHand vẫn tăng — khối này luôn chạy vì đã ở trong nhánh
+                    // "AcceptedQuantity > 0 || totalDefective > 0" phía trên.
+                    var tx = new StockTransaction
                     {
-                        // Log StockTransaction
-                        var tx = new StockTransaction
-                        {
-                            Inventory = inventory,
-                            ProductId = item.PurchaseOrderItem.ProductId,
-                            MaterialId = item.PurchaseOrderItem.MaterialId,
-                            WarehouseLocationId = defaultLocation.Id,
-                            QuantityChange = item.AcceptedQuantity,
-                            TransactionType = TransactionType.GoodsReceipt,
-                            ReferenceId = receipt.Id,
-                            CreatedByUserId = warehouseStaffId,
-                            CreatedAt = DateTime.UtcNow
-                        };
-                        _context.StockTransactions.Add(tx);
-                    }
+                        Inventory = inventory,
+                        ProductId = item.PurchaseOrderItem.ProductId,
+                        MaterialId = item.PurchaseOrderItem.MaterialId,
+                        WarehouseLocationId = defaultLocation.Id,
+                        QuantityChange = item.AcceptedQuantity + totalDefective,
+                        TransactionType = TransactionType.GoodsReceipt,
+                        ReferenceId = receipt.Id,
+                        CreatedByUserId = warehouseStaffId,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _context.StockTransactions.Add(tx);
 
                     if (totalDefective > 0)
                     {
