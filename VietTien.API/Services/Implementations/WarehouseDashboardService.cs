@@ -35,18 +35,10 @@ namespace VietTien.API.Services.Implementations
                 .Select(w => new WarehouseSummaryDto { Id = w.Id, Name = w.Name, Code = w.Code })
                 .ToListAsync();
 
-            // Ngưỡng cảnh báo tồn thấp: AvailableQuantity là computed property (không dịch được sang SQL) ->
-            // lấy tập đã lọc ReorderThreshold trước (thường nhỏ) rồi so sánh ở memory, giống CeoDashboardService.
-            var thresholdedInventories = await _context.Inventories
-                .AsNoTracking()
-                .Include(i => i.Product)
-                .Include(i => i.Material)
-                .Where(i => i.ReorderThreshold != null)
-                .ToListAsync();
-            var lowStockInventories = thresholdedInventories
-                .Where(i => i.AvailableQuantity < i.ReorderThreshold!.Value)
-                .OrderBy(i => i.ReorderThreshold!.Value == 0 ? 0 : (double)i.AvailableQuantity / i.ReorderThreshold!.Value)
-                .ToList();
+            // Dùng đúng 1 định nghĩa "tồn thấp" duy nhất (InventoryService.GetLowStockAlertsAsync) —
+            // trước đây Dashboard tự tính lại bằng logic khác (chỉ xét Product, so sánh "<" thay vì
+            // "<=", bỏ sót hoàn toàn Material) nên số liệu lệch với trang Cảnh báo tồn thấp và Báo cáo.
+            var lowStockAlertsCanonical = await _inventoryService.GetLowStockAlertsAsync();
 
             var slowMovingItems = await _inventoryService.GetSlowMovingItemsAsync(null, SlowMovingDaysThreshold);
 
@@ -68,24 +60,13 @@ namespace VietTien.API.Services.Implementations
 
             var inventoryOps = new WarehouseInventoryKpiDto
             {
-                LowStockCount = lowStockInventories.Count,
+                LowStockCount = lowStockAlertsCanonical.Count,
                 SlowMovingCount = slowMovingItems.Count,
                 TransfersInTransit = await _context.StockTransfers.CountAsync(t => t.Status == StockTransferStatus.Dispatched),
                 ActiveWarehouses = warehouses.Count,
             };
 
             var weeklyVolume = await BuildWeeklyVolumeAsync(localToday, todayStart);
-
-            var stockHealth = lowStockInventories
-                .Take(5)
-                .Select(i => new StockHealthItemDto
-                {
-                    Name = i.Product?.Name ?? i.Material?.Name ?? "N/A",
-                    OnHand = i.OnHandQuantity,
-                    Threshold = i.ReorderThreshold ?? 0,
-                    Unit = i.Product?.Unit ?? i.Material?.Unit ?? string.Empty,
-                })
-                .ToList();
 
             var recentPickTasks = await _context.PickTasks
                 .AsNoTracking()
@@ -104,6 +85,7 @@ namespace VietTien.API.Services.Implementations
             var pendingPurchaseOrders = await _context.PurchaseOrders
                 .AsNoTracking()
                 .Include(po => po.Supplier)
+                .Include(po => po.Items)
                 .Where(po => po.Status == PurchaseOrderStatus.SentToWarehouse || po.Status == PurchaseOrderStatus.PartiallyReceived)
                 .OrderByDescending(po => po.CreatedAt)
                 .Take(RecentListLimit)
@@ -113,18 +95,21 @@ namespace VietTien.API.Services.Implementations
                     Code = po.Code,
                     SupplierName = po.Supplier.Name,
                     Status = PurchaseOrderStatusLabel(po.Status),
-                    ProgressPercent = po.Status == PurchaseOrderStatus.PartiallyReceived ? 50 : 0,
+                    // Trước đây hardcode 50% cho mọi PO "nhận một phần", bất kể thực nhận bao nhiêu.
+                    ProgressPercent = po.Items.Sum(i => i.ExpectedQuantity) > 0
+                        ? po.Items.Sum(i => i.ReceivedQuantity) * 100 / po.Items.Sum(i => i.ExpectedQuantity)
+                        : 0,
                 })
                 .ToListAsync();
 
-            var lowStockAlerts = lowStockInventories
+            var lowStockAlerts = lowStockAlertsCanonical
                 .Take(RecentListLimit)
-                .Select(i => new LowStockItemDto
+                .Select(a => new LowStockItemDto
                 {
-                    Name = i.Product?.Name ?? i.Material?.Name ?? "N/A",
-                    OnHand = i.AvailableQuantity,
-                    Threshold = i.ReorderThreshold ?? 0,
-                    Unit = i.Product?.Unit ?? i.Material?.Unit ?? string.Empty,
+                    Name = a.ItemName,
+                    OnHand = (int)a.AvailableQuantity,
+                    Threshold = (int)a.Threshold,
+                    Unit = a.Unit ?? string.Empty,
                 })
                 .ToList();
 
@@ -167,7 +152,6 @@ namespace VietTien.API.Services.Implementations
                 Inbound = inbound,
                 InventoryOps = inventoryOps,
                 WeeklyVolume = weeklyVolume,
-                StockHealth = stockHealth,
                 RecentPickTasks = recentPickTasks,
                 PendingPurchaseOrders = pendingPurchaseOrders,
                 LowStockAlerts = lowStockAlerts,

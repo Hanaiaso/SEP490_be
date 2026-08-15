@@ -10,7 +10,9 @@ namespace VietTien.API.Models
         public Guid? MaterialId { get; set; }
 
         public int Quantity { get; set; }
-        
+
+        public string? Note { get; set; }
+
         // Navigation
         public GoodsIssue GoodsIssue { get; set; } = null!;
         public Product? Product { get; set; }

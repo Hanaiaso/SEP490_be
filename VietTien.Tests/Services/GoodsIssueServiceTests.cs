@@ -23,7 +23,7 @@ namespace VietTien.Tests.Services
 
         public GoodsIssueServiceTests()
         {
-            _sut = new GoodsIssueService(_db, _cloudinary.Object, TestWarehouseAccessGuard.Create(_db));
+            _sut = new GoodsIssueService(_db, _cloudinary.Object, TestWarehouseAccessGuard.Create(_db), new NoOpAuditLogService());
             (_warehouse, _location) = TestData.Warehouse();
             // Phải gán kho cho staff: phiếu xuất kho nay bị chặn theo AssignedWarehouseId (SRS NAC-05).
             _staff = TestData.User(u =>

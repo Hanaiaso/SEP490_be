@@ -59,7 +59,7 @@ namespace VietTien.Tests.Services
         // ── #7 GoodsIssueService ─────────────────────────────────────────────
 
         private GoodsIssueService NewGoodsIssueService()
-            => new(_db, new Mock<ICloudinaryService>().Object, _guard);
+            => new(_db, new Mock<ICloudinaryService>().Object, _guard, new NoOpAuditLogService());
 
         [Fact]
         public async Task GoodsIssue_CreateForAnotherWarehouse_IsForbidden()
@@ -210,7 +210,7 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task StockAdjustment_GetByIdOfAnotherStaffProposal_IsForbidden()
         {
-            var sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, _guard);
+            var sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, _guard, new NoOpAuditLogService());
             var inv = SeedInventoryIn(_locB, 100);
 
             var created = await sut.CreateAsync(_staffB.Id, new CreateStockAdjustmentRequest
@@ -229,7 +229,7 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task StockAdjustment_GetByIdAsCeo_IsAllowed()
         {
-            var sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, _guard);
+            var sut = new StockAdjustmentService(_db, new Mock<INotificationService>().Object, _guard, new NoOpAuditLogService());
             var ceo = TestData.User(u => u.Role = SystemRole.CEO);
             _db.Users.Add(ceo);
             _db.SaveChanges();
@@ -251,7 +251,7 @@ namespace VietTien.Tests.Services
 
         private WarehouseManagementController NewQuarantineController(Guid actingUserId)
             => new WarehouseManagementController(
-                    new Mock<IWarehouseManagementService>().Object, _db, _guard)
+                    new Mock<IWarehouseManagementService>().Object, _db, _guard, new NoOpAuditLogService())
                 .WithUser(actingUserId, "WarehouseStaff");
 
         [Fact]

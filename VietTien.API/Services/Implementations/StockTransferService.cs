@@ -13,14 +13,16 @@ namespace VietTien.API.Services.Implementations
         private readonly ICloudinaryService _cloudinaryService;
         private readonly INotificationService _notificationService;
         private readonly IWarehouseAccessGuard _warehouseAccessGuard;
+        private readonly IAuditLogService _auditLogService;
 
-        public StockTransferService(ApplicationDbContext context, IEmailService emailService, ICloudinaryService cloudinaryService, INotificationService notificationService, IWarehouseAccessGuard warehouseAccessGuard)
+        public StockTransferService(ApplicationDbContext context, IEmailService emailService, ICloudinaryService cloudinaryService, INotificationService notificationService, IWarehouseAccessGuard warehouseAccessGuard, IAuditLogService auditLogService)
         {
             _context = context;
             _emailService = emailService;
             _cloudinaryService = cloudinaryService;
             _notificationService = notificationService;
             _warehouseAccessGuard = warehouseAccessGuard;
+            _auditLogService = auditLogService;
         }
 
         public async Task<IEnumerable<StockTransferDto>> GetAllAsync(string? status = null)
@@ -297,6 +299,19 @@ namespace VietTien.API.Services.Implementations
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
+                // BR-022: xuất kho điều chuyển làm giảm OnHandQuantity thật -> bắt buộc audit trail.
+                var dispatchActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == transfer.CreatedByUserId);
+                await _auditLogService.LogAsync(
+                    entityName: "StockTransfer",
+                    entityId: transfer.Id.ToString(),
+                    action: "DISPATCH",
+                    actorUserId: transfer.CreatedByUserId,
+                    actorEmail: dispatchActor?.Email,
+                    actorRole: "WarehouseStaff",
+                    before: new { Status = "Draft/TransportArranged", transfer.Code },
+                    after: new { Status = "Dispatched", transfer.Code, transfer.SourceWarehouseId, transfer.DestinationWarehouseId },
+                    reason: $"Xuất kho điều chuyển {transfer.Code}");
+
                 // Phiếu đã chuyển trạng thái Dispatched và commit thành công ở trên -> lỗi gửi
                 // notification không được làm fail request, chỉ log để theo dõi.
                 try
@@ -479,6 +494,18 @@ namespace VietTien.API.Services.Implementations
 
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
+
+                var receiveActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == staffId);
+                await _auditLogService.LogAsync(
+                    entityName: "StockTransfer",
+                    entityId: transfer.Id.ToString(),
+                    action: "RECEIVE",
+                    actorUserId: staffId,
+                    actorEmail: receiveActor?.Email,
+                    actorRole: "WarehouseStaff",
+                    before: new { Status = "Dispatched", transfer.Code },
+                    after: new { Status = "Received", transfer.Code },
+                    reason: dto.Note);
 
                 return MapToDto(transfer);
             }
