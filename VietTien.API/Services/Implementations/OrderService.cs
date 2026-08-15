@@ -736,24 +736,16 @@ namespace VietTien.API.Services.Implementations
             {
                 try
                 {
-                    var base64Data = request.InvoicePdfBase64;
-                    if (base64Data.Contains(","))
-                    {
-                        base64Data = base64Data.Split(',')[1];
-                    }
-
-                    var wwwrootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-                    var invoicesPath = Path.Combine(wwwrootPath, "invoices");
-                    if (!Directory.Exists(invoicesPath))
-                    {
-                        Directory.CreateDirectory(invoicesPath);
-                    }
-
-                    var filePath = Path.Combine(invoicesPath, $"{orderCode}.pdf");
-                    var fileBytes = Convert.FromBase64String(base64Data);
-                    await File.WriteAllBytesAsync(filePath, fileBytes);
-                    
-                    pdfUrl = $"/invoices/{orderCode}.pdf";
+                    // Lưu trên Cloudinary thay vì wwwroot/invoices như trước: (1) container Azure không
+                    // đảm bảo file ghi vào đĩa còn tồn tại sau restart/redeploy, (2) URL tương đối
+                    // "/invoices/xxx.pdf" bị trình duyệt phân giải theo origin của FRONTEND -> SPA
+                    // fallback trả index.html -> React Router đẩy nhân viên về lại dashboard thay vì
+                    // mở hóa đơn. Giống hệt cách UploadInvoicePdfAsync đang làm -> URL tuyệt đối.
+                    pdfUrl = await _cloudinaryService.UploadBase64ImageAsync(
+                        request.InvoicePdfBase64,
+                        "invoices",
+                        orderCode
+                    );
                 }
                 catch (Exception ex)
                 {
