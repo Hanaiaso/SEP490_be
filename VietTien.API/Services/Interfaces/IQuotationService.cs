@@ -17,7 +17,10 @@ namespace VietTien.API.Services.Interfaces
 
         // Actions
         Task<QuotationDto> PickUpQuotationAsync(Guid quotationId, Guid salesStaffId);
-        
+
+        // Sales Manager phân công thủ công cho báo giá ≥ ngưỡng B2B (thay cho Sale tự nhận xử lý).
+        Task<QuotationDto> AssignQuotationAsync(Guid quotationId, Guid managerId, AssignQuotationRequest request);
+
         // New Versioning Logic
         Task<QuotationVersionDto> CreateVersionAsync(Guid quotationId, Guid salesStaffId, CreateQuotationVersionRequest request);
         Task<QuotationVersionDto> ManagerReviewVersionAsync(Guid quotationId, Guid managerId, ManagerReviewRequest request);

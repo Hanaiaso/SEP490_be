@@ -52,6 +52,14 @@ namespace VietTien.API.DTOs.Quotation
         public bool IsAccepted { get; set; }
     }
 
+    // Sales Manager phân công thủ công 1 nhân viên Sale cho báo giá ≥ ngưỡng B2B (thay cho Sale tự
+    // nhận xử lý) — đảm bảo người có kinh nghiệm phù hợp mới đàm phán các đơn giá trị lớn.
+    public class AssignQuotationRequest
+    {
+        [Required(ErrorMessage = "Vui lòng chọn nhân viên Sale để phân công.")]
+        public Guid StaffId { get; set; }
+    }
+
     public class QuotationDto
     {
         public Guid Id { get; set; }

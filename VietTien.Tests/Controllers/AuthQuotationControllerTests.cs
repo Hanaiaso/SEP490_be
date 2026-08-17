@@ -554,6 +554,58 @@ namespace VietTien.Tests.Controllers
             (await Build("SalesStaff").PickUpQuotation(Guid.NewGuid())).StatusOf().Should().Be(400);
         }
 
+        // ── Sales Manager phân công thủ công ────────────────────────────────
+
+        [Fact]
+        public async Task AssignQuotation_Success_ReturnsOk()
+        {
+            _service.Setup(s => s.AssignQuotationAsync(It.IsAny<Guid>(), _userId, It.IsAny<AssignQuotationRequest>()))
+                .ReturnsAsync(new QuotationDto());
+
+            (await Build("SalesManager").AssignQuotation(Guid.NewGuid(), new AssignQuotationRequest { StaffId = Guid.NewGuid() }))
+                .StatusOf().Should().Be(200);
+        }
+
+        [Fact]
+        public async Task AssignQuotation_WhenMissing_Returns404()
+        {
+            _service.Setup(s => s.AssignQuotationAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AssignQuotationRequest>()))
+                .ThrowsAsync(new KeyNotFoundException("x"));
+
+            (await Build("SalesManager").AssignQuotation(Guid.NewGuid(), new AssignQuotationRequest { StaffId = Guid.NewGuid() }))
+                .StatusOf().Should().Be(404);
+        }
+
+        [Fact]
+        public async Task AssignQuotation_WhenAlreadyAssigned_Returns409()
+        {
+            _service.Setup(s => s.AssignQuotationAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AssignQuotationRequest>()))
+                .ThrowsAsync(new InvalidOperationException("Da phan cong cho nguoi khac"));
+
+            (await Build("SalesManager").AssignQuotation(Guid.NewGuid(), new AssignQuotationRequest { StaffId = Guid.NewGuid() }))
+                .StatusOf().Should().Be(409);
+        }
+
+        [Fact]
+        public async Task AssignQuotation_WhenConcurrent_Returns409()
+        {
+            _service.Setup(s => s.AssignQuotationAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AssignQuotationRequest>()))
+                .ThrowsAsync(new DbUpdateConcurrencyException());
+
+            (await Build("SalesManager").AssignQuotation(Guid.NewGuid(), new AssignQuotationRequest { StaffId = Guid.NewGuid() }))
+                .StatusOf().Should().Be(409);
+        }
+
+        [Fact]
+        public async Task AssignQuotation_WhenServiceThrows_Returns400()
+        {
+            _service.Setup(s => s.AssignQuotationAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<AssignQuotationRequest>()))
+                .ThrowsAsync(new Exception("loi"));
+
+            (await Build("SalesManager").AssignQuotation(Guid.NewGuid(), new AssignQuotationRequest { StaffId = Guid.NewGuid() }))
+                .StatusOf().Should().Be(400);
+        }
+
         // ── phiên bản báo giá ────────────────────────────────────────────────
 
         [Fact]

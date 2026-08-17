@@ -63,9 +63,11 @@ namespace VietTien.Tests.Services
 
         //  ▶ Block: CreateQuotationFromCartAsync()
 
-        // L1-QUO-01 | Guard-TRUE | Cart >= 100M, chưa có giá thỏa thuận -> tạo quotation (Draft) + báo Sale phụ trách
+        // L1-QUO-01 | Guard-TRUE | Cart >= 100M, chưa có giá thỏa thuận -> tạo quotation (Draft) + báo
+        // Sales Manager phân công thủ công (KHÔNG còn báo trực tiếp cho Sale phụ trách để Sale tự
+        // nhận xử lý — mọi báo giá qua luồng này đều ≥100tr, phải do Manager phân công người phù hợp).
         [Fact]
-        public async Task L1_QUO_01_CreateFromCart_Above100M_CreatedAndSalesNotified()
+        public async Task L1_QUO_01_CreateFromCart_Above100M_CreatedAndManagerNotified()
         {
             var salesStaffId = Guid.NewGuid();
             _profile.AssignedSalesStaffId = salesStaffId;
@@ -82,9 +84,12 @@ namespace VietTien.Tests.Services
             _quoRepo.Verify(r => r.CreateAsync(It.IsAny<Quotation>()), Times.Once);
             created!.Status.Should().Be(QuotationStatus.Draft); // 'Requested' trong spec = Draft trong code
             created.OriginalTotal.Should().Be(120_000_000m);
-            _noti.Verify(n => n.CreateNotificationAsync(
-                NotificationType.SYS_16_NewQuotationRequest, salesStaffId,
+            _noti.Verify(n => n.CreateRoleNotificationAsync(
+                NotificationType.SYS_42_QuotationNeedsManagerAssignment, SystemRole.SalesManager,
                 It.IsAny<string>(), It.IsAny<string>(), created.Id, "Quotation"), Times.Once);
+            _noti.Verify(n => n.CreateNotificationAsync(
+                It.IsAny<NotificationType>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Guid?>(), It.IsAny<string?>()), Times.Never); // không còn báo trực tiếp cho Sale
         }
 
         // L1-QUO-02 | Guard-FALSE | Cart < 100M -> từ chối, không tạo quotation
@@ -101,34 +106,84 @@ namespace VietTien.Tests.Services
             _quoRepo.Verify(r => r.CreateAsync(It.IsAny<Quotation>()), Times.Never);
         }
 
-        //  ▶ Block: PickUpQuotationAsync()
+        //  ▶ Block: PickUpQuotationAsync() — Sale KHÔNG còn được tự nhận xử lý báo giá ≥100tr
 
-        // L1-QUO-03 | State-Valid | Draft -> Negotiating khi Sales nhận xử lý, gán SalesStaffId
+        // L1-QUO-03 | EP-Invalid | Sale gọi PickUp -> luôn bị từ chối, kể cả quotation còn Draft/chưa
+        // ai nhận (Sales Manager phải dùng AssignQuotationAsync thay thế).
         [Fact]
-        public async Task L1_QUO_03_PickUp_AssignsStaffAndMovesToNegotiating()
+        public async Task L1_QUO_03_PickUp_NoLongerAllowed_AlwaysRejected()
         {
             var q = SeedQuotation();
-            var s1 = Guid.NewGuid();
 
-            var dto = await _sut.PickUpQuotationAsync(q.Id, s1);
+            var act = () => _sut.PickUpQuotationAsync(q.Id, Guid.NewGuid());
 
-            q.SalesStaffId.Should().Be(s1);
-            q.Status.Should().Be(QuotationStatus.Negotiating);
-            _quoRepo.Verify(r => r.UpdateAsync(q), Times.Once);
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*Sales Manager phân công*");
+            q.SalesStaffId.Should().BeNull();
+            _quoRepo.Verify(r => r.UpdateAsync(It.IsAny<Quotation>()), Times.Never);
         }
 
-        // L1-QUO-04 | EP-Invalid | Quotation đã có Sales khác nhận -> từ chối, giữ nguyên người phụ trách
+        //  ▶ Block: AssignQuotationAsync() — Sales Manager phân công thủ công thay cho Sale tự nhận
+
+        // L1-QUO-04 | State-Valid | Manager phân công 1 Sale đang active -> Draft chuyển Negotiating,
+        // gán đúng SalesStaffId, báo cho Sale được phân công.
         [Fact]
-        public async Task L1_QUO_04_PickUp_AlreadyAssigned_Rejected()
+        public async Task L1_QUO_04_Assign_ActiveSalesStaff_MovesToNegotiatingAndNotifies()
+        {
+            var q = SeedQuotation();
+            var staff = TestData.User(u => { u.Role = SystemRole.SalesStaff; u.IsActive = true; });
+            _userRepo.Setup(r => r.GetByIdAsync(staff.Id)).ReturnsAsync(staff);
+
+            var dto = await _sut.AssignQuotationAsync(q.Id, Guid.NewGuid(), new AssignQuotationRequest { StaffId = staff.Id });
+
+            q.SalesStaffId.Should().Be(staff.Id);
+            q.Status.Should().Be(QuotationStatus.Negotiating);
+            _quoRepo.Verify(r => r.UpdateAsync(q), Times.Once);
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_43_QuotationAssignedByManager, staff.Id,
+                It.IsAny<string>(), It.IsAny<string>(), q.Id, "Quotation"), Times.Once);
+        }
+
+        // L1-QUO-04b | EP-Invalid | Quotation đã có Sales khác phụ trách -> từ chối, giữ nguyên người cũ
+        [Fact]
+        public async Task L1_QUO_04b_Assign_AlreadyAssigned_Rejected()
         {
             var s2 = Guid.NewGuid();
             var q = SeedQuotation(x => { x.SalesStaffId = s2; x.Status = QuotationStatus.Negotiating; });
 
-            var act = () => _sut.PickUpQuotationAsync(q.Id, Guid.NewGuid());
+            var act = () => _sut.AssignQuotationAsync(q.Id, Guid.NewGuid(), new AssignQuotationRequest { StaffId = Guid.NewGuid() });
 
-            await act.Should().ThrowAsync<Exception>()
-                .WithMessage("Already picked up by another sales staff");
+            await act.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*đã được phân công*");
             q.SalesStaffId.Should().Be(s2);
+        }
+
+        // L1-QUO-04c | EP-Invalid | Chọn 1 user không phải SalesStaff (vd Customer) -> từ chối
+        [Fact]
+        public async Task L1_QUO_04c_Assign_NotSalesStaffRole_Rejected()
+        {
+            var q = SeedQuotation();
+            var notSales = TestData.User(u => u.Role = SystemRole.Customer);
+            _userRepo.Setup(r => r.GetByIdAsync(notSales.Id)).ReturnsAsync(notSales);
+
+            var act = () => _sut.AssignQuotationAsync(q.Id, Guid.NewGuid(), new AssignQuotationRequest { StaffId = notSales.Id });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*không hợp lệ*");
+            q.SalesStaffId.Should().BeNull();
+        }
+
+        // L1-QUO-04d | EP-Invalid | Sale được chọn đang bị khóa tài khoản (IsActive=false) -> từ chối
+        [Fact]
+        public async Task L1_QUO_04d_Assign_InactiveSalesStaff_Rejected()
+        {
+            var q = SeedQuotation();
+            var lockedStaff = TestData.User(u => { u.Role = SystemRole.SalesStaff; u.IsActive = false; });
+            _userRepo.Setup(r => r.GetByIdAsync(lockedStaff.Id)).ReturnsAsync(lockedStaff);
+
+            var act = () => _sut.AssignQuotationAsync(q.Id, Guid.NewGuid(), new AssignQuotationRequest { StaffId = lockedStaff.Id });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*khóa tài khoản*");
+            q.SalesStaffId.Should().BeNull();
         }
 
         //  ▶ Block: CreateVersionAsync()

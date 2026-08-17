@@ -127,6 +127,32 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPost("{id}/assign")]
+        [Authorize(Roles = "SalesManager")]
+        public async Task<IActionResult> AssignQuotation(Guid id, [FromBody] AssignQuotationRequest request)
+        {
+            try
+            {
+                return Ok(await _quotationService.AssignQuotationAsync(id, GetUserId(), request));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "Báo giá đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("{id}/versions")]
         [Authorize(Roles = "SalesStaff")]
         public async Task<IActionResult> CreateVersion(Guid id, [FromBody] CreateQuotationVersionRequest request)

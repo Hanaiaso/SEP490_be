@@ -62,25 +62,24 @@ namespace VietTien.API.Services.Implementations
             await _quotationRepo.CreateAsync(quotation);
             await _unitOfWork.SaveChangesAsync();
 
-            if (profile.AssignedSalesStaffId != null)
+            // Mọi báo giá tạo qua luồng này đều ≥ 100tr (validate ở trên) -> Sale không còn được tự
+            // nhận xử lý (xem PickUpQuotationAsync) mà phải chờ Sales Manager phân công thủ công cho
+            // người có kinh nghiệm phù hợp. Báo giá đã được lưu thành công ở trên -> lỗi gửi
+            // notification không được làm fail request tạo báo giá, chỉ log để theo dõi.
+            try
             {
-                // Báo giá đã được lưu thành công ở trên -> lỗi gửi notification không được
-                // làm fail request tạo báo giá, chỉ log để theo dõi.
-                try
-                {
-                    await _notificationService.CreateNotificationAsync(
-                        NotificationType.SYS_16_NewQuotationRequest,
-                        profile.AssignedSalesStaffId.Value,
-                        "Yêu cầu báo giá mới",
-                        $"Khách hàng {profile.User.FullName} vừa tạo yêu cầu báo giá trị giá {originalTotal:N0}đ.",
-                        quotation.Id,
-                        "Quotation"
-                    );
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[QuotationService] Error sending new quotation request notification: {ex.Message}");
-                }
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_42_QuotationNeedsManagerAssignment,
+                    SystemRole.SalesManager,
+                    "Báo giá lớn cần phân công thủ công",
+                    $"Khách hàng {profile.User.FullName} vừa yêu cầu báo giá trị giá {originalTotal:N0}đ (≥100tr). Vui lòng phân công nhân viên Sale có kinh nghiệm xử lý.",
+                    quotation.Id,
+                    "Quotation"
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[QuotationService] Error sending manager assignment notification: {ex.Message}");
             }
 
             return await GetQuotationByIdAsync(quotation.Id, userId, "Customer");
@@ -138,18 +137,52 @@ namespace VietTien.API.Services.Implementations
             return list.Select(MapToDto);
         }
 
-        public async Task<QuotationDto> PickUpQuotationAsync(Guid quotationId, Guid salesStaffId)
+        public Task<QuotationDto> PickUpQuotationAsync(Guid quotationId, Guid salesStaffId)
+        {
+            // Mọi báo giá đều ≥ 100tr (CreateQuotationFromCartAsync chặn dưới ngưỡng) -> Sale không
+            // còn được tự nhận xử lý; Sales Manager phải phân công thủ công (AssignQuotationAsync)
+            // cho người có kinh nghiệm phù hợp, tránh Sale tự chọn đàm phán đơn giá trị lớn.
+            throw new InvalidOperationException(
+                "Báo giá từ 100 triệu trở lên phải do Sales Manager phân công nhân viên phụ trách, không thể tự nhận xử lý.");
+        }
+
+        public async Task<QuotationDto> AssignQuotationAsync(Guid quotationId, Guid managerId, AssignQuotationRequest request)
         {
             var q = await _quotationRepo.GetByIdAsync(quotationId);
             if (q == null) throw new KeyNotFoundException("Quotation not found");
 
-            if (q.SalesStaffId != null) throw new InvalidOperationException("Already picked up by another sales staff");
+            if (q.SalesStaffId != null)
+                throw new InvalidOperationException("Báo giá này đã được phân công cho nhân viên khác.");
 
-            q.SalesStaffId = salesStaffId;
+            var staff = await _userRepo.GetByIdAsync(request.StaffId);
+            if (staff == null || staff.Role != SystemRole.SalesStaff)
+                throw new Exception("Nhân viên được chọn không hợp lệ.");
+            if (!staff.IsActive)
+                throw new Exception("Nhân viên được chọn hiện đang bị khóa tài khoản.");
+
+            q.SalesStaffId = request.StaffId;
             q.Status = QuotationStatus.Negotiating;
 
             await _quotationRepo.UpdateAsync(q);
             await _unitOfWork.SaveChangesAsync();
+
+            // Báo giá đã được phân công thành công ở trên -> lỗi gửi notification không được làm
+            // fail request phân công, chỉ log để theo dõi.
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    NotificationType.SYS_43_QuotationAssignedByManager,
+                    request.StaffId,
+                    "Được phân công xử lý báo giá",
+                    $"Sales Manager vừa phân công bạn xử lý báo giá của khách hàng {q.CustomerProfile.User.FullName} (trị giá {q.OriginalTotal:N0}đ).",
+                    q.Id,
+                    "Quotation"
+                );
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[QuotationService] Error sending quotation assignment notification: {ex.Message}");
+            }
 
             return MapToDto(q);
         }
