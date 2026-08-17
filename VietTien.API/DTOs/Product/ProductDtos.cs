@@ -132,6 +132,10 @@ namespace VietTien.API.DTOs.Product
         [Range(0, int.MaxValue, ErrorMessage = "Ngưỡng cảnh báo tồn đọng phải >= 0")]
         public int? ExcessThreshold { get; set; }
 
+        /// <summary>Trọng lượng 1 đơn vị sản phẩm (kg, null = chưa cấu hình) — dùng tính tổng cân nặng đơn hàng khi đóng gói/xếp xe.</summary>
+        [Range(0.001, double.MaxValue, ErrorMessage = "Trọng lượng phải lớn hơn 0")]
+        public decimal? WeightKg { get; set; }
+
         /// <summary>Danh sách ảnh sản phẩm (ảnh đầu tiên trở thành ảnh đại diện). Từng file được validate thủ công trong ProductService.</summary>
         public List<IFormFile>? ImageFiles { get; set; }
     }
@@ -169,6 +173,10 @@ namespace VietTien.API.DTOs.Product
         [Range(0, int.MaxValue, ErrorMessage = "Ngưỡng cảnh báo tồn đọng phải >= 0")]
         public int? ExcessThreshold { get; set; }
 
+        /// <summary>Trọng lượng 1 đơn vị sản phẩm (kg, null = chưa cấu hình) — dùng tính tổng cân nặng đơn hàng khi đóng gói/xếp xe.</summary>
+        [Range(0.001, double.MaxValue, ErrorMessage = "Trọng lượng phải lớn hơn 0")]
+        public decimal? WeightKg { get; set; }
+
         /// <summary>Ảnh mới cần thêm vào gallery (giữ nguyên ảnh cũ trừ khi liệt kê trong RemoveImageIds). Từng file được validate thủ công trong ProductService.</summary>
         public List<IFormFile>? ImageFiles { get; set; }
 
@@ -196,6 +204,7 @@ namespace VietTien.API.DTOs.Product
 
         public int? ReorderThreshold { get; set; }
         public int? ExcessThreshold { get; set; }
+        public decimal? WeightKg { get; set; }
 
         public bool IsDiscontinued { get; set; }
         public double AverageRating { get; set; }

@@ -223,7 +223,8 @@ namespace VietTien.API.Services.Implementations
                 ImageUrl = imageUrls.FirstOrDefault(),
                 IsDiscontinued = false,
                 ReorderThreshold = dto.ReorderThreshold,
-                ExcessThreshold = dto.ExcessThreshold
+                ExcessThreshold = dto.ExcessThreshold,
+                WeightKg = dto.WeightKg
             };
 
             for (var i = 0; i < imageUrls.Count; i++)
@@ -289,6 +290,7 @@ namespace VietTien.API.Services.Implementations
                 AvailableStock      = p.Inventories?.Sum(i => i.AvailableQuantity) ?? 0,
                 ReorderThreshold    = p.ReorderThreshold,
                 ExcessThreshold     = p.ExcessThreshold,
+                WeightKg            = p.WeightKg,
                 IsDiscontinued      = p.IsDiscontinued,
                 AverageRating       = p.AverageRating,
                 ReviewCount         = p.ReviewCount,
@@ -363,6 +365,7 @@ namespace VietTien.API.Services.Implementations
             product.Unit = dto.Unit;
             product.ReorderThreshold = dto.ReorderThreshold;
             product.ExcessThreshold = dto.ExcessThreshold;
+            product.WeightKg = dto.WeightKg;
             // Chỉ ghi đè khi client thực sự gửi giá trị -> tránh xóa mất du lieu neu client (API call truc tiep,
             // khong qua form CEO) khong gui 2 truong optional nay (da tung gay mat du lieu that tren production).
             if (dto.Description != null) product.Description = dto.Description;
