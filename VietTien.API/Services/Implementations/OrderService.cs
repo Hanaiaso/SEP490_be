@@ -23,6 +23,7 @@ namespace VietTien.API.Services.Implementations
         private readonly ISystemConfigService _systemConfigService;
         private readonly IDiscountTierService _discountTierService;
         private readonly IInventoryReservationService _inventoryReservationService;
+        private readonly IOrderInvoiceService _orderInvoiceService;
 
         public OrderService(
             IUnitOfWork unitOfWork,
@@ -34,7 +35,8 @@ namespace VietTien.API.Services.Implementations
             ICloudinaryService cloudinaryService,
             ISystemConfigService systemConfigService,
             IDiscountTierService discountTierService,
-            IInventoryReservationService inventoryReservationService)
+            IInventoryReservationService inventoryReservationService,
+            IOrderInvoiceService orderInvoiceService)
         {
             _unitOfWork = unitOfWork;
             _context = context;
@@ -46,6 +48,7 @@ namespace VietTien.API.Services.Implementations
             _systemConfigService = systemConfigService;
             _discountTierService = discountTierService;
             _inventoryReservationService = inventoryReservationService;
+            _orderInvoiceService = orderInvoiceService;
         }
 
         private async Task<CustomerProfile> GetCustomerProfileAsync(Guid userId)
@@ -206,8 +209,10 @@ namespace VietTien.API.Services.Implementations
                 baseTotal, profile.Id, selectedItems.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
 
             var totalAfterDiscount = baseTotal - discountAmount;
-            var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
-            decimal vatPercentage = requiresVat ? 0.10m : 0m;
+            // VAT 10% bắt buộc trên MỌI đơn — không còn điều kiện theo MST (MST chỉ quyết định có
+            // được yêu cầu xuất hóa đơn đỏ chính thức cho công ty hay không, không quyết định có tính
+            // thuế VAT trên đơn hay không, xem RequiresRedInvoice/RedInvoiceStatus).
+            decimal vatPercentage = 0.10m;
             decimal vatAmount = Math.Round(totalAfterDiscount * vatPercentage, 0, MidpointRounding.AwayFromZero);
             decimal finalPayment = totalAfterDiscount + vatAmount;
 
@@ -257,6 +262,14 @@ namespace VietTien.API.Services.Implementations
             await using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                // Giỏ hàng có thể đã tự giữ chỗ các dòng này từ lúc thêm vào giỏ (xem CartService) —
+                // "nhả rồi giữ lại ngay" trong cùng transaction để chuyển giao từ giữ-chỗ-theo-giỏ sang
+                // giữ-chỗ-theo-đơn một cách an toàn: nhả 0 (giỏ cũ trước khi có tính năng này) là no-op
+                // vô hại, giữ chỗ lại y hệt hành vi cũ; SQL Server khoá row trong transaction nên không
+                // có khe hở đua giữa 2 lệnh. Guard hết hạn giữ giá ở trên (IsAnyItemExpired) đảm bảo mọi
+                // dòng đang chọn mua chắc chắn còn được giữ chỗ hợp lệ trước khi tới đây.
+                await _inventoryReservationService.ReleaseReservedAsync(
+                    selectedItems.Select(i => (i.ProductId, i.Quantity)));
                 // Giữ mềm tồn kho để tránh oversell khi nhiều khách đặt đồng thời; ném Exception nếu thiếu hàng.
                 await _inventoryReservationService.ReserveAsync(
                     selectedItems.Select(i => (i.ProductId, i.Quantity)));
@@ -265,10 +278,10 @@ namespace VietTien.API.Services.Implementations
                 var (discountAmount, discountPercentage, negotiatedUnitPrices) = await CalculateDiscountAsync(
                     baseTotal, profile.Id, selectedItems.Select(i => (i.ProductId, i.Quantity, i.UnitPrice)));
                 var totalAfterDiscount = baseTotal - discountAmount;
-                // Cùng nguồn sự thật với GetCheckoutSummaryAsync: VAT áp theo hồ sơ có MST, KHÔNG theo
-                // cờ request.RequiresRedInvoice (đó là cờ yêu cầu xuất hóa đơn đỏ, khác việc tính VAT).
-                var requiresVat = !string.IsNullOrEmpty(profile.TaxCode);
-                decimal vatAmount = requiresVat ? Math.Round(totalAfterDiscount * 0.10m, 0, MidpointRounding.AwayFromZero) : 0m;
+                // VAT 10% bắt buộc trên MỌI đơn — cùng nguồn sự thật với GetCheckoutSummaryAsync (không
+                // còn điều kiện theo MST; MST chỉ quyết định có được yêu cầu hóa đơn đỏ hay không, xem
+                // request.RequiresRedInvoice, độc lập với việc tính VAT).
+                decimal vatAmount = Math.Round(totalAfterDiscount * 0.10m, 0, MidpointRounding.AwayFromZero);
                 decimal finalPayment = totalAfterDiscount + vatAmount;
 
                 decimal creditApplied = 0m;
@@ -786,13 +799,18 @@ namespace VietTien.API.Services.Implementations
                 }
             }
 
+            // VAT 10% bắt buộc, tính phía SERVER — không tin request.VatAmount do client (Sale tại quầy)
+            // gửi lên nữa, tránh trường hợp tự ý bỏ/sửa VAT. Chỉ dùng request.VatAmount để đối chiếu lỗi
+            // gõ nhầm bên dưới, không dùng để lưu vào Order.
+            var serverVatAmount = Math.Round((request.TotalAmount - request.DiscountAmount) * 0.10m, 0, MidpointRounding.AwayFromZero);
+
             var order = new Order
             {
                 CustomerProfileId = customerProfile.Id,
                 OrderCode = orderCode,
                 TotalAmount = request.TotalAmount,
                 DiscountAmount = request.DiscountAmount,
-                VatAmount = request.VatAmount,
+                VatAmount = serverVatAmount,
                 FinalPayment = request.FinalPayment,
                 PaymentMethod = request.PaymentMethod,
                 // Cash tại quầy chưa coi là đã thanh toán ngay — chỉ Paid sau khi nhân viên bấm
@@ -818,8 +836,10 @@ namespace VietTien.API.Services.Implementations
             var itemsTotal = request.Items.Sum(i => i.Price * i.Quantity);
             if (itemsTotal != request.TotalAmount)
                 throw new Exception("Tổng tiền hàng (TotalAmount) không khớp với tổng đơn giá x số lượng của các mặt hàng.");
-            if (request.TotalAmount - request.DiscountAmount + request.VatAmount != request.FinalPayment)
-                throw new Exception("Số tiền thanh toán cuối cùng (FinalPayment) không khớp với TotalAmount - DiscountAmount + VatAmount.");
+            // VAT 10% là bắt buộc — đối chiếu FinalPayment theo VAT server tự tính (serverVatAmount),
+            // không theo request.VatAmount do client gửi, để chặn việc bỏ/hạ VAT từ phía trình duyệt.
+            if (request.TotalAmount - request.DiscountAmount + serverVatAmount != request.FinalPayment)
+                throw new Exception($"Số tiền thanh toán cuối cùng (FinalPayment) không khớp với TotalAmount - DiscountAmount + VAT 10% bắt buộc ({serverVatAmount:N0}đ).");
 
             foreach (var item in request.Items)
             {
@@ -1258,6 +1278,82 @@ namespace VietTien.API.Services.Implementations
             }
         }
 
+        /// <summary>Sale nhập lại thông tin hóa đơn đỏ THẬT lấy từ bên thứ 3 (số, ngày xuất, ảnh/PDF
+        /// đính kèm) — hoàn thiện nốt luồng RequiresRedInvoice/RedInvoiceStatus vốn trước đây chỉ dừng
+        /// ở Pending. Cho phép gọi lại nhiều lần để sửa (không khoá cứng sau khi đã Issued).</summary>
+        public async Task<SalesOrderDetailDto> SubmitRedInvoiceAsync(Guid orderId, Guid callerUserId, string callerRole, SubmitRedInvoiceRequestDto request)
+        {
+            var order = await _unitOfWork.Orders.GetOrderByIdAsync(orderId);
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+            await EnsureOrderAccessAsync(order, callerUserId, callerRole);
+
+            if (!order.RequiresRedInvoice)
+                throw new InvalidOperationException("Đơn hàng này khách hàng không yêu cầu xuất hóa đơn đỏ, không có gì để nhập.");
+
+            if (!string.IsNullOrEmpty(request.DocumentBase64))
+            {
+                try
+                {
+                    order.RedInvoiceDocumentUrl = await _cloudinaryService.UploadBase64ImageAsync(
+                        request.DocumentBase64, "red-invoices", $"{order.OrderCode}-red-invoice");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error uploading red invoice document: {ex.Message}");
+                    throw new Exception("Lỗi khi tải lên file hóa đơn đỏ. Vui lòng thử lại.");
+                }
+            }
+
+            order.RedInvoiceNumber = request.RedInvoiceNumber;
+            order.RedInvoiceIssuedAt = request.RedInvoiceIssuedAt;
+            order.RedInvoiceEnteredByUserId = callerUserId;
+            order.RedInvoiceStatus = RedInvoiceStatus.Issued;
+
+            await _unitOfWork.Orders.UpdateOrderAsync(order);
+            await _unitOfWork.SaveChangesAsync();
+
+            // Đơn hàng đã lưu thành công ở trên -> lỗi gửi notification không được làm fail request,
+            // chỉ log để theo dõi.
+            try
+            {
+                var customerUserId = await _context.Orders
+                    .Where(o => o.Id == orderId)
+                    .Select(o => o.CustomerProfile.UserId)
+                    .FirstOrDefaultAsync();
+                if (customerUserId != Guid.Empty)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_49_RedInvoiceIssued,
+                        customerUserId,
+                        "Hóa đơn đỏ đã được xuất",
+                        $"Đơn hàng {order.OrderCode} đã có hóa đơn đỏ (số {request.RedInvoiceNumber}, ngày {request.RedInvoiceIssuedAt:dd/MM/yyyy}). Vui lòng xem chi tiết đơn hàng để tải hóa đơn.",
+                        order.Id,
+                        "Order"
+                    );
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[OrderService] Error sending red invoice notification: {ex.Message}");
+            }
+
+            return await GetSalesOrderDetailAsync(orderId);
+        }
+
+        /// <summary>Hóa đơn PDF chính thức, sinh theo yêu cầu (không cache) — luôn phản ánh dữ liệu mới
+        /// nhất kể cả khi hóa đơn đỏ được nhập SAU khi đơn đã tạo.</summary>
+        public async Task<byte[]> GenerateInvoicePdfAsync(Guid orderId, Guid callerUserId, string callerRole)
+        {
+            var order = await _context.Orders
+                .Include(o => o.CustomerProfile).ThenInclude(cp => cp.User)
+                .Include(o => o.OrderItems).ThenInclude(oi => oi.Product)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+            await EnsureOrderAccessAsync(order, callerUserId, callerRole);
+
+            return _orderInvoiceService.GenerateInvoicePdf(order);
+        }
 
         public async Task<PagedResultDto<OrderHistoryItemDto>> GetOrderHistoryAsync(
             Guid userId, OrderHistoryQueryDto query)
@@ -1439,6 +1535,9 @@ namespace VietTien.API.Services.Implementations
                 InvoicePdfUrl    = order.InvoicePdfUrl,
                 CanRequestVat    = canRequestVat,
                 VatDeadline      = canRequestVat ? vatDeadline : null,
+                RedInvoiceNumber = order.RedInvoiceNumber,
+                RedInvoiceIssuedAt = order.RedInvoiceIssuedAt,
+                RedInvoiceDocumentUrl = order.RedInvoiceDocumentUrl,
                 Items            = itemDtos,
                 ReturnExchangeRequests = order.ReturnExchangeRequests.Select(req => new ReturnExchangeRequestSnapshotDto
                 {
@@ -1771,6 +1870,11 @@ namespace VietTien.API.Services.Implementations
                 PickingStartedAt = order.PickingStartedAt,
                 PickingCompletedAt = order.PickingCompletedAt,
                 InvoicePdfUrl = order.InvoicePdfUrl,
+                RequiresRedInvoice = order.RequiresRedInvoice,
+                RedInvoiceStatus = order.RedInvoiceStatus.ToString(),
+                RedInvoiceNumber = order.RedInvoiceNumber,
+                RedInvoiceIssuedAt = order.RedInvoiceIssuedAt,
+                RedInvoiceDocumentUrl = order.RedInvoiceDocumentUrl,
                 HasReturnRequest = order.ReturnExchangeRequests.Any(r => r.Status != ReturnExchangeStatus.Cancelled),
                 ReturnRequestStatus = order.ReturnExchangeRequests.Where(r => r.Status != ReturnExchangeStatus.Cancelled)
                     .OrderByDescending(r => r.CreatedAt)

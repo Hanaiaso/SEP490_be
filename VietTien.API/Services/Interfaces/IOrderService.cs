@@ -16,6 +16,8 @@ namespace VietTien.API.Services.Interfaces
         Task<List<DashboardOrderDto>> GetSalesDashboardDrillDownAsync(string metric, Guid? scopedSalesStaffId = null);
         Task ConfirmDirectOrderPaymentAsync(Guid orderId);
         Task UploadInvoicePdfAsync(Guid orderId, string pdfBase64, Guid callerUserId, string callerRole);
+        Task<SalesOrderDetailDto> SubmitRedInvoiceAsync(Guid orderId, Guid callerUserId, string callerRole, SubmitRedInvoiceRequestDto request);
+        Task<byte[]> GenerateInvoicePdfAsync(Guid orderId, Guid callerUserId, string callerRole);
 
         Task<PagedResultDto<OrderHistoryItemDto>> GetOrderHistoryAsync(
             Guid userId, OrderHistoryQueryDto query);

@@ -256,6 +256,61 @@ namespace VietTien.API.Controllers
             }
         }
 
+        // Hóa đơn PDF CHÍNH THỨC sinh phía server theo yêu cầu (không cache) — luôn phản ánh dữ liệu
+        // mới nhất (VAT bắt buộc, số hóa đơn đỏ nếu đã nhập) — thay cho bản PDF tự tạo ở trình duyệt.
+        [HttpGet("{orderId}/invoice-pdf")]
+        public async Task<IActionResult> GetInvoicePdf(Guid orderId)
+        {
+            try
+            {
+                var pdfBytes = await _orderService.GenerateInvoicePdfAsync(orderId, GetUserId(), GetUserRole());
+                return File(pdfBytes, "application/pdf", $"hoa-don-{orderId}.pdf");
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        // Sale/Manager nhập lại thông tin hóa đơn đỏ THẬT lấy từ bên thứ 3 cho đơn hàng khách đã
+        // yêu cầu xuất hóa đơn (RequiresRedInvoice) — hoàn thiện luồng RedInvoiceStatus.
+        [HttpPost("{orderId}/red-invoice")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> SubmitRedInvoice(Guid orderId, [FromBody] SubmitRedInvoiceRequestDto request)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _orderService.SubmitRedInvoiceAsync(orderId, GetUserId(), GetUserRole(), request);
+                return Ok(result);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Conflict(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
 
         [HttpGet("my-history")]
         public async Task<ActionResult<PagedResultDto<OrderHistoryItemDto>>> GetMyOrderHistory(

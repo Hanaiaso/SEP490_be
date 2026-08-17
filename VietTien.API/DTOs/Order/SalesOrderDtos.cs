@@ -57,6 +57,28 @@ namespace VietTien.API.DTOs.Order
         public List<ReturnExchangeRequestSnapshotDto> ReturnExchangeRequests { get; set; } = new();
         public string? CompanyName { get; set; }
         public List<SalesOrderItemDto> Items { get; set; } = new List<SalesOrderItemDto>();
+
+        // Hóa đơn đỏ (nhập thủ công từ hóa đơn thật lấy từ bên thứ 3)
+        public bool RequiresRedInvoice { get; set; }
+        public string RedInvoiceStatus { get; set; } = string.Empty;
+        public string? RedInvoiceNumber { get; set; }
+        public DateTime? RedInvoiceIssuedAt { get; set; }
+        public string? RedInvoiceDocumentUrl { get; set; }
+    }
+
+    // Sale/kế toán nhập lại thông tin hóa đơn đỏ THẬT lấy từ bên thứ 3 — cho phép gọi lại nhiều lần
+    // để sửa (không khoá cứng sau khi đã Issued).
+    public class SubmitRedInvoiceRequestDto
+    {
+        [Required(ErrorMessage = "Số hóa đơn là bắt buộc.")]
+        [MaxLength(100)]
+        public string RedInvoiceNumber { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Ngày xuất hóa đơn là bắt buộc.")]
+        public DateTime RedInvoiceIssuedAt { get; set; }
+
+        // Ảnh/PDF hóa đơn đính kèm — tuỳ chọn (có thể sửa lại số/ngày mà không đổi file đã tải).
+        public string? DocumentBase64 { get; set; }
     }
 
     public class ReturnExchangeRequestSnapshotDto

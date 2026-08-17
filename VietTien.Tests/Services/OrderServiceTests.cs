@@ -43,7 +43,8 @@ namespace VietTien.Tests.Services
         {
             _db = TestDbFactory.Create();
             var uow = new UnitOfWork(_db);
-            var cartService = new CartService(uow, _db);
+            var inventoryReservationService = new FakeInventoryReservationService(_db);
+            var cartService = new CartService(uow, _db, inventoryReservationService);
 
             // Ngưỡng báo giá B2B + bậc chiết khấu giờ đọc từ Admin config/DiscountTier (DB) —
             // mock theo đúng dữ liệu seed production: 100M threshold; 10M+:5%, 31M+:6%, 51M+:7%, 71M+:8%.
@@ -62,7 +63,8 @@ namespace VietTien.Tests.Services
 
             _sut = new OrderService(uow, _db, TestConfig.Create(), cartService,
                 _email.Object, _noti.Object, new Mock<ICloudinaryService>().Object,
-                _sysConfig.Object, discountTiers.Object, new FakeInventoryReservationService(_db));
+                _sysConfig.Object, discountTiers.Object, inventoryReservationService,
+                new OrderInvoiceService());
 
             _salesStaff = TestData.User(u => u.Role = SystemRole.SalesStaff);
             _db.Users.Add(_salesStaff);
@@ -127,7 +129,7 @@ namespace VietTien.Tests.Services
 
             summary.DiscountPercentage.Should().Be(5);
             summary.DiscountAmount.Should().Be(500_000m);
-            summary.FinalPayment.Should().Be(9_500_000m); // không VAT (chưa có MST)
+            summary.FinalPayment.Should().Be(10_450_000m); // VAT 10% bắt buộc trên mọi đơn: 9.500.000 * 1.10
         }
 
         // L1-ORD-03 | BVA-Max | Tổng 99.999.999 -> vẫn là bậc chiết khấu (8%), CHƯA rơi vào luồng báo giá B2B
@@ -187,7 +189,7 @@ namespace VietTien.Tests.Services
             var summary = await _sut.GetCheckoutSummaryAsync(_customer.Id);
 
             summary.DiscountAmount.Should().Be(10_000_000m); // 120M - giá đã thoả thuận 110M
-            summary.FinalPayment.Should().Be(110_000_000m); // không VAT (chưa có MST)
+            summary.FinalPayment.Should().Be(121_000_000m); // VAT 10% bắt buộc: 110.000.000 * 1.10
         }
 
         // L1-ORD-04b | EP-Invalid | Báo giá đã chấp nhận nhưng HẾT HIỆU LỰC (ValidUntil quá hạn) ->
@@ -331,7 +333,7 @@ namespace VietTien.Tests.Services
 
             var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
 
-            response.FinalPayment.Should().Be(5_000_000m); // đúng giá server tính từ snapshot giỏ
+            response.FinalPayment.Should().Be(5_500_000m); // 5.000.000 + VAT 10% bắt buộc
             _db.Orders.Single().TotalAmount.Should().Be(5_000_000m);
         }
 
@@ -404,7 +406,7 @@ namespace VietTien.Tests.Services
             var order = _db.Orders.Single(o => o.Id == response.OrderId);
             order.TotalAmount.Should().Be(120_000_000m); // tổng đơn vẫn đúng như trước
             order.DiscountAmount.Should().Be(10_000_000m);
-            order.FinalPayment.Should().Be(110_000_000m);
+            order.FinalPayment.Should().Be(121_000_000m); // VAT 10% bắt buộc: 110.000.000 * 1.10
         }
 
         // L1-ORD-11i | EP-Valid | Khách có 2 báo giá CustomerAccepted còn hạn cùng lúc (đàm phán 2 đợt
@@ -497,7 +499,7 @@ namespace VietTien.Tests.Services
             orderItem.PriceSnapshot.Should().NotBe(105_000m); // không được rơi về giá niêm yết
 
             var order = _db.Orders.Single(o => o.Id == response.OrderId);
-            order.FinalPayment.Should().Be(60_000_000m);
+            order.FinalPayment.Should().Be(66_000_000m); // VAT 10% bắt buộc: 60.000.000 * 1.10
         }
 
         // L1-ORD-11j | EP-Valid | Giá đàm phán HIỆU LỰC dịch chuyển theo đúng % thay đổi của giá niêm
@@ -848,13 +850,16 @@ namespace VietTien.Tests.Services
             return (product, inv);
         }
 
+        // VAT 10% bắt buộc trên mọi đơn kể cả POS (server tự tính lại, không tin request.VatAmount) ->
+        // FinalPayment mặc định phải VAT-inclusive để không bị chặn ở bước đối chiếu số học.
         private static PlaceDirectOrderRequestDto DirectRequest(Guid productId, int qty, string? phone = "0912345678",
             PaymentMethod method = PaymentMethod.Cash) => new()
         {
             CustomerName = "Khách Vãng Lai",
             PhoneNumber = phone,
             TotalAmount = qty * 50_000m,
-            FinalPayment = qty * 50_000m,
+            VatAmount = qty * 5_000m,
+            FinalPayment = qty * 55_000m,
             PaymentMethod = method,
             Items = new List<DirectOrderItemDto> { new() { ProductId = productId, Quantity = qty, Price = 50_000m } }
         };

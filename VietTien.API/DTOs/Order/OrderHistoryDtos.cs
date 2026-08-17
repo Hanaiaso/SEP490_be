@@ -109,6 +109,11 @@ namespace VietTien.API.DTOs.Order
         public bool   CanRequestVat   { get; set; }
         public DateTime? VatDeadline  { get; set; }
 
+        // Hóa đơn đỏ thật (nhập bởi Sale) — chỉ đọc phía khách hàng
+        public string? RedInvoiceNumber { get; set; }
+        public DateTime? RedInvoiceIssuedAt { get; set; }
+        public string? RedInvoiceDocumentUrl { get; set; }
+
         // Danh sách sản phẩm (BR-OH-08, BR-OH-09)
         public List<OrderItemDetailDto> Items { get; set; } = new();
     }

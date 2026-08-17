@@ -28,7 +28,7 @@ namespace VietTien.Tests.Services
         public CartServiceTests()
         {
             _db = TestDbFactory.Create();
-            _sut = new CartService(new UnitOfWork(_db), _db);
+            _sut = new CartService(new UnitOfWork(_db), _db, new FakeInventoryReservationService(_db));
         }
 
         private (User user, CustomerProfile profile) SeedCustomerWithAddress()
@@ -194,6 +194,7 @@ namespace VietTien.Tests.Services
         {
             var (user, _) = SeedCustomerWithAddress();
             var p1 = TestData.SeedProduct(_db, p => p.StandardListedPrice = 50_000m);
+            TestData.SeedInventory(_db, p1.Id, 100);
 
             var dto = await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 2 });
 
@@ -206,6 +207,7 @@ namespace VietTien.Tests.Services
         {
             var (user, _) = SeedCustomerWithAddress();
             var p1 = TestData.SeedProduct(_db);
+            TestData.SeedInventory(_db, p1.Id, 100);
             await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 2 });
 
             var dto = await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 3 });
@@ -274,6 +276,90 @@ namespace VietTien.Tests.Services
             dto.Items.Should().BeEmpty();
             _db.Carts.Count(c => c.Id == cart.Id).Should().Be(1); // giỏ vẫn tồn tại
             _db.CartItems.Count().Should().Be(0);
+        }
+
+        //  ▶ Block: Giữ chỗ tồn kho theo giỏ hàng (thêm mới) — thêm/tăng số lượng giữ chỗ ngay,
+        //  xoá/giảm nhả lại — để người bỏ giỏ TRƯỚC không bị người mua SAU giành mất hàng.
+
+        // L1-CART-15 | EP-Invalid | Thêm vào giỏ vượt tồn kho khả dụng -> chặn, không tạo dòng giỏ,
+        // không đụng tới ReservedQuantity.
+        [Fact]
+        public async Task L1_CART_15_AddItem_ExceedsStock_Rejected_NoReservationLeaked()
+        {
+            var (user, _) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var inv = TestData.SeedInventory(_db, p1.Id, 5);
+
+            var act = () => _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 6 });
+
+            await act.Should().ThrowAsync<Exception>();
+            _db.CartItems.Count().Should().Be(0);
+            _db.Inventories.Single(i => i.Id == inv.Id).ReservedQuantity.Should().Be(0);
+        }
+
+        // L1-CART-16 | EP-Valid | Thêm vào giỏ -> giữ chỗ NGAY (Inventory.ReservedQuantity tăng đúng
+        // bằng số lượng vừa thêm), không đợi tới lúc đặt hàng.
+        [Fact]
+        public async Task L1_CART_16_AddItem_ReservesStockImmediately()
+        {
+            var (user, _) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var inv = TestData.SeedInventory(_db, p1.Id, 100);
+
+            await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 60 });
+
+            _db.Inventories.Single(i => i.Id == inv.Id).ReservedQuantity.Should().Be(60);
+        }
+
+        // L1-CART-17 | EP-Valid | Xoá dòng giỏ -> nhả lại đúng phần đã giữ chỗ.
+        [Fact]
+        public async Task L1_CART_17_RemoveItem_ReleasesReservedStock()
+        {
+            var (user, _) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var inv = TestData.SeedInventory(_db, p1.Id, 100);
+            var dto = await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 60 });
+            var cartItemId = dto.Items.Single().Id;
+
+            await _sut.RemoveItemFromCartAsync(user.Id, cartItemId);
+
+            _db.Inventories.Single(i => i.Id == inv.Id).ReservedQuantity.Should().Be(0);
+        }
+
+        // L1-CART-18 | EP-Valid | Đổi số lượng dòng giỏ -> giữ thêm/nhả bớt đúng phần CHÊNH LỆCH,
+        // không giữ lại toàn bộ số lượng mới từ đầu.
+        [Fact]
+        public async Task L1_CART_18_UpdateQuantity_AdjustsReservationByDelta()
+        {
+            var (user, _) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var inv = TestData.SeedInventory(_db, p1.Id, 100);
+            var dto = await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 60 });
+            var cartItemId = dto.Items.Single().Id;
+
+            await _sut.UpdateCartItemAsync(user.Id, cartItemId, new UpdateCartItemRequestDto { Quantity = 90 });
+            _db.Inventories.Single(i => i.Id == inv.Id).ReservedQuantity.Should().Be(90);
+
+            await _sut.UpdateCartItemAsync(user.Id, cartItemId, new UpdateCartItemRequestDto { Quantity = 20 });
+            _db.Inventories.Single(i => i.Id == inv.Id).ReservedQuantity.Should().Be(20);
+        }
+
+        // L1-CART-19 | EP-Valid | Clear cart -> nhả lại tồn kho đã giữ chỗ của TẤT CẢ các dòng.
+        [Fact]
+        public async Task L1_CART_19_ClearCart_ReleasesAllReservedStock()
+        {
+            var (user, _) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var p2 = TestData.SeedProduct(_db);
+            var inv1 = TestData.SeedInventory(_db, p1.Id, 100);
+            var inv2 = TestData.SeedInventory(_db, p2.Id, 100);
+            await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p1.Id, Quantity = 10 });
+            await _sut.AddItemToCartAsync(user.Id, new AddToCartRequestDto { ProductId = p2.Id, Quantity = 20 });
+
+            await _sut.ClearCartAsync(user.Id);
+
+            _db.Inventories.Single(i => i.Id == inv1.Id).ReservedQuantity.Should().Be(0);
+            _db.Inventories.Single(i => i.Id == inv2.Id).ReservedQuantity.Should().Be(0);
         }
     }
 }

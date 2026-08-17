@@ -115,6 +115,14 @@ namespace VietTien.API.Models
         public bool RequiresRedInvoice { get; set; } = false;
         public RedInvoiceStatus RedInvoiceStatus { get; set; } = RedInvoiceStatus.None;
 
+        // Số/ngày hóa đơn đỏ THẬT do Sale lấy từ bên thứ 3 (kế toán/nhà cung cấp dịch vụ hóa đơn điện
+        // tử) rồi nhập lại vào hệ thống — khác InvoicePdfUrl (bản PDF nội bộ tự sinh, không phải hóa
+        // đơn đỏ chính thức).
+        public string? RedInvoiceNumber { get; set; }
+        public DateTime? RedInvoiceIssuedAt { get; set; }
+        public string? RedInvoiceDocumentUrl { get; set; }
+        public Guid? RedInvoiceEnteredByUserId { get; set; }
+
         // Navigation Properties
         public CustomerProfile CustomerProfile { get; set; } = null!;
         public ICollection<OrderItem> OrderItems { get; set; } = new List<OrderItem>();

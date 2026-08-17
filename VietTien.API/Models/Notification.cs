@@ -81,6 +81,9 @@ namespace VietTien.API.Models
         SYS_45_ProductPriceUpdateOrderAssigned,
         SYS_46_ProductPriceUpdateScheduleNotice,
         SYS_47_ProductPriceUpdateOrderExecuted,
-        SYS_48_ProductPriceUpdateOrderCancelled
+        SYS_48_ProductPriceUpdateOrderCancelled,
+
+        // Sale đã nhập số hóa đơn đỏ thật (lấy từ bên thứ 3) cho đơn hàng khách đã yêu cầu xuất hóa đơn.
+        SYS_49_RedInvoiceIssued
     }
 }

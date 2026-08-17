@@ -13,10 +13,13 @@ using VietTien.API.Infrastructure.Security;
 using VietTien.API.Repositories.Implementations;
 using VietTien.API.Repositories.Interfaces;
 using VietTien.API.Services.Implementations;
+using QuestPDF.Infrastructure;
 using VietTien.API.Services.Interfaces;
 using VietTien.API.Services.BackgroundServices;
 using VietTien.API.Services.ScheduledJobs;
 using VietTien.API.Hubs;
+
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -56,6 +59,7 @@ builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IQuotationRepository, QuotationRepository>();
 builder.Services.AddScoped<IQuotationService, QuotationService>();
 builder.Services.AddScoped<IProductPriceUpdateService, ProductPriceUpdateService>();
+builder.Services.AddScoped<IOrderInvoiceService, OrderInvoiceService>();
 builder.Services.AddScoped<IWarehouseService, WarehouseService>();
 builder.Services.AddScoped<IStockTransferService, StockTransferService>();
 builder.Services.AddHttpContextAccessor();
@@ -104,6 +108,7 @@ builder.Services.AddScoped<IScheduledJob, LowStockAlertJob>();
 builder.Services.AddScoped<IScheduledJob, SePayWebhookRetryJob>();
 builder.Services.AddScoped<IScheduledJob, MarketingPostMakeScheduleJob>();
 builder.Services.AddScoped<IScheduledJob, QuotationExpiryJob>();
+builder.Services.AddScoped<IScheduledJob, CartReservationExpiryJob>();
 builder.Services.AddScoped<IScheduledJob, UpcomingDeliveryReminderJob>();
 
 // Admin module (Phase 3): KPI engine + dashboard theo role

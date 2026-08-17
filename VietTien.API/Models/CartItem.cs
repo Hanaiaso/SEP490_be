@@ -13,6 +13,12 @@ namespace VietTien.API.Models
         // Cart.UpdatedAt (mốc chung cho cả giỏ, đổi mỗi khi khách thao tác bất kỳ gì khác trong giỏ).
         public DateTime? PriceLockedAt { get; set; }
 
+        // null = dòng này đang giữ chỗ tồn kho đúng bằng Quantity (Inventory.ReservedQuantity đã cộng
+        // phần này vào); có giá trị = đã nhả chỗ (do khách xoá/giảm số lượng, hoặc do
+        // CartReservationExpiryJob quét thấy hết hạn giữ giá >24h) — dùng làm cờ chống nhả 2 lần, vì
+        // ReservedQuantity là pool dùng chung cho cả sản phẩm, không tách được theo từng CartItem.
+        public DateTime? ReservationReleasedAt { get; set; }
+
         // Navigation Properties
         public Cart Cart { get; set; } = null!;
         public Product Product { get; set; } = null!;
