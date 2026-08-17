@@ -20,6 +20,20 @@ namespace VietTien.API.DTOs.Warehouse
         public string SuggestedAction { get; set; } = string.Empty;
     }
 
+    // Mirror LowStockAlertDto nhưng theo chiều ngược lại: vượt ngưỡng TỐI ĐA (tồn đọng) thay vì dưới
+    // ngưỡng tối thiểu. Dùng cho GET /api/inventory/excess-stock-alerts.
+    public class ExcessStockAlertDto
+    {
+        public string ItemType { get; set; } = string.Empty; // "Product" | "Material"
+        public Guid ItemId { get; set; }
+        public string ItemName { get; set; } = string.Empty;
+        public string? ItemSku { get; set; }
+        public double AvailableQuantity { get; set; }
+        public double Threshold { get; set; }
+        public string? Unit { get; set; }
+        public string SuggestedAction { get; set; } = string.Empty;
+    }
+
     public class InventoryItemDto
     {
         public Guid Id { get; set; }

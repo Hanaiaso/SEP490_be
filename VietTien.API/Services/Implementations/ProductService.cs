@@ -221,7 +221,9 @@ namespace VietTien.API.Services.Implementations
                 Description = dto.Description,
                 Specifications = dto.Specifications,
                 ImageUrl = imageUrls.FirstOrDefault(),
-                IsDiscontinued = false
+                IsDiscontinued = false,
+                ReorderThreshold = dto.ReorderThreshold,
+                ExcessThreshold = dto.ExcessThreshold
             };
 
             for (var i = 0; i < imageUrls.Count; i++)
@@ -285,6 +287,8 @@ namespace VietTien.API.Services.Implementations
                 CategoryName        = p.Category.Name,
                 Unit                = p.Unit,
                 AvailableStock      = p.Inventories?.Sum(i => i.AvailableQuantity) ?? 0,
+                ReorderThreshold    = p.ReorderThreshold,
+                ExcessThreshold     = p.ExcessThreshold,
                 IsDiscontinued      = p.IsDiscontinued,
                 AverageRating       = p.AverageRating,
                 ReviewCount         = p.ReviewCount,
@@ -357,6 +361,8 @@ namespace VietTien.API.Services.Implementations
             product.StandardListedPrice = dto.StandardListedPrice;
             product.CategoryId = dto.CategoryId;
             product.Unit = dto.Unit;
+            product.ReorderThreshold = dto.ReorderThreshold;
+            product.ExcessThreshold = dto.ExcessThreshold;
             // Chỉ ghi đè khi client thực sự gửi giá trị -> tránh xóa mất du lieu neu client (API call truc tiep,
             // khong qua form CEO) khong gui 2 truong optional nay (da tung gay mat du lieu that tren production).
             if (dto.Description != null) product.Description = dto.Description;

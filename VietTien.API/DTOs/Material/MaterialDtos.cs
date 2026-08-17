@@ -9,6 +9,7 @@ namespace VietTien.API.DTOs.Material
         public string Unit { get; set; } = string.Empty;
         public double CurrentStock { get; set; }
         public double SafetyThreshold { get; set; }
+        public double? MaxStockThreshold { get; set; }
         public DateTime? LastAlertSentDate { get; set; }
         public bool IsBelowSafetyThreshold { get; set; }
     }
@@ -24,6 +25,9 @@ namespace VietTien.API.DTOs.Material
 
         [Range(0, double.MaxValue, ErrorMessage = "Ngưỡng an toàn phải lớn hơn hoặc bằng 0")]
         public double SafetyThreshold { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Ngưỡng tồn đọng phải lớn hơn hoặc bằng 0")]
+        public double? MaxStockThreshold { get; set; }
     }
 
     public class UpdateMaterialDto
@@ -37,5 +41,8 @@ namespace VietTien.API.DTOs.Material
 
         [Range(0, double.MaxValue, ErrorMessage = "Ngưỡng an toàn phải lớn hơn hoặc bằng 0")]
         public double SafetyThreshold { get; set; }
+
+        [Range(0, double.MaxValue, ErrorMessage = "Ngưỡng tồn đọng phải lớn hơn hoặc bằng 0")]
+        public double? MaxStockThreshold { get; set; }
     }
 }

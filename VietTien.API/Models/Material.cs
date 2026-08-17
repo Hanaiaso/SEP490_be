@@ -7,7 +7,8 @@ namespace VietTien.API.Models
         public string Unit { get; set; } = string.Empty; // Cây, Cái, Cuộn
         public double CurrentStock { get; set; }
         public double SafetyThreshold { get; set; } // Ngưỡng an toàn Admin cấu hình
-        public DateTime? LastAlertSentDate { get; set; } // Cơ chế tự động nhắc nhở mỗi 2 ngày
+        public double? MaxStockThreshold { get; set; } // Ngưỡng tồn đọng (null = chưa cấu hình, không cảnh báo)
+        public DateTime? LastAlertSentDate { get; set; } // Cơ chế tự động nhắc nhở mỗi 2 ngày (dùng chung cho cả cảnh báo thấp và tồn đọng)
 
         // Phương thức kiểm tra điều kiện chạm ngưỡng
         public bool IsBelowSafetyThreshold() => CurrentStock <= SafetyThreshold;

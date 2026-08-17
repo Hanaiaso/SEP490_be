@@ -84,6 +84,12 @@ namespace VietTien.API.Models
         SYS_48_ProductPriceUpdateOrderCancelled,
 
         // Sale đã nhập số hóa đơn đỏ thật (lấy từ bên thứ 3) cho đơn hàng khách đã yêu cầu xuất hóa đơn.
-        SYS_49_RedInvoiceIssued
+        SYS_49_RedInvoiceIssued,
+
+        // Sản phẩm/nguyên vật liệu vượt ngưỡng tồn đọng (ExcessThreshold/MaxStockThreshold) — mirror SYS_20.
+        SYS_50_ExcessStockAlert,
+
+        // Mặt hàng không có giao dịch xuất kho trong X ngày (chậm luân chuyển) — SlowMovingStockAlertJob.
+        SYS_51_SlowMovingStockAlert
     }
 }

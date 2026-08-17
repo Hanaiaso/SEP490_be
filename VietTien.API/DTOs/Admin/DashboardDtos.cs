@@ -95,7 +95,8 @@ namespace VietTien.API.DTOs.Admin
     public class InventorySummaryDto
     {
         public int TotalSkus { get; set; }
-        public int LowStockCount { get; set; } // ReorderThreshold đã cấu hình và AvailableQuantity dưới ngưỡng (Phase 2)
+        public int LowStockCount { get; set; } // Product.ReorderThreshold/Material.SafetyThreshold đã cấu hình và tồn dưới ngưỡng
+        public int ExcessStockCount { get; set; } // Product.ExcessThreshold/Material.MaxStockThreshold đã cấu hình và tồn vượt ngưỡng
         public decimal EstimatedInventoryValue { get; set; } // Σ OnHandQuantity * StandardListedPrice (chỉ hàng thành phẩm có giá niêm yết)
     }
 

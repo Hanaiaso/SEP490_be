@@ -105,6 +105,7 @@ builder.Services.AddScoped<IWebhookLogService, WebhookLogService>();
 builder.Services.AddScoped<IScheduledJob, OrderSlaJob>();
 builder.Services.AddScoped<IScheduledJob, SePayReservationExpiryJob>();
 builder.Services.AddScoped<IScheduledJob, LowStockAlertJob>();
+builder.Services.AddScoped<IScheduledJob, SlowMovingStockAlertJob>();
 builder.Services.AddScoped<IScheduledJob, SePayWebhookRetryJob>();
 builder.Services.AddScoped<IScheduledJob, MarketingPostMakeScheduleJob>();
 builder.Services.AddScoped<IScheduledJob, QuotationExpiryJob>();

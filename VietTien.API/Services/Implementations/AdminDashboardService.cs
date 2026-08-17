@@ -17,11 +17,13 @@ namespace VietTien.API.Services.Implementations
 
         private readonly ApplicationDbContext _context;
         private readonly IKpiService _kpiService;
+        private readonly IInventoryService _inventoryService;
 
-        public AdminDashboardService(ApplicationDbContext context, IKpiService kpiService)
+        public AdminDashboardService(ApplicationDbContext context, IKpiService kpiService, IInventoryService inventoryService)
         {
             _context = context;
             _kpiService = kpiService;
+            _inventoryService = inventoryService;
         }
 
         public async Task<AdminDashboardDto> GetDashboardAsync(DateTime from, DateTime to)
@@ -75,34 +77,29 @@ namespace VietTien.API.Services.Implementations
             };
         }
 
-        // Ngưỡng cảnh báo tồn thấp: AvailableQuantity là computed property (không dịch được sang SQL) ->
-        // lấy tập đã lọc ReorderThreshold trước (thường nhỏ) rồi so sánh ở memory, giống CeoDashboardService.
+        // Dùng lại InventoryService (nguồn xác thực duy nhất, gộp cả Product + Material qua mọi kho)
+        // thay vì tự tính lại — trước đây đọc thẳng Inventory.ReorderThreshold (field per-row đã chết,
+        // không có nơi nào set) nên LowStockAlertCount trên Dashboard Admin luôn = 0.
         private async Task<(int Count, List<AdminLowStockItemDto> Items)> GetLowStockAsync()
         {
-            var thresholdedInventories = await _context.Inventories
-                .AsNoTracking()
-                .Include(i => i.Product)
-                .Include(i => i.Material)
-                .Where(i => i.ReorderThreshold != null)
-                .ToListAsync();
+            var alerts = await _inventoryService.GetLowStockAlertsAsync();
 
-            var lowStock = thresholdedInventories
-                .Where(i => i.AvailableQuantity < i.ReorderThreshold!.Value)
-                .OrderBy(i => i.ReorderThreshold!.Value == 0 ? 0 : (double)i.AvailableQuantity / i.ReorderThreshold!.Value)
+            var ordered = alerts
+                .OrderBy(a => a.Threshold == 0 ? 0 : a.AvailableQuantity / a.Threshold)
                 .ToList();
 
-            var items = lowStock
+            var items = ordered
                 .Take(TopListLimit)
-                .Select(i => new AdminLowStockItemDto
+                .Select(a => new AdminLowStockItemDto
                 {
-                    Name = i.Product?.Name ?? i.Material?.Name ?? "N/A",
-                    AvailableQuantity = i.AvailableQuantity,
-                    Unit = i.Product?.Unit ?? i.Material?.Unit ?? string.Empty,
-                    Urgent = i.ReorderThreshold!.Value > 0 && (double)i.AvailableQuantity / i.ReorderThreshold!.Value < 0.5,
+                    Name = a.ItemName,
+                    AvailableQuantity = (int)a.AvailableQuantity,
+                    Unit = a.Unit ?? string.Empty,
+                    Urgent = a.Threshold > 0 && a.AvailableQuantity / a.Threshold < 0.5,
                 })
                 .ToList();
 
-            return (lowStock.Count, items);
+            return (ordered.Count, items);
         }
 
         private async Task<List<AdminTopProductDto>> GetTopProductsAsync(DateTime from, DateTime to)

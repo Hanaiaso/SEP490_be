@@ -56,6 +56,7 @@ namespace VietTien.API.Services.Implementations
                 Name = dto.Name,
                 Unit = dto.Unit,
                 SafetyThreshold = dto.SafetyThreshold,
+                MaxStockThreshold = dto.MaxStockThreshold,
                 CurrentStock = 0 // Tồn kho ban đầu là 0
             };
 
@@ -97,6 +98,7 @@ namespace VietTien.API.Services.Implementations
             material.Name = dto.Name;
             material.Unit = dto.Unit;
             material.SafetyThreshold = dto.SafetyThreshold;
+            material.MaxStockThreshold = dto.MaxStockThreshold;
 
             try
             {
@@ -151,6 +153,7 @@ namespace VietTien.API.Services.Implementations
                 Unit = m.Unit,
                 CurrentStock = calculatedStock,
                 SafetyThreshold = m.SafetyThreshold,
+                MaxStockThreshold = m.MaxStockThreshold,
                 LastAlertSentDate = m.LastAlertSentDate,
                 IsBelowSafetyThreshold = calculatedStock <= m.SafetyThreshold
             };

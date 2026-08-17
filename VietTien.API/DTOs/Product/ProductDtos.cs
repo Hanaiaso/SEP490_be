@@ -124,6 +124,14 @@ namespace VietTien.API.DTOs.Product
 
         public string? Specifications { get; set; }
 
+        /// <summary>Ngưỡng cảnh báo tồn thấp (null = chưa cấu hình, không cảnh báo) — tính trên tổng khả dụng mọi kho.</summary>
+        [Range(0, int.MaxValue, ErrorMessage = "Ngưỡng cảnh báo tồn thấp phải >= 0")]
+        public int? ReorderThreshold { get; set; }
+
+        /// <summary>Ngưỡng cảnh báo tồn đọng (null = chưa cấu hình, không cảnh báo) — vượt ngưỡng này coi là tồn đọng.</summary>
+        [Range(0, int.MaxValue, ErrorMessage = "Ngưỡng cảnh báo tồn đọng phải >= 0")]
+        public int? ExcessThreshold { get; set; }
+
         /// <summary>Danh sách ảnh sản phẩm (ảnh đầu tiên trở thành ảnh đại diện). Từng file được validate thủ công trong ProductService.</summary>
         public List<IFormFile>? ImageFiles { get; set; }
     }
@@ -153,6 +161,14 @@ namespace VietTien.API.DTOs.Product
 
         public string? Specifications { get; set; }
 
+        /// <summary>Ngưỡng cảnh báo tồn thấp (null = chưa cấu hình, không cảnh báo) — tính trên tổng khả dụng mọi kho.</summary>
+        [Range(0, int.MaxValue, ErrorMessage = "Ngưỡng cảnh báo tồn thấp phải >= 0")]
+        public int? ReorderThreshold { get; set; }
+
+        /// <summary>Ngưỡng cảnh báo tồn đọng (null = chưa cấu hình, không cảnh báo) — vượt ngưỡng này coi là tồn đọng.</summary>
+        [Range(0, int.MaxValue, ErrorMessage = "Ngưỡng cảnh báo tồn đọng phải >= 0")]
+        public int? ExcessThreshold { get; set; }
+
         /// <summary>Ảnh mới cần thêm vào gallery (giữ nguyên ảnh cũ trừ khi liệt kê trong RemoveImageIds). Từng file được validate thủ công trong ProductService.</summary>
         public List<IFormFile>? ImageFiles { get; set; }
 
@@ -177,6 +193,9 @@ namespace VietTien.API.DTOs.Product
 
         /// <summary>Tồn kho khả dụng (null nếu chưa có dữ liệu kho)</summary>
         public int? AvailableStock { get; set; }
+
+        public int? ReorderThreshold { get; set; }
+        public int? ExcessThreshold { get; set; }
 
         public bool IsDiscontinued { get; set; }
         public double AverageRating { get; set; }

@@ -72,6 +72,14 @@ namespace VietTien.API.Controllers
             return Ok(result);
         }
 
+        [HttpGet("excess-stock-alerts")]
+        [Authorize(Roles = "WarehouseStaff,SalesManager,CEO,Admin")]
+        public async Task<IActionResult> GetExcessStockAlerts()
+        {
+            var result = await _inventoryService.GetExcessStockAlertsAsync();
+            return Ok(result);
+        }
+
         // ─── INV-01: alias tương thích ngược cho InventoryCountSessionService (DEF-L4-003) ─────
         // Đã hợp nhất về 1 hệ thống kiểm kê duy nhất (POST/GET /api/inventory-count-sessions...,
         // xem InventoryCountSessionController) — bỏ StockCountSession/StockCountLine riêng của

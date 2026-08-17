@@ -140,13 +140,14 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task Report_FlagsLowStock_ForProductBelowReorderThresholdAndMaterialAtSafetyThreshold()
         {
-            var product = TestData.SeedProduct(_db);
+            // Ngưỡng tồn thấp Product nay nằm trên Product.ReorderThreshold (gộp theo tổng khả dụng
+            // mọi kho), không còn theo từng dòng Inventory riêng lẻ.
+            var product = TestData.SeedProduct(_db, p => p.ReorderThreshold = 5);
             var material = SeedMaterial(safety: 10);
             var (w, loc) = TestData.Warehouse();
             _db.Warehouses.Add(w);
             _db.Inventories.AddRange(
-                // sản phẩm: dùng dấu < nên bằng ngưỡng thì KHÔNG tính là thấp
-                TestData.Inventory(product.Id, loc.Id, 3, i => i.ReorderThreshold = 5),
+                TestData.Inventory(product.Id, loc.Id, 3),
                 // nguyên vật liệu: dùng dấu <= nên bằng ngưỡng LÀ thấp
                 new Inventory { MaterialId = material.Id, WarehouseLocationId = loc.Id, OnHandQuantity = 10 });
             await _db.SaveChangesAsync();
@@ -160,10 +161,10 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task Report_IgnoresProductWithoutReorderThreshold()
         {
-            var product = TestData.SeedProduct(_db);
+            var product = TestData.SeedProduct(_db, p => p.ReorderThreshold = null);
             var (w, loc) = TestData.Warehouse();
             _db.Warehouses.Add(w);
-            _db.Inventories.Add(TestData.Inventory(product.Id, loc.Id, 0, i => i.ReorderThreshold = null));
+            _db.Inventories.Add(TestData.Inventory(product.Id, loc.Id, 0));
             await _db.SaveChangesAsync();
 
             var report = await _sut.GetInventoryReportAsync(null, null, null);
@@ -179,8 +180,8 @@ namespace VietTien.Tests.Services
             _db.Warehouses.Add(w);
             for (var qty = 6; qty >= 1; qty--)
             {
-                var p = TestData.SeedProduct(_db);
-                _db.Inventories.Add(TestData.Inventory(p.Id, loc.Id, qty, i => i.ReorderThreshold = 100));
+                var p = TestData.SeedProduct(_db, p => p.ReorderThreshold = 100);
+                _db.Inventories.Add(TestData.Inventory(p.Id, loc.Id, qty));
             }
             await _db.SaveChangesAsync();
 

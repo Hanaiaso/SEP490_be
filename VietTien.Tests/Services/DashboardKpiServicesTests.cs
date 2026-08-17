@@ -1,5 +1,8 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
+using Moq;
 using VietTien.API.Data;
+using VietTien.API.Hubs;
 using VietTien.API.Models;
 using VietTien.API.Services.Implementations;
 using VietTien.Tests.TestHelpers;
@@ -27,6 +30,7 @@ namespace VietTien.Tests.Services
     {
         private readonly ApplicationDbContext _db = TestDbFactory.Create();
         private readonly KpiService _kpi;
+        private readonly InventoryService _inventoryService;
 
         private readonly DateTime _from = DateTime.UtcNow.Date.AddDays(-7);
         private readonly DateTime _to = DateTime.UtcNow.Date.AddDays(1);
@@ -34,6 +38,7 @@ namespace VietTien.Tests.Services
         public DashboardKpiServicesTests()
         {
             _kpi = new KpiService(_db, new SalesTargetService(_db));
+            _inventoryService = new InventoryService(_db, MockHubContext.Create<WarehouseHub>().Object, new Mock<ILogger<InventoryService>>().Object, TestWarehouseAccessGuard.Create(_db));
         }
 
         private User SeedSales()
@@ -141,7 +146,7 @@ namespace VietTien.Tests.Services
             var s1 = SeedSales();
             SeedCompletedOrder(s1.Id, 3_000_000m);
 
-            var sut = new CeoDashboardService(_db, _kpi);
+            var sut = new CeoDashboardService(_db, _kpi, _inventoryService);
             var dashboard = await sut.GetDashboardAsync(_from, _to);
 
             dashboard.OrgKpi.Should().NotBeNull();

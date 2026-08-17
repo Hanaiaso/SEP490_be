@@ -17,11 +17,13 @@ namespace VietTien.API.Services.Implementations
 
         private readonly ApplicationDbContext _context;
         private readonly IKpiService _kpiService;
+        private readonly IInventoryService _inventoryService;
 
-        public CeoDashboardService(ApplicationDbContext context, IKpiService kpiService)
+        public CeoDashboardService(ApplicationDbContext context, IKpiService kpiService, IInventoryService inventoryService)
         {
             _context = context;
             _kpiService = kpiService;
+            _inventoryService = inventoryService;
         }
 
         public async Task<CeoDashboardDto> GetDashboardAsync(DateTime from, DateTime to)
@@ -48,13 +50,11 @@ namespace VietTien.API.Services.Implementations
                 .Distinct()
                 .CountAsync();
 
-            // AvailableQuantity là computed property (Math.Max trên C#), không dịch được sang SQL ->
-            // lấy tập đã lọc ReorderThreshold trước (thường nhỏ) rồi so sánh ở memory, giống LowStockAlertJob (Phase 2).
-            var thresholdedInventories = await _context.Inventories
-                .AsNoTracking()
-                .Where(i => i.ReorderThreshold != null)
-                .ToListAsync();
-            var lowStockCount = thresholdedInventories.Count(i => i.AvailableQuantity < i.ReorderThreshold!.Value);
+            // Dùng lại InventoryService (nguồn xác thực duy nhất, gộp cả Product + Material qua mọi kho)
+            // thay vì tự tính lại — trước đây đọc thẳng Inventory.ReorderThreshold (field per-row đã chết,
+            // không có nơi nào set) nên LowStockCount trên Dashboard CEO luôn = 0 dù thực tế có hàng cảnh báo.
+            var lowStockCount = (await _inventoryService.GetLowStockAlertsAsync()).Count;
+            var excessStockCount = (await _inventoryService.GetExcessStockAlertsAsync()).Count;
 
             var estimatedValue = await _context.Inventories
                 .Where(i => i.ProductId != null)
@@ -64,6 +64,7 @@ namespace VietTien.API.Services.Implementations
             {
                 TotalSkus = totalSkus,
                 LowStockCount = lowStockCount,
+                ExcessStockCount = excessStockCount,
                 EstimatedInventoryValue = estimatedValue
             };
         }

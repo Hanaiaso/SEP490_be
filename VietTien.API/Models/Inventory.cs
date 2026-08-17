@@ -26,6 +26,9 @@ namespace VietTien.API.Models
         // Ngưỡng cảnh báo tồn thấp cho hàng thành phẩm (null = chưa cấu hình, không cảnh báo dòng này)
         public int? ReorderThreshold { get; set; }
 
+        // Cooldown cho cảnh báo chậm luân chuyển (per-row, vì GetSlowMovingItemsAsync tính theo từng dòng kho)
+        public DateTime? LastSlowMovingAlertSentAt { get; set; }
+
         public Guid? LastUpdatedByUserId { get; set; }
         public DateTime? LastUpdatedAt { get; set; }
 

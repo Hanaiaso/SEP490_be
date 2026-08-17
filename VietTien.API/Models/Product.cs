@@ -27,6 +27,12 @@ namespace VietTien.API.Models
         public double AverageRating { get; set; } = 0;
         public int ReviewCount { get; set; } = 0;
 
+        // Ngưỡng cảnh báo tồn kho (CEO cấu hình ở trang Quản lý sản phẩm) — tính trên TỔNG khả dụng
+        // across mọi kho (mirror Material.SafetyThreshold), null = chưa cấu hình, không cảnh báo.
+        public int? ReorderThreshold { get; set; }   // dưới ngưỡng này = tồn thấp
+        public int? ExcessThreshold { get; set; }    // vượt ngưỡng này = tồn đọng
+        public DateTime? LastAlertSentDate { get; set; } // cooldown dùng chung cho cả 2 loại cảnh báo trên
+
         // Navigation Properties
         public Category Category { get; set; } = null!;
         public ICollection<Inventory> Inventories { get; set; } = new List<Inventory>();

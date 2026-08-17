@@ -341,11 +341,21 @@ namespace VietTien.API.Services.Implementations
                 .Where(i => i.ProductId != null && i.Product != null)
                 .Sum(i => i.OnHandQuantity * i.Product!.StandardListedPrice);
 
+            // Ngưỡng tồn thấp của Product nay tính GỘP theo tổng khả dụng mọi kho (Product.ReorderThreshold,
+            // mirror Material) chứ không còn theo từng dòng Inventory riêng lẻ -> phải tính trước tổng khả
+            // dụng theo ProductId rồi mọi dòng của SP đó dùng chung 1 kết quả, đúng theo LowStockAlertJob/
+            // GetLowStockAlertsAsync (nguồn xác thực).
+            var productAvailableMap = inventories
+                .Where(i => i.ProductId != null)
+                .GroupBy(i => i.ProductId!.Value)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.AvailableQuantity));
+
             // "<=" khớp với ngưỡng đã dùng ở GetLowStockAlertsAsync (nguồn xác thực cho trang Cảnh
             // báo tồn thấp) và đúng với SRS FT-12 ("crossing to or below the threshold") — trước đây
             // dùng "<" cho Product nên một sản phẩm chạm đúng ngưỡng bị đếm khác nhau giữa 2 màn hình.
             bool IsLow(Inventory i) =>
-                (i.ProductId != null && i.ReorderThreshold != null && i.AvailableQuantity <= i.ReorderThreshold.Value) ||
+                (i.ProductId != null && i.Product != null && i.Product.ReorderThreshold != null &&
+                    productAvailableMap.TryGetValue(i.ProductId.Value, out var totalAvail) && totalAvail <= i.Product.ReorderThreshold.Value) ||
                 (i.MaterialId != null && i.Material != null && i.AvailableQuantity <= i.Material.SafetyThreshold);
 
             var lowStockItems = inventories.Where(IsLow).ToList();
@@ -511,41 +521,38 @@ namespace VietTien.API.Services.Implementations
             return "Theo dõi thêm";
         }
 
-        // L3-INV-06: cùng phép so sánh ngưỡng với LowStockAlertJob (Inventory.ReorderThreshold cho
-        // hàng thành phẩm, Material.SafetyThreshold tính từ tổng Inventories cho nguyên vật liệu) —
-        // nhưng đọc trực tiếp, không gửi notification/không cooldown, phục vụ GET theo yêu cầu.
+        // L3-INV-06: cùng phép so sánh ngưỡng với LowStockAlertJob (Product.ReorderThreshold gộp theo
+        // tổng Inventories cho hàng thành phẩm, Material.SafetyThreshold tính từ tổng Inventories cho
+        // nguyên vật liệu) — nhưng đọc trực tiếp, không gửi notification/không cooldown, phục vụ GET
+        // theo yêu cầu.
         public async Task<List<LowStockAlertDto>> GetLowStockAlertsAsync()
         {
             var alerts = new List<LowStockAlertDto>();
 
-            // AvailableQuantity là computed property phía C# (Math.Max(0, OnHand - Reserved - ...)),
-            // KHÔNG map ra cột DB nào -> đưa thẳng vào .Where() sẽ bị EF cố dịch sang SQL và ném
-            // InvalidOperationException (route trả 409 qua ExceptionHandlingMiddleware) khi chạy với
-            // provider SQL Server thật (EF InMemory dùng trong unit test client-eval nên không phát
-            // hiện được lỗi này). Chỉ lọc ReorderThreshold != null (cột thật) ở SQL, còn so sánh với
-            // AvailableQuantity phải làm SAU khi đã ToListAsync() — đúng như LowStockAlertJob đang làm.
-            var candidateInventories = await _context.Inventories
-                .Include(i => i.Product)
-                .Include(i => i.WarehouseLocation).ThenInclude(wl => wl.Warehouse)
-                .Where(i => i.ReorderThreshold != null)
+            var candidateProducts = await _context.Products
+                .Include(p => p.Inventories)
+                .Where(p => p.ReorderThreshold != null)
                 .ToListAsync();
-            var lowStockInventories = candidateInventories
-                .Where(i => i.AvailableQuantity <= i.ReorderThreshold!.Value)
-                .ToList();
 
-            alerts.AddRange(lowStockInventories.Select(inv => new LowStockAlertDto
+            foreach (var product in candidateProducts)
             {
-                ItemType = "Product",
-                ItemId = inv.ProductId ?? inv.Id,
-                ItemName = inv.Product?.Name ?? "(Sản phẩm không xác định)",
-                ItemSku = inv.Product?.Sku,
-                WarehouseId = inv.WarehouseLocation?.WarehouseId,
-                WarehouseName = inv.WarehouseLocation?.Warehouse?.Name,
-                AvailableQuantity = inv.AvailableQuantity,
-                Threshold = inv.ReorderThreshold!.Value,
-                Unit = inv.Product?.Unit,
-                SuggestedAction = "Tạo Purchase Order bổ sung hàng"
-            }));
+                var available = product.Inventories.Sum(i => i.AvailableQuantity);
+                if (available > product.ReorderThreshold!.Value) continue;
+
+                alerts.Add(new LowStockAlertDto
+                {
+                    ItemType = "Product",
+                    ItemId = product.Id,
+                    ItemName = product.Name,
+                    ItemSku = product.Sku,
+                    WarehouseId = null,
+                    WarehouseName = null,
+                    AvailableQuantity = available,
+                    Threshold = product.ReorderThreshold.Value,
+                    Unit = product.Unit,
+                    SuggestedAction = "Tạo Purchase Order bổ sung hàng"
+                });
+            }
 
             var materials = await _context.Materials.Include(m => m.Inventories).ToListAsync();
 
@@ -569,6 +576,60 @@ namespace VietTien.API.Services.Implementations
                     Threshold = material.SafetyThreshold,
                     Unit = material.Unit,
                     SuggestedAction = "Đặt mua thêm nguyên vật liệu"
+                });
+            }
+
+            return alerts;
+        }
+
+        // Mirror GetLowStockAlertsAsync theo chiều ngược lại: vượt ngưỡng TỐI ĐA (tồn đọng).
+        public async Task<List<ExcessStockAlertDto>> GetExcessStockAlertsAsync()
+        {
+            var alerts = new List<ExcessStockAlertDto>();
+
+            var candidateProducts = await _context.Products
+                .Include(p => p.Inventories)
+                .Where(p => p.ExcessThreshold != null)
+                .ToListAsync();
+
+            foreach (var product in candidateProducts)
+            {
+                var available = product.Inventories.Sum(i => i.AvailableQuantity);
+                if (available <= product.ExcessThreshold!.Value) continue;
+
+                alerts.Add(new ExcessStockAlertDto
+                {
+                    ItemType = "Product",
+                    ItemId = product.Id,
+                    ItemName = product.Name,
+                    ItemSku = product.Sku,
+                    AvailableQuantity = available,
+                    Threshold = product.ExcessThreshold.Value,
+                    Unit = product.Unit,
+                    SuggestedAction = "Cân nhắc khuyến mãi hoặc tạm dừng nhập thêm"
+                });
+            }
+
+            var materials = await _context.Materials.Include(m => m.Inventories).Where(m => m.MaxStockThreshold != null).ToListAsync();
+
+            foreach (var material in materials)
+            {
+                var calculatedStock = material.Inventories.Any()
+                    ? material.Inventories.Sum(i => i.AvailableQuantity)
+                    : material.CurrentStock;
+
+                if (calculatedStock <= material.MaxStockThreshold!.Value) continue;
+
+                alerts.Add(new ExcessStockAlertDto
+                {
+                    ItemType = "Material",
+                    ItemId = material.Id,
+                    ItemName = material.Name,
+                    ItemSku = null,
+                    AvailableQuantity = calculatedStock,
+                    Threshold = material.MaxStockThreshold.Value,
+                    Unit = material.Unit,
+                    SuggestedAction = "Tạm dừng đặt mua thêm nguyên vật liệu này"
                 });
             }
 
