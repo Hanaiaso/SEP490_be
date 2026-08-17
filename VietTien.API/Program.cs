@@ -55,6 +55,7 @@ builder.Services.AddScoped<IInventoryReservationService, InventoryReservationSer
 builder.Services.AddScoped<IProductService, ProductService>();
 builder.Services.AddScoped<IQuotationRepository, QuotationRepository>();
 builder.Services.AddScoped<IQuotationService, QuotationService>();
+builder.Services.AddScoped<IProductPriceUpdateService, ProductPriceUpdateService>();
 builder.Services.AddScoped<IWarehouseService, WarehouseService>();
 builder.Services.AddScoped<IStockTransferService, StockTransferService>();
 builder.Services.AddHttpContextAccessor();

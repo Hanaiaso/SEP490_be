@@ -103,7 +103,7 @@ namespace VietTien.API.Services.Implementations
                 // lỡ tạo/duyệt thêm 1 báo giá khác không liên quan. Giờ duyệt qua TẤT CẢ báo giá còn hạn,
                 // ưu tiên báo giá mới nhất trong số những báo giá khớp đủ mọi dòng trong giỏ hiện tại.
                 var acceptedVersions = await _context.QuotationVersions
-                    .Include(v => v.Items)
+                    .Include(v => v.Items).ThenInclude(i => i.Product)
                     .Where(v => v.Quotation.CustomerProfileId == customerProfileId
                         && v.Quotation.Status == QuotationStatus.CustomerAccepted
                         && v.Id == v.Quotation.AcceptedVersionId
@@ -123,7 +123,7 @@ namespace VietTien.API.Services.Implementations
 
                     if (allLinesNegotiated)
                     {
-                        var negotiatedUnitPrices = negotiatedByProduct.ToDictionary(kv => kv.Key, kv => kv.Value.ProposedUnitPrice);
+                        var negotiatedUnitPrices = negotiatedByProduct.ToDictionary(kv => kv.Key, kv => EffectiveNegotiatedUnitPrice(kv.Value));
                         var negotiatedTotal = cartLineList.Sum(line => negotiatedUnitPrices[line.ProductId] * line.Quantity);
                         var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
                         var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
@@ -136,6 +136,20 @@ namespace VietTien.API.Services.Implementations
             var discountAmount = Math.Round(totalAmount * discountPercentage, 0, MidpointRounding.AwayFromZero);
 
             return (discountAmount, discountPercentage, null);
+        }
+
+        // Giá đàm phán HIỆU LỰC dịch chuyển theo đúng % thay đổi của giá niêm yết hiện tại, thay vì
+        // "đứng yên" ở đúng con số đã duyệt lúc đàm phán. OriginalUnitPrice/ProposedUnitPrice giữ
+        // nguyên (không ghi đè) làm lịch sử đúng những gì CEO/Manager đã thực sự duyệt; tỉ lệ giữa 2
+        // số đó (vd 80.000/100.000 = 0.8, tức giảm 20%) được áp lại lên Product.StandardListedPrice
+        // HIỆN TẠI mỗi lần tính tiền — nếu 1 ProductPriceUpdateOrder sau đó đổi giá niêm yết -2%, giá
+        // đàm phán hiệu lực cũng tự động -2% mà không cần chạy cập nhật hàng loạt lúc đợt giá thực thi,
+        // và không dồn sai số làm tròn qua nhiều lần đổi giá liên tiếp (luôn tính lại từ 2 mốc gốc).
+        private static decimal EffectiveNegotiatedUnitPrice(QuotationVersionItem item)
+        {
+            if (item.OriginalUnitPrice <= 0) return item.ProposedUnitPrice;
+            var ratio = item.ProposedUnitPrice / item.OriginalUnitPrice;
+            return Math.Round(ratio * item.Product.StandardListedPrice, 0, MidpointRounding.AwayFromZero);
         }
 
         // BR-026: đơn ≥ ngưỡng báo giá B2B mà chưa có báo giá được duyệt thì không được đặt thẳng theo
@@ -216,9 +230,12 @@ namespace VietTien.API.Services.Implementations
             var profile = await GetCustomerProfileAsync(userId);
             var cartEntity = await _unitOfWork.Carts.GetCartByCustomerIdAsync(profile.Id);
 
-            // GH-08/BR-025: chặn đặt hàng khi giỏ đã giữ giá quá 24h — khách phải bấm làm mới giá
-            // (RefreshCartPricesAsync) trước, GetCartAsync không tự làm mới UpdatedAt khi đọc.
-            if (cartEntity != null && (DateTime.UtcNow - cartEntity.UpdatedAt).TotalHours > 24)
+            // GH-08/BR-025: chặn đặt hàng khi còn dòng nào đã giữ giá quá 24h — khách phải bấm làm mới
+            // giá (RefreshCartPricesAsync) trước, GetCartAsync không tự làm mới UpdatedAt khi đọc.
+            // Dùng chung CartPriceLockHelper với CartService.GetCartAsync (per-item PriceLockedAt, fallback
+            // Cart.UpdatedAt) — trước đây đọc thẳng cartEntity.UpdatedAt nên chặn nhầm/bỏ lọt khi 1 dòng
+            // vừa bị 1 đợt ProductPriceUpdateOrder khoá giá riêng trong khi cả giỏ nói chung mới/cũ hơn.
+            if (cartEntity != null && CartPriceLockHelper.IsAnyItemExpired(cartEntity.Items, cartEntity.UpdatedAt))
                 throw new Exception("Giá trong giỏ hàng đã hết hạn giữ (quá 24h). Vui lòng xem lại giỏ hàng để cập nhật giá mới trước khi đặt hàng.");
 
             var cart = await _cartService.GetCartAsync(userId);

@@ -132,6 +132,60 @@ namespace VietTien.Tests.Services
             dto.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(10)); // đồng hồ giữ giá reset
         }
 
+        // L1-CART-12 | EP-Valid | Dòng có PriceLockedAt gần đây (<24h) -> KHÔNG hết hạn dù cả giỏ
+        // (Cart.UpdatedAt) đã cũ >24h — mốc riêng của dòng ưu tiên hơn mốc chung của giỏ.
+        [Fact]
+        public async Task L1_CART_12_GetCart_ItemRecentlyPriceLocked_NotExpiredDespiteStaleCart()
+        {
+            var (user, profile) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var cart = SeedCart(profile.Id, (p1, 2, 50_000m));
+            var item = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            cart.UpdatedAt = DateTime.UtcNow.AddHours(-26);
+            item.PriceLockedAt = DateTime.UtcNow.AddMinutes(-5);
+            _db.SaveChanges();
+
+            var dto = await _sut.GetCartAsync(user.Id);
+
+            dto.Items.Single().IsPriceExpired.Should().BeFalse();
+            dto.IsPriceExpired.Should().BeFalse();
+        }
+
+        // L1-CART-13 | EP-Invalid | Dòng có PriceLockedAt cũ (>24h) -> hết hạn dù cả giỏ (Cart.UpdatedAt)
+        // vừa mới được đụng tới.
+        [Fact]
+        public async Task L1_CART_13_GetCart_ItemPriceLockExpired_ExpiredDespiteFreshCart()
+        {
+            var (user, profile) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db);
+            var cart = SeedCart(profile.Id, (p1, 2, 50_000m));
+            var item = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            cart.UpdatedAt = DateTime.UtcNow;
+            item.PriceLockedAt = DateTime.UtcNow.AddHours(-25);
+            _db.SaveChanges();
+
+            var dto = await _sut.GetCartAsync(user.Id);
+
+            dto.Items.Single().IsPriceExpired.Should().BeTrue();
+            dto.IsPriceExpired.Should().BeTrue();
+        }
+
+        // L1-CART-14 | EP-Valid | RefreshCartPricesAsync xoá luôn PriceLockedAt của từng dòng.
+        [Fact]
+        public async Task L1_CART_14_RefreshCartPrices_ClearsPriceLockedAt()
+        {
+            var (user, profile) = SeedCustomerWithAddress();
+            var p1 = TestData.SeedProduct(_db, p => p.StandardListedPrice = 60_000m);
+            var cart = SeedCart(profile.Id, (p1, 2, 50_000m));
+            var item = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            item.PriceLockedAt = DateTime.UtcNow.AddHours(-25);
+            _db.SaveChanges();
+
+            await _sut.RefreshCartPricesAsync(user.Id);
+
+            _db.CartItems.Single(ci => ci.Id == item.Id).PriceLockedAt.Should().BeNull();
+        }
+
         //  ▶ Block: AddItemToCartAsync()
 
         // L1-CART-05 | EP-Valid | Thêm sản phẩm mới -> tạo line item với snapshot giá niêm yết

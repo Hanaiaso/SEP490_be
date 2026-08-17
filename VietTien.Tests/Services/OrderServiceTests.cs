@@ -500,6 +500,93 @@ namespace VietTien.Tests.Services
             order.FinalPayment.Should().Be(60_000_000m);
         }
 
+        // L1-ORD-11j | EP-Valid | Giá đàm phán HIỆU LỰC dịch chuyển theo đúng % thay đổi của giá niêm
+        // yết hiện tại (ProductPriceUpdateOrder), thay vì đứng yên ở đúng con số đã duyệt lúc đàm phán.
+        [Fact]
+        public async Task L1_ORD_11j_PlaceOrder_ListedPriceChangedAfterNegotiation_EffectivePriceScalesProportionally()
+        {
+            var cart = SeedCartWithTotal(100_000_000m, qty: 1000); // niêm yết 100.000đ/sp lúc thêm giỏ
+            var cartItem = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            var product = _db.Products.Single(p => p.Id == cartItem.ProductId);
+
+            var quotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 100_000_000m,
+                ValidUntil = DateTime.UtcNow.AddDays(7),
+            };
+            var version = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = quotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 80_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            version.Items.Add(new QuotationVersionItem
+            {
+                QuotationVersionId = version.Id,
+                ProductId = product.Id,
+                Quantity = 1000,
+                OriginalUnitPrice = 100_000m,
+                ProposedUnitPrice = 80_000m, // đàm phán xuống 80.000đ (giảm 20%)
+            });
+            quotation.AcceptedVersionId = version.Id;
+            quotation.Versions.Add(version);
+            _db.Quotations.Add(quotation);
+            _db.SaveChanges();
+
+            // Mô phỏng 1 đợt ProductPriceUpdateOrder đã thực thi SAU khi đàm phán: giá niêm yết -2%
+            // còn 98.000đ. Giỏ hàng của khách vẫn giữ snapshot giá cũ 100.000đ (đúng ý nghĩa khoá giá
+            // 24h — xem CartPriceLockHelper) nên totalAmount tính từ giỏ không đổi, vẫn đủ ngưỡng B2B.
+            product.StandardListedPrice = 98_000m;
+            _db.SaveChanges();
+
+            var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            var orderItem = _db.OrderItems.Single(oi => oi.OrderId == response.OrderId);
+            orderItem.PriceSnapshot.Should().Be(78_400m); // 80.000 * (98.000/100.000) — giữ đúng tỉ lệ giảm 20%
+        }
+
+        // L1-ORD-11k | EP-Valid | 1 dòng giỏ vừa bị khoá giá riêng (PriceLockedAt gần đây) do 1 đợt
+        // ProductPriceUpdateOrder — KHÔNG bị chặn đặt hàng dù cả giỏ (Cart.UpdatedAt) đã cũ >24h.
+        // Regression cho lỗi: PlaceOrderAsync trước đây tự đọc thẳng cartEntity.UpdatedAt, bỏ qua
+        // PriceLockedAt riêng của từng dòng -> false-block.
+        [Fact]
+        public async Task L1_ORD_11k_PlaceOrder_ItemRecentlyPriceLocked_NotBlockedDespiteStaleCart()
+        {
+            var cart = SeedCartWithTotal(40_000m, qty: 1, stock: 100);
+            var cartItem = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            cart.UpdatedAt = DateTime.UtcNow.AddHours(-26); // cả giỏ nói chung đã cũ
+            cartItem.PriceLockedAt = DateTime.UtcNow.AddMinutes(-5); // nhưng dòng này vừa mới bị khoá giá
+            _db.SaveChanges();
+
+            var act = () => _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            await act.Should().NotThrowAsync();
+        }
+
+        // L1-ORD-11l | EP-Invalid | 1 dòng giỏ đã khoá giá quá 24h (PriceLockedAt cũ) — VẪN bị chặn
+        // đặt hàng dù cả giỏ (Cart.UpdatedAt) vừa mới được đụng vào (vd thêm sản phẩm khác gần đây).
+        // Regression cho chiều ngược lại: false-pass nếu chỉ đọc cartEntity.UpdatedAt.
+        [Fact]
+        public async Task L1_ORD_11l_PlaceOrder_ItemPriceLockExpired_BlockedDespiteFreshCart()
+        {
+            var cart = SeedCartWithTotal(40_000m, qty: 1, stock: 100);
+            var cartItem = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            cart.UpdatedAt = DateTime.UtcNow; // cả giỏ nói chung vừa mới đụng tới
+            cartItem.PriceLockedAt = DateTime.UtcNow.AddHours(-25); // nhưng dòng này đã hết hạn giữ giá riêng
+            _db.SaveChanges();
+
+            var act = () => _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("*hết hạn giữ*");
+        }
+
         //  ▶ Block: Thanh toán một phần giỏ hàng (CartItemIds)
 
         /// <summary>Seed giỏ có 2 dòng sản phẩm độc lập, mỗi dòng giá trị 2.000.000đ (dưới ngưỡng

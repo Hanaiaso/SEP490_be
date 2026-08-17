@@ -73,6 +73,14 @@ namespace VietTien.API.Models
         // Báo giá ≥ ngưỡng B2B: Sale không còn tự nhận xử lý được, Sales Manager phải phân công thủ
         // công cho người có kinh nghiệm phù hợp.
         SYS_42_QuotationNeedsManagerAssignment,
-        SYS_43_QuotationAssignedByManager
+        SYS_43_QuotationAssignedByManager,
+
+        // Luồng cập nhật giá hàng hóa (ProductPriceUpdateOrder): CEO đề xuất -> Sales Manager phân
+        // công + thông báo khách hàng -> Sales Staff thực hiện đúng ngày hiệu lực.
+        SYS_44_ProductPriceUpdateOrderProposed,
+        SYS_45_ProductPriceUpdateOrderAssigned,
+        SYS_46_ProductPriceUpdateScheduleNotice,
+        SYS_47_ProductPriceUpdateOrderExecuted,
+        SYS_48_ProductPriceUpdateOrderCancelled
     }
 }

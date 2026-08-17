@@ -119,6 +119,11 @@ namespace VietTien.API.DTOs.Quotation
         public int Quantity { get; set; }
         public decimal OriginalUnitPrice { get; set; }
         public decimal ProposedUnitPrice { get; set; }
+
+        // Giá niêm yết SỐNG hiện tại của sản phẩm (khác OriginalUnitPrice — cái đó là snapshot lúc
+        // đàm phán, đứng yên). FE dùng để tự tính giá đàm phán hiệu lực = ProposedUnitPrice /
+        // OriginalUnitPrice * CurrentListedPrice, mirror đúng OrderService.CalculateDiscountAsync.
+        public decimal CurrentListedPrice { get; set; }
     }
 
     public class ChatMessageDto

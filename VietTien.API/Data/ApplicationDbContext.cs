@@ -38,6 +38,8 @@ namespace VietTien.API.Data
         public DbSet<QuotationVersion> QuotationVersions => Set<QuotationVersion>();
         public DbSet<QuotationVersionItem> QuotationVersionItems => Set<QuotationVersionItem>();
         public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+        public DbSet<ProductPriceUpdateOrder> ProductPriceUpdateOrders => Set<ProductPriceUpdateOrder>();
+        public DbSet<ProductPriceUpdateOrderItem> ProductPriceUpdateOrderItems => Set<ProductPriceUpdateOrderItem>();
 
         // System Notifications
         public DbSet<Notification> Notifications => Set<Notification>();
@@ -713,6 +715,43 @@ namespace VietTien.API.Data
                 .HasOne(cm => cm.Sender)
                 .WithMany()
                 .HasForeignKey(cm => cm.SenderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            // --- PHÂN HỆ CẬP NHẬT GIÁ HÀNG HÓA (PRODUCT PRICE UPDATE ORDER) ---
+            modelBuilder.Entity<ProductPriceUpdateOrder>()
+                .HasOne(o => o.ProposedByUser)
+                .WithMany()
+                .HasForeignKey(o => o.ProposedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ProductPriceUpdateOrder>()
+                .HasOne(o => o.AssignedByManager)
+                .WithMany()
+                .HasForeignKey(o => o.AssignedByManagerId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ProductPriceUpdateOrder>()
+                .HasOne(o => o.AssignedSalesStaff)
+                .WithMany()
+                .HasForeignKey(o => o.AssignedSalesStaffId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ProductPriceUpdateOrder>()
+                .HasOne(o => o.ExecutedByUser)
+                .WithMany()
+                .HasForeignKey(o => o.ExecutedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<ProductPriceUpdateOrderItem>()
+                .HasOne(i => i.ProductPriceUpdateOrder)
+                .WithMany(o => o.Items)
+                .HasForeignKey(i => i.ProductPriceUpdateOrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<ProductPriceUpdateOrderItem>()
+                .HasOne(i => i.Product)
+                .WithMany()
+                .HasForeignKey(i => i.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             // --- MỐI QUAN HỆ CỦA CÁC PHÂN HỆ KHÁC (ĐÃ XÓA CÁC KHAI BÁO TRÙNG LẶP DƯ THỪA) ---

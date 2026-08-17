@@ -22,5 +22,7 @@ namespace VietTien.API.DTOs.Cart
         public int Quantity { get; set; }
         public decimal UnitPrice { get; set; }
         public decimal TotalPrice => Quantity * UnitPrice;
+        // true nếu riêng dòng này đã hết cửa sổ giữ giá 24h (xem CartItem.PriceLockedAt).
+        public bool IsPriceExpired { get; set; }
     }
 }

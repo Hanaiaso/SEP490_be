@@ -529,7 +529,8 @@ namespace VietTien.API.Services.Implementations
                     ProductImageUrl = i.Product?.ImageUrl,
                     Quantity = i.Quantity,
                     OriginalUnitPrice = i.OriginalUnitPrice,
-                    ProposedUnitPrice = i.ProposedUnitPrice
+                    ProposedUnitPrice = i.ProposedUnitPrice,
+                    CurrentListedPrice = i.Product?.StandardListedPrice ?? i.OriginalUnitPrice
                 }).ToList()
             };
         }

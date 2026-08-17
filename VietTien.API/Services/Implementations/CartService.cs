@@ -54,7 +54,10 @@ namespace VietTien.API.Services.Implementations
             // Checkout luôn gọi GetCartAsync (qua checkout-summary) trước khi khách kịp bấm đặt hàng,
             // xoá mất dấu vết hết hạn một cách âm thầm. Việc làm mới giá thật sự chỉ diễn ra khi khách
             // bấm nút xác nhận, xem RefreshCartPricesAsync.
-            var isPriceExpired = (DateTime.UtcNow - cart.UpdatedAt).TotalHours > 24;
+            //
+            // Mỗi dòng có mốc giữ giá RIÊNG (PriceLockedAt, set khi 1 đợt ProductPriceUpdateOrder đổi
+            // giá sản phẩm đó trong lúc đang nằm trong giỏ) — dòng nào chưa từng bị đụng tới thì fallback
+            // về mốc chung Cart.UpdatedAt như quy tắc BR-025 cũ (xem CartPriceLockHelper).
 
             // Map to DTO
             var cartDto = new CartDto
@@ -62,7 +65,6 @@ namespace VietTien.API.Services.Implementations
                 Id = cart.Id,
                 CustomerProfileId = cart.CustomerProfileId,
                 UpdatedAt = cart.UpdatedAt,
-                IsPriceExpired = isPriceExpired,
                 Items = cart.Items.Select(i => new CartItemDto
                 {
                     Id = i.Id,
@@ -70,9 +72,11 @@ namespace VietTien.API.Services.Implementations
                     ProductName = i.Product.Name,
                     ImageUrl = i.Product.ImageUrl,
                     Quantity = i.Quantity,
-                    UnitPrice = i.UnitPrice
+                    UnitPrice = i.UnitPrice,
+                    IsPriceExpired = CartPriceLockHelper.IsItemExpired(i.PriceLockedAt, cart.UpdatedAt)
                 }).ToList()
             };
+            cartDto.IsPriceExpired = cartDto.Items.Any(i => i.IsPriceExpired);
 
             cartDto.TotalItems = cartDto.Items.Sum(i => i.Quantity);
             var baseTotalPrice = cartDto.Items.Sum(i => i.TotalPrice);
@@ -111,6 +115,7 @@ namespace VietTien.API.Services.Implementations
                 {
                     if (item.UnitPrice != item.Product.StandardListedPrice)
                         item.UnitPrice = item.Product.StandardListedPrice;
+                    item.PriceLockedAt = null;
                 }
 
                 cart.UpdatedAt = DateTime.UtcNow;
