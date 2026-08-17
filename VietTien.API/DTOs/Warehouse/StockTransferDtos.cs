@@ -29,6 +29,10 @@ namespace VietTien.API.DTOs.Warehouse
         public string? DeliveryShift { get; set; }
         public DateTime? ScheduledDeliveryDate { get; set; }
         public List<StockTransferItemDto> Items { get; set; } = new();
+
+        // Chỉ có giá trị ngay tại thời điểm DispatchAsync vừa tạo phiếu xuất kho (mục 12) — không nạp lại ở các lần GET sau.
+        public Guid? GoodsIssueId { get; set; }
+        public string? GoodsIssueCode { get; set; }
     }
 
     public class StockTransferItemDto

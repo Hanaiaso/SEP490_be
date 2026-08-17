@@ -296,6 +296,33 @@ namespace VietTien.API.Services.Implementations
                 transfer.Status = StockTransferStatus.Dispatched;
                 transfer.DispatchedAt = DateTime.UtcNow;
 
+                // Phiếu xuất kho cho điều chuyển nội bộ (mục 12) — dùng lại GoodsIssueType.StockTransfer
+                // vốn đã có trong enum nhưng chưa từng được tạo ở đâu. Post ngay (không qua Draft/proof)
+                // vì việc trừ tồn thật đã xảy ra ở vòng lặp trên rồi, phiếu này chỉ là chứng từ ghi nhận.
+                var goodsIssue = new GoodsIssue
+                {
+                    Id = Guid.NewGuid(),
+                    Code = "GI-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
+                    Type = GoodsIssueType.StockTransfer,
+                    ReferenceId = transfer.Id,
+                    WarehouseId = transfer.SourceWarehouseId,
+                    IssuedByUserId = transfer.CreatedByUserId,
+                    IssueDate = DateTime.UtcNow,
+                    Status = GoodsIssueStatus.Posted,
+                    Note = $"Xuất điều chuyển {transfer.Code} sang kho {transfer.DestinationWarehouse.Name}"
+                };
+                foreach (var item in transfer.Items)
+                {
+                    goodsIssue.Items.Add(new GoodsIssueItem
+                    {
+                        GoodsIssueId = goodsIssue.Id,
+                        ProductId = item.ProductId,
+                        MaterialId = item.MaterialId,
+                        Quantity = item.Quantity
+                    });
+                }
+                _context.GoodsIssues.Add(goodsIssue);
+
                 await _context.SaveChangesAsync();
                 await transaction.CommitAsync();
 
@@ -338,7 +365,10 @@ namespace VietTien.API.Services.Implementations
                     Console.WriteLine($"[StockTransferService] Error sending stock transfer dispatched notification: {notifyEx.Message}");
                 }
 
-                return MapToDto(transfer);
+                var resultDto = MapToDto(transfer);
+                resultDto.GoodsIssueId = goodsIssue.Id;
+                resultDto.GoodsIssueCode = goodsIssue.Code;
+                return resultDto;
             }
             catch
             {

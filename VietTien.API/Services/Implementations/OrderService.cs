@@ -1526,6 +1526,8 @@ namespace VietTien.API.Services.Implementations
                 DeliveryVehicleId = order.DeliveryVehicleId,
                 DeliveryStatus   = order.DeliveryStatus.ToString(),
                 ScheduledDeliveryDate = order.ScheduledDeliveryDate,
+                PlannedDepartureAt = order.DeliveryTrip?.PlannedDepartureAt,
+                PlannedArrivalAt   = order.DeliveryTrip?.PlannedArrivalAt,
                 DeliveredAt      = order.DeliveredAt,
                 CustomerSignatureUrl = order.CustomerSignatureUrl,
                 DeliveryPhotoUrl  = order.DeliveryPhotoUrl,
@@ -1585,6 +1587,7 @@ namespace VietTien.API.Services.Implementations
                 .Include(o => o.CustomerProfile).ThenInclude(cp => cp.User)
                 .Include(o => o.CustomerProfile.Addresses)
                 .Include(o => o.OrderItems).ThenInclude(oi => oi.Product)
+                .Include(o => o.DeliveryTrip)
                 .Include(o => o.ReturnExchangeRequests).ThenInclude(req => req.ReturnItems).ThenInclude(ri => ri.Product)
                 .Include(o => o.ReturnExchangeRequests).ThenInclude(req => req.ExchangeItems).ThenInclude(ei => ei.Product)
                 .Include(o => o.ReturnExchangeRequests).ThenInclude(req => req.ReplacementOrder)
@@ -1648,6 +1651,8 @@ namespace VietTien.API.Services.Implementations
                 DeliveryVehicleId = order.DeliveryVehicleId,
                 DeliveryStatus = order.DeliveryStatus.ToString(),
                 ScheduledDeliveryDate = order.ScheduledDeliveryDate,
+                PlannedDepartureAt = order.DeliveryTrip?.PlannedDepartureAt,
+                PlannedArrivalAt   = order.DeliveryTrip?.PlannedArrivalAt,
                 DeliveredAt = order.DeliveredAt,
                 CustomerSignatureUrl = order.CustomerSignatureUrl,
                 DeliveryPhotoUrl = order.DeliveryPhotoUrl,
@@ -2593,7 +2598,8 @@ namespace VietTien.API.Services.Implementations
                     ScheduledDeliveryDate = o.ScheduledDeliveryDate,
                     FailedDeliveryCount = o.FailedDeliveryCount,
                     IsBlocked = o.IsBlockedForDelivery,
-                    ItemCount = o.OrderItems?.Sum(oi => oi.Quantity) ?? 0
+                    ItemCount = o.OrderItems?.Sum(oi => oi.Quantity) ?? 0,
+                    TotalPackedWeightKg = o.TotalPackedWeightKg
                 };
             }).ToList();
 

@@ -93,6 +93,10 @@ namespace VietTien.API.DTOs.Order
         public int? DeliveryVehicleId  { get; set; }
         public string? DeliveryStatus  { get; set; }
         public DateTime? ScheduledDeliveryDate { get; set; }
+
+        // Giờ dự kiến (chuyến giao — Nhóm C) — chỉ có khi đơn đã được gán vào 1 DeliveryTrip đang Loading/InDelivery.
+        public DateTime? PlannedDepartureAt { get; set; }
+        public DateTime? PlannedArrivalAt   { get; set; }
         public DateTime? DeliveredAt   { get; set; }
         public string? CustomerSignatureUrl { get; set; }
         public string? DeliveryPhotoUrl      { get; set; }

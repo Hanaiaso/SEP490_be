@@ -180,20 +180,31 @@ namespace VietTien.API.Services.Implementations
                 FinalPayment = order.FinalPayment
             };
 
+            // Nạp 1 lần toàn bộ Inventory cho mọi sản phẩm liên quan (đơn hàng + mọi pick task) để tính
+            // vừa tổng (PhysicalStock) vừa breakdown theo từng kho (StockByWarehouse) — tránh N+1 query
+            // riêng cho từng dòng như trước, và cho phép PickTaskItem biết tồn TẠI ĐÚNG KHO của task đó
+            // (khác với tổng 3 kho ở mục Items cấp đơn hàng, tránh nhầm lẫn mục 10 nêu ra).
+            var relevantProductIds = order.OrderItems.Select(i => i.ProductId)
+                .Union(pickTasks.SelectMany(pt => pt.Items).Select(pti => pti.ProductId))
+                .Distinct()
+                .ToList();
+
+            var allInventories = await _context.Inventories
+                .Include(i => i.WarehouseLocation)
+                .ThenInclude(wl => wl.Warehouse)
+                .Where(inv => inv.ProductId != null && relevantProductIds.Contains(inv.ProductId.Value))
+                .ToListAsync();
+
             foreach (var item in order.OrderItems)
             {
-                var inventories = await _context.Inventories
-                    .Include(i => i.WarehouseLocation)
-                    .ThenInclude(wl => wl.Warehouse)
-                    .Where(inv => inv.ProductId == item.ProductId)
-                    .ToListAsync();
-                    
+                var inventories = allInventories.Where(inv => inv.ProductId == item.ProductId).ToList();
+
                 var physicalStock = inventories.Sum(inv => inv.OnHandQuantity);
-                
+
                 var defaultWarehouseStock = inventories
                     .Where(inv => inv.WarehouseLocation?.Warehouse?.Code == "WH-DEFAULT")
                     .Sum(inv => inv.OnHandQuantity);
-                
+
                 var requiredTransfer = Math.Max(0, item.Quantity - defaultWarehouseStock);
 
                 if (detailDto.AllocatedWarehouse == "Kho mặc định" && inventories.Any(inv => inv.WarehouseLocation?.Warehouse?.Name != null))
@@ -205,6 +216,17 @@ namespace VietTien.API.Services.Implementations
                     detailDto.AllocatedWarehouseCode = "WH-DEFAULT"; // Destination is always WH-DEFAULT
                 }
 
+                var stockByWarehouse = inventories
+                    .Where(inv => inv.WarehouseLocation?.Warehouse != null)
+                    .GroupBy(inv => inv.WarehouseLocation!.Warehouse!)
+                    .Select(g => new WarehouseStockBreakdownDto
+                    {
+                        WarehouseId = g.Key.Id,
+                        WarehouseName = g.Key.Name,
+                        OnHandQuantity = g.Sum(inv => inv.OnHandQuantity)
+                    })
+                    .ToList();
+
                 detailDto.Items.Add(new WarehouseOrderItemDto
                 {
                     ProductId = item.ProductId,
@@ -212,6 +234,7 @@ namespace VietTien.API.Services.Implementations
                     SKU = item.Product.Sku,
                     RequestedQuantity = item.Quantity,
                     PhysicalStock = physicalStock,
+                    StockByWarehouse = stockByWarehouse,
                     IsStockSufficient = physicalStock >= item.Quantity,
                     PackedQuantity = item.PackedQuantity,
                     RemainingQuantity = item.Quantity - item.PackedQuantity,
@@ -234,6 +257,11 @@ namespace VietTien.API.Services.Implementations
                         ProductName = pti.Product.Name,
                         SKU = pti.Product.Sku,
                         RequestedQuantity = pti.QuantityToPick,
+                        // Tồn TẠI ĐÚNG KHO của pick task này (không phải tổng 3 kho) — nhân viên đang đứng
+                        // ở kho pt.WarehouseId nên đây mới là con số họ cần đối chiếu khi lấy hàng.
+                        PhysicalStock = allInventories
+                            .Where(inv => inv.ProductId == pti.ProductId && inv.WarehouseLocation?.WarehouseId == pt.WarehouseId)
+                            .Sum(inv => inv.OnHandQuantity),
                         PackedQuantity = pti.PickedQuantity,
                         RemainingQuantity = pti.QuantityToPick - pti.PickedQuantity
                     }).ToList()
@@ -442,6 +470,11 @@ namespace VietTien.API.Services.Implementations
 
             if (pt == null) throw new KeyNotFoundException("Không tìm thấy lệnh xuất kho.");
 
+            var productIds = pt.Items.Select(pti => pti.ProductId).Distinct().ToList();
+            var inventoriesAtThisWarehouse = await _context.Inventories
+                .Where(inv => inv.ProductId != null && productIds.Contains(inv.ProductId.Value) && inv.WarehouseLocation!.WarehouseId == pt.WarehouseId)
+                .ToListAsync();
+
             return new PickTaskDto
             {
                 PickTaskId = pt.Id,
@@ -457,6 +490,9 @@ namespace VietTien.API.Services.Implementations
                     ProductName = pti.Product.Name,
                     SKU = pti.Product.Sku,
                     RequestedQuantity = pti.QuantityToPick,
+                    // Tồn TẠI ĐÚNG KHO của pick task này (pt.WarehouseId) — không phải tổng 3 kho, để nhân
+                    // viên đối chiếu đúng số tồn tại chỗ họ đang đứng lấy hàng (mục 10).
+                    PhysicalStock = inventoriesAtThisWarehouse.Where(inv => inv.ProductId == pti.ProductId).Sum(inv => inv.OnHandQuantity),
                     PackedQuantity = pti.PickedQuantity,
                     RemainingQuantity = pti.QuantityToPick - pti.PickedQuantity
                 }).ToList()
@@ -770,11 +806,41 @@ namespace VietTien.API.Services.Implementations
             }
         }
 
+        // Đóng gói xong: bắt buộc số thùng + tổng cân nặng + ít nhất 1 ảnh bằng chứng — trước đây nút
+        // "Hoàn tất Packing" trên FE không gọi backend nào cả (chỉ đổi state cục bộ), nên chưa từng có
+        // ràng buộc nào. Nay đây là cổng thật, và ConsolidateOrderAsync sẽ yêu cầu bước này đã xong.
+        public async Task CompletePackingAsync(Guid orderId, Guid staffId, int boxCount, decimal totalWeightKg, List<string> evidenceImageUrls)
+        {
+            if (boxCount <= 0)
+                throw new ArgumentException("Số thùng đóng gói phải lớn hơn 0.");
+            if (totalWeightKg <= 0)
+                throw new ArgumentException("Tổng trọng lượng đóng gói phải lớn hơn 0.");
+            if (evidenceImageUrls == null || evidenceImageUrls.Count == 0)
+                throw new ArgumentException("Bắt buộc phải có ít nhất 1 ảnh bằng chứng đóng gói.");
+
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
+            if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
+
+            if (order.WarehouseStaffId.HasValue && order.WarehouseStaffId.Value != staffId)
+                throw new UnauthorizedAccessException("Bạn không có quyền thao tác trên đơn hàng này.");
+
+            if (order.FulfillmentStatus != FulfillmentStatus.Ready)
+                throw new Exception("Đơn hàng chưa lấy hàng xong (Picking), chưa thể hoàn tất đóng gói.");
+
+            order.PackedBoxCount = boxCount;
+            order.TotalPackedWeightKg = totalWeightKg;
+            order.PackingEvidenceUrls = string.Join(",", evidenceImageUrls);
+            order.PackingCompletedAt = DateTime.UtcNow;
+
+            _context.Orders.Update(order);
+            await _context.SaveChangesAsync();
+        }
+
         public async Task ConsolidateOrderAsync(Guid orderId, Guid staffId)
         {
             var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
-            
+
             if (order.WarehouseStaffId.HasValue && order.WarehouseStaffId.Value != staffId)
                 throw new UnauthorizedAccessException("Bạn không có quyền thao tác trên đơn hàng này.");
 
@@ -783,12 +849,17 @@ namespace VietTien.API.Services.Implementations
             if (order.FulfillmentStatus != FulfillmentStatus.Ready && order.FulfillmentStatus != FulfillmentStatus.Consolidating)
                 throw new Exception("Đơn hàng chưa sẵn sàng để tập kết.");
 
+            // Bắt buộc đã đóng gói xong (số thùng + cân nặng + bằng chứng) trước khi cho tập kết — chặn
+            // bỏ qua bước đóng gói (mục 11).
+            if (order.PackingCompletedAt == null)
+                throw new Exception("Đơn hàng chưa hoàn tất đóng gói (chưa nhập số thùng/cân nặng/ảnh bằng chứng). Vui lòng hoàn tất Packing trước.");
+
             order.FulfillmentStatus = FulfillmentStatus.Consolidated;
             _context.Orders.Update(order);
             await _context.SaveChangesAsync();
         }
 
-        public async Task HandoverOrderAsync(Guid orderId, Guid staffId, string callerRole, HandoverRequestDto dto)
+        public async Task<HandoverResultDto> HandoverOrderAsync(Guid orderId, Guid staffId, string callerRole, HandoverRequestDto dto)
         {
             // BR-034: xác nhận kép — mỗi bên chỉ được ký phần chữ ký của mình. Trước đây endpoint dùng
             // chung [Authorize(Roles = "WarehouseStaff,SalesStaff,...")] không đối chiếu vai trò gọi
@@ -799,7 +870,9 @@ namespace VietTien.API.Services.Implementations
             if (callerRole == nameof(SystemRole.SalesStaff) && !string.IsNullOrEmpty(dto.WarehouseSignature))
                 throw new UnauthorizedAccessException("Sales không được ký thay phía kho.");
 
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
+            var order = await _context.Orders
+                .Include(o => o.OrderItems)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
             if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
 
             if (order.FulfillmentStatus != FulfillmentStatus.Consolidated)
@@ -829,15 +902,122 @@ namespace VietTien.API.Services.Implementations
                 handover.SalesStaffId = staffId; // In reality this staffId could be the Sales user ID, we just assign whoever triggered this
             }
 
-            if (!string.IsNullOrEmpty(handover.WarehouseSignature) && !string.IsNullOrEmpty(handover.SalesSignature))
+            var isNowConfirmed = !string.IsNullOrEmpty(handover.WarehouseSignature) && !string.IsNullOrEmpty(handover.SalesSignature);
+            if (!isNowConfirmed)
             {
-                handover.Status = HandoverStatus.Confirmed;
-                handover.HandoverTime = DateTime.UtcNow;
-                order.FulfillmentStatus = FulfillmentStatus.HandedOver;
+                _context.Orders.Update(order);
+                await _context.SaveChangesAsync();
+                return new HandoverResultDto { Message = "Đã ghi nhận chữ ký, chờ bên còn lại xác nhận.", IsConfirmed = false };
             }
 
-            _context.Orders.Update(order);
-            await _context.SaveChangesAsync();
+            handover.Status = HandoverStatus.Confirmed;
+            handover.HandoverTime = DateTime.UtcNow;
+
+            // Cả 2 chữ ký đã đủ -> tự động sinh và Post luôn phiếu xuất kho (không còn cần bước Post thủ
+            // công riêng ở WarehouseGoodsIssue.tsx cho loại SalesOrder) — tái dùng đúng logic trừ kho/
+            // StockTransaction/ReleaseAllocated đã có ở CreateGoodsIssueForOrderAsync, cùng 1 transaction
+            // với việc chuyển FulfillmentStatus để không bao giờ có trạng thái "đã bàn giao nhưng chưa
+            // xuất kho" lơ lửng.
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                order.FulfillmentStatus = FulfillmentStatus.Fulfilled;
+                _context.Orders.Update(order);
+
+                var goodsIssue = await CreateGoodsIssueForOrderAsync(order, staffId);
+                await _context.SaveChangesAsync();
+
+                await _inventoryReservationService.ReleaseAllocatedAsync(
+                    order.OrderItems.Select(i => (i.ProductId, i.Quantity)));
+
+                await transaction.CommitAsync();
+
+                return new HandoverResultDto
+                {
+                    Message = "Bàn giao đơn hàng thành công. Phiếu xuất kho đã được tạo tự động.",
+                    IsConfirmed = true,
+                    GoodsIssueId = goodsIssue.Id,
+                    GoodsIssueCode = goodsIssue.Code
+                };
+            }
+            catch
+            {
+                await transaction.RollbackAsync();
+                throw;
+            }
+        }
+
+        // Tách từ PostGoodsIssueAsync gốc: build + lưu 1 GoodsIssue (Type=SalesOrder) trừ tồn WH-DEFAULT
+        // cho toàn bộ OrderItems của 1 đơn. KHÔNG tự SaveChanges/commit — caller (HandoverOrderAsync hoặc
+        // PostGoodsIssueAsync) quản lý transaction để gộp chung với thay đổi FulfillmentStatus.
+        private async Task<GoodsIssue> CreateGoodsIssueForOrderAsync(Order order, Guid staffId)
+        {
+            var warehouseId = await _context.Warehouses.Where(w => w.Code == "WH-DEFAULT").Select(w => w.Id).FirstOrDefaultAsync();
+            if (warehouseId == Guid.Empty) throw new KeyNotFoundException("Không tìm thấy kho mặc định (WH-DEFAULT).");
+
+            var goodsIssue = new GoodsIssue
+            {
+                Id = Guid.NewGuid(),
+                Code = "GI-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
+                ReferenceId = order.Id,
+                IssuedByUserId = staffId,
+                WarehouseId = warehouseId,
+                IssueDate = DateTime.UtcNow,
+                Type = GoodsIssueType.SalesOrder,
+                Status = GoodsIssueStatus.Posted
+            };
+
+            foreach (var item in order.OrderItems)
+            {
+                // BUGFIX: trước đây chỉ tìm 1 dòng Inventory DUY NHẤT có đủ OnHandQuantity cho toàn bộ
+                // item.Quantity — nhưng tồn ở WH-DEFAULT được phép trải trên nhiều vị trí (bin), y hệt
+                // cách StockTransferService/InventoryReservationService đã xử lý ở nơi khác. Một đơn hoàn
+                // toàn hợp lệ (đủ tổng tồn) vẫn bị chặn nếu số lượng đó nằm rải rác ở >1 vị trí. Nay gom
+                // tất cả các dòng tồn của sản phẩm tại WH-DEFAULT, trừ dần từ dòng lớn nhất, ghi 1
+                // StockTransaction cho mỗi dòng thực sự bị trừ để vết audit khớp đúng vị trí vật lý.
+                var rows = await _context.Inventories
+                    .Include(inv => inv.WarehouseLocation)
+                    .ThenInclude(wl => wl.Warehouse)
+                    .Where(inv => inv.ProductId == item.ProductId && inv.OnHandQuantity > 0 && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Code == "WH-DEFAULT")
+                    .OrderByDescending(inv => inv.OnHandQuantity)
+                    .ToListAsync();
+
+                var totalOnHand = rows.Sum(r => r.OnHandQuantity);
+                if (totalOnHand < item.Quantity)
+                    throw new Exception($"Không đủ tồn kho khả dụng cho sản phẩm {item.ProductId} tại kho tập kết (WH-DEFAULT). Vui lòng kiểm tra lại điều chuyển nội bộ.");
+
+                var remaining = item.Quantity;
+                foreach (var inventory in rows)
+                {
+                    if (remaining <= 0) break;
+                    var take = Math.Min(remaining, inventory.OnHandQuantity);
+                    if (take <= 0) continue;
+
+                    inventory.OnHandQuantity -= take;
+                    _context.Inventories.Update(inventory);
+
+                    // Log biến động tồn kho StockTransaction — thiếu bước này khiến báo cáo xuất/nhập và
+                    // "hàng chậm luân chuyển" (đọc từ StockTransaction) không thấy được các đơn đã xuất thật qua luồng này.
+                    _context.StockTransactions.Add(new StockTransaction
+                    {
+                        InventoryId = inventory.Id,
+                        ProductId = item.ProductId,
+                        WarehouseLocationId = inventory.WarehouseLocationId,
+                        QuantityChange = -take,
+                        TransactionType = TransactionType.GoodsIssue,
+                        ReferenceId = goodsIssue.Id,
+                        CreatedByUserId = staffId,
+                        CreatedAt = DateTime.UtcNow
+                    });
+
+                    remaining -= take;
+                }
+
+                goodsIssue.Items.Add(new GoodsIssueItem { GoodsIssueId = goodsIssue.Id, ProductId = item.ProductId, Quantity = item.Quantity });
+            }
+
+            _context.GoodsIssues.Add(goodsIssue);
+            return goodsIssue;
         }
 
         public async Task PostGoodsIssueAsync(Guid orderId, Guid staffId)
@@ -848,80 +1028,16 @@ namespace VietTien.API.Services.Implementations
                 var order = await _context.Orders
                     .Include(o => o.OrderItems)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
-                
+
                 if (order == null) throw new KeyNotFoundException("Không tìm thấy đơn hàng.");
-                
+
                 if (order.FulfillmentStatus != FulfillmentStatus.HandedOver)
                     throw new Exception("Đơn hàng chưa được bàn giao.");
 
                 order.FulfillmentStatus = FulfillmentStatus.Fulfilled;
-
-                var warehouseId = await _context.Warehouses.Where(w => w.Code == "WH-DEFAULT").Select(w => w.Id).FirstOrDefaultAsync();
-                if (warehouseId == Guid.Empty) throw new KeyNotFoundException("Không tìm thấy kho mặc định (WH-DEFAULT).");
-
-                var goodsIssue = new GoodsIssue
-                {
-                    Id = Guid.NewGuid(),
-                    Code = "GI-" + DateTime.UtcNow.ToString("yyyyMMddHHmmss"),
-                    ReferenceId = order.Id,
-                    IssuedByUserId = staffId,
-                    WarehouseId = warehouseId,
-                    IssueDate = DateTime.UtcNow,
-                    Type = GoodsIssueType.SalesOrder,
-                    Status = GoodsIssueStatus.Posted
-                };
-                
-                foreach (var item in order.OrderItems)
-                {
-                    // BUGFIX: trước đây chỉ tìm 1 dòng Inventory DUY NHẤT có đủ OnHandQuantity cho toàn bộ
-                    // item.Quantity — nhưng tồn ở WH-DEFAULT được phép trải trên nhiều vị trí (bin), y hệt
-                    // cách StockTransferService/InventoryReservationService đã xử lý ở nơi khác. Một đơn hoàn
-                    // toàn hợp lệ (đủ tổng tồn) vẫn bị chặn nếu số lượng đó nằm rải rác ở >1 vị trí. Nay gom
-                    // tất cả các dòng tồn của sản phẩm tại WH-DEFAULT, trừ dần từ dòng lớn nhất, ghi 1
-                    // StockTransaction cho mỗi dòng thực sự bị trừ để vết audit khớp đúng vị trí vật lý.
-                    var rows = await _context.Inventories
-                        .Include(inv => inv.WarehouseLocation)
-                        .ThenInclude(wl => wl.Warehouse)
-                        .Where(inv => inv.ProductId == item.ProductId && inv.OnHandQuantity > 0 && inv.WarehouseLocation != null && inv.WarehouseLocation.Warehouse!.Code == "WH-DEFAULT")
-                        .OrderByDescending(inv => inv.OnHandQuantity)
-                        .ToListAsync();
-
-                    var totalOnHand = rows.Sum(r => r.OnHandQuantity);
-                    if (totalOnHand < item.Quantity)
-                        throw new Exception($"Không đủ tồn kho khả dụng cho sản phẩm {item.ProductId} tại kho tập kết (WH-DEFAULT). Vui lòng kiểm tra lại điều chuyển nội bộ.");
-
-                    var remaining = item.Quantity;
-                    foreach (var inventory in rows)
-                    {
-                        if (remaining <= 0) break;
-                        var take = Math.Min(remaining, inventory.OnHandQuantity);
-                        if (take <= 0) continue;
-
-                        inventory.OnHandQuantity -= take;
-                        _context.Inventories.Update(inventory);
-
-                        // Log biến động tồn kho StockTransaction — thiếu bước này khiến báo cáo xuất/nhập và
-                        // "hàng chậm luân chuyển" (đọc từ StockTransaction) không thấy được các đơn đã xuất thật qua luồng này.
-                        _context.StockTransactions.Add(new StockTransaction
-                        {
-                            InventoryId = inventory.Id,
-                            ProductId = item.ProductId,
-                            WarehouseLocationId = inventory.WarehouseLocationId,
-                            QuantityChange = -take,
-                            TransactionType = TransactionType.GoodsIssue,
-                            ReferenceId = goodsIssue.Id,
-                            CreatedByUserId = staffId,
-                            CreatedAt = DateTime.UtcNow
-                        });
-
-                        remaining -= take;
-                    }
-
-                    goodsIssue.Items.Add(new GoodsIssueItem { GoodsIssueId = goodsIssue.Id, ProductId = item.ProductId, Quantity = item.Quantity });
-                }
-
-                _context.GoodsIssues.Add(goodsIssue);
                 _context.Orders.Update(order);
+
+                await CreateGoodsIssueForOrderAsync(order, staffId);
                 await _context.SaveChangesAsync();
 
                 // BUGFIX: hàng đã thật sự rời kho ở trên (trừ OnHandQuantity) nhưng phần AllocatedQuantity

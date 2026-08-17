@@ -135,6 +135,7 @@ namespace VietTien.API.Repositories.Implementations
                     .ThenInclude(cp => cp.Addresses)
                 .Include(o => o.OrderItems)
                     .ThenInclude(oi => oi.Product)  // Include Product để lấy tên, SKU (BR-OH-09)
+                .Include(o => o.DeliveryTrip)  // Giờ dự kiến xuất phát/đến (Nhóm C) hiển thị cho khách hàng
                 .Include(o => o.ReturnedGoodsLogs)
                 .Include(o => o.ReturnExchangeRequests)
                     .ThenInclude(req => req.ReturnItems)

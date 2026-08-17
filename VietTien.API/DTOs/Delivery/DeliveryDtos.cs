@@ -83,6 +83,7 @@ namespace VietTien.API.DTOs.Delivery
         public int FailedDeliveryCount { get; set; }
         public bool IsBlocked { get; set; }         // >= 3 lần thất bại
         public int ItemCount { get; set; }
+        public decimal? TotalPackedWeightKg { get; set; }
     }
 
     // ─── BƯỚC 2: GHI NHẬN KẾT QUẢ GIAO HÀNG (POD + COD) ────────────────────
@@ -347,8 +348,26 @@ namespace VietTien.API.DTOs.Delivery
         public DateTime CreatedAt { get; set; }
         public DateTime? StartedAt { get; set; }
         public DateTime? CompletedAt { get; set; }
+        public DateTime? PlannedDepartureAt { get; set; }
+        public DateTime? PlannedArrivalAt { get; set; }
+        public decimal TotalWeightKg { get; set; }
+        public decimal? VehicleCapacityKg { get; set; }
+        public decimal? RemainingCapacityKg { get; set; }
         public List<Guid> OrderIds { get; set; } = new();
         public List<string> OrderCodes { get; set; } = new();
+    }
+
+    public class StartLoadingRequestDto
+    {
+        public DateTime? PlannedDepartureAt { get; set; }
+        public DateTime? PlannedArrivalAt { get; set; }
+    }
+
+    public class AddOrdersToTripRequestDto
+    {
+        [Required]
+        [MinLength(1, ErrorMessage = "Danh sách đơn hàng không được rỗng.")]
+        public List<Guid> OrderIds { get; set; } = new();
     }
 
     public class RecordDeliveryAttemptRequestDto

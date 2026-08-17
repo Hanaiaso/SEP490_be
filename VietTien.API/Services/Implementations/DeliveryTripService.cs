@@ -29,6 +29,9 @@ namespace VietTien.API.Services.Implementations
 
         private static DeliveryTripResponseDto ToDto(DeliveryTrip trip)
         {
+            var totalWeight = trip.Orders?.Sum(o => o.TotalPackedWeightKg ?? 0) ?? 0;
+            var capacity = trip.Vehicle?.Capacity;
+
             return new DeliveryTripResponseDto
             {
                 Id = trip.Id,
@@ -41,6 +44,11 @@ namespace VietTien.API.Services.Implementations
                 CreatedAt = trip.CreatedAt,
                 StartedAt = trip.StartedAt,
                 CompletedAt = trip.CompletedAt,
+                PlannedDepartureAt = trip.PlannedDepartureAt,
+                PlannedArrivalAt = trip.PlannedArrivalAt,
+                TotalWeightKg = totalWeight,
+                VehicleCapacityKg = capacity,
+                RemainingCapacityKg = capacity.HasValue ? capacity.Value - totalWeight : null,
                 OrderIds = trip.Orders?.Select(o => o.Id).ToList() ?? new List<Guid>(),
                 OrderCodes = trip.Orders?.Select(o => o.OrderCode).ToList() ?? new List<string>()
             };
@@ -55,6 +63,22 @@ namespace VietTien.API.Services.Implementations
             return trip ?? throw new KeyNotFoundException("Không tìm thấy chuyến giao hàng.");
         }
 
+        // Chặn cứng (đã chốt với người dùng): không cho gán thêm đơn vào chuyến nếu tổng trọng lượng
+        // vượt Vehicle.Capacity. Đơn chưa có TotalPackedWeightKg (chưa đóng gói xong) tính là 0kg —
+        // không chặn, chỉ đơn giản chưa đóng góp vào tổng (đúng tinh thần "an toàn, không suy diễn").
+        private static void EnsureWithinCapacity(Vehicle vehicle, decimal currentWeightKg, decimal addingWeightKg, List<string> addingOrderCodes)
+        {
+            if (vehicle.Capacity == null) return;
+
+            var newTotal = currentWeightKg + addingWeightKg;
+            if (newTotal > vehicle.Capacity.Value)
+            {
+                throw new VehicleOverweightException(
+                    $"Xe {vehicle.VehicleNumber} chỉ chở tối đa {vehicle.Capacity.Value:N0}kg, hiện đã có {currentWeightKg:N0}kg. " +
+                    $"Thêm đơn {string.Join(", ", addingOrderCodes)} ({addingWeightKg:N0}kg) sẽ vượt tải trọng. Vui lòng chọn xe/chuyến khác cho (các) đơn này.");
+            }
+        }
+
         public async Task<DeliveryTripResponseDto> CreateTripAsync(Guid createdByUserId, CreateDeliveryTripRequestDto dto)
         {
             var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.Id == dto.VehicleId);
@@ -67,11 +91,23 @@ namespace VietTien.API.Services.Implementations
                 t.VehicleId == dto.VehicleId
                 && t.Shift == dto.Shift
                 && t.TripDate.Date == tripDate
-                && (t.Status == DeliveryTripStatus.Scheduled || t.Status == DeliveryTripStatus.InDelivery));
+                && (t.Status == DeliveryTripStatus.Scheduled || t.Status == DeliveryTripStatus.Loading || t.Status == DeliveryTripStatus.InDelivery));
 
             if (hasConflict)
                 throw new VehicleShiftConflictException(
                     $"Xe {vehicle.VehicleNumber} đã có chuyến giao trùng ca {dto.Shift} ngày {tripDate:dd/MM/yyyy}.");
+
+            var candidateOrders = await _context.Orders
+                .Where(o => dto.OrderIds.Contains(o.Id))
+                .ToListAsync();
+
+            var eligibleOrders = candidateOrders
+                // Chỉ gom vào chuyến những đơn chưa được lập lịch giao ở luồng nào khác — cùng ràng buộc
+                // với ScheduleDeliveryAsync (OrderService.cs) để 2 luồng không giẫm lên nhau.
+                .Where(o => o.DeliveryStatus == DeliveryStatus.NotScheduled || o.DeliveryStatus == DeliveryStatus.Rescheduled)
+                .ToList();
+
+            EnsureWithinCapacity(vehicle, 0m, eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0), eligibleOrders.Select(o => o.OrderCode).ToList());
 
             var trip = new DeliveryTrip
             {
@@ -84,17 +120,8 @@ namespace VietTien.API.Services.Implementations
             };
             _context.DeliveryTrips.Add(trip);
 
-            var orders = await _context.Orders
-                .Where(o => dto.OrderIds.Contains(o.Id))
-                .ToListAsync();
-
-            foreach (var order in orders)
+            foreach (var order in eligibleOrders)
             {
-                // Chỉ gom vào chuyến những đơn chưa được lập lịch giao ở luồng nào khác — cùng ràng buộc
-                // với ScheduleDeliveryAsync (OrderService.cs) để 2 luồng không giẫm lên nhau.
-                if (order.DeliveryStatus != DeliveryStatus.NotScheduled && order.DeliveryStatus != DeliveryStatus.Rescheduled)
-                    continue;
-
                 order.DeliveryTripId = trip.Id;
                 order.DeliveryStatus = DeliveryStatus.Scheduled;
             }
@@ -102,7 +129,71 @@ namespace VietTien.API.Services.Implementations
             await _context.SaveChangesAsync();
 
             trip.Vehicle = vehicle;
-            trip.Orders = orders.Where(o => o.DeliveryTripId == trip.Id).ToList();
+            trip.Orders = eligibleOrders;
+            return ToDto(trip);
+        }
+
+        public async Task<DeliveryTripResponseDto> StartLoadingAsync(Guid tripId, StartLoadingRequestDto dto)
+        {
+            var trip = await LoadTripAsync(tripId);
+
+            if (trip.Status != DeliveryTripStatus.Scheduled)
+                throw new InvalidOperationException("Chuyến giao không ở trạng thái chờ bốc hàng.");
+
+            trip.Status = DeliveryTripStatus.Loading;
+            if (dto.PlannedDepartureAt.HasValue) trip.PlannedDepartureAt = dto.PlannedDepartureAt;
+            if (dto.PlannedArrivalAt.HasValue) trip.PlannedArrivalAt = dto.PlannedArrivalAt;
+
+            await _context.SaveChangesAsync();
+            return ToDto(trip);
+        }
+
+        public async Task<DeliveryTripResponseDto> AddOrdersToTripAsync(Guid tripId, AddOrdersToTripRequestDto dto)
+        {
+            var trip = await LoadTripAsync(tripId);
+
+            if (trip.Status != DeliveryTripStatus.Loading)
+                throw new InvalidOperationException("Chỉ có thể thêm đơn khi chuyến đang ở trạng thái Bốc hàng (Loading).");
+
+            var candidateOrders = await _context.Orders
+                .Where(o => dto.OrderIds.Contains(o.Id))
+                .ToListAsync();
+
+            var eligibleOrders = candidateOrders
+                .Where(o => o.DeliveryStatus == DeliveryStatus.NotScheduled || o.DeliveryStatus == DeliveryStatus.Rescheduled)
+                .ToList();
+
+            var currentWeight = trip.Orders.Sum(o => o.TotalPackedWeightKg ?? 0);
+            EnsureWithinCapacity(trip.Vehicle, currentWeight, eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0), eligibleOrders.Select(o => o.OrderCode).ToList());
+
+            foreach (var order in eligibleOrders)
+            {
+                order.DeliveryTripId = trip.Id;
+                order.DeliveryStatus = DeliveryStatus.Scheduled;
+            }
+
+            await _context.SaveChangesAsync();
+
+            trip.Orders = trip.Orders.Concat(eligibleOrders).ToList();
+            return ToDto(trip);
+        }
+
+        public async Task<DeliveryTripResponseDto> RemoveOrderFromTripAsync(Guid tripId, Guid orderId)
+        {
+            var trip = await LoadTripAsync(tripId);
+
+            if (trip.Status != DeliveryTripStatus.Loading)
+                throw new InvalidOperationException("Chỉ có thể rút đơn khi chuyến đang ở trạng thái Bốc hàng (Loading).");
+
+            var order = trip.Orders.FirstOrDefault(o => o.Id == orderId)
+                ?? throw new KeyNotFoundException("Đơn hàng không thuộc chuyến giao này.");
+
+            order.DeliveryTripId = null;
+            order.DeliveryStatus = DeliveryStatus.NotScheduled;
+
+            await _context.SaveChangesAsync();
+
+            trip.Orders = trip.Orders.Where(o => o.Id != orderId).ToList();
             return ToDto(trip);
         }
 
@@ -110,8 +201,8 @@ namespace VietTien.API.Services.Implementations
         {
             var trip = await LoadTripAsync(tripId);
 
-            if (trip.Status != DeliveryTripStatus.Scheduled)
-                throw new InvalidOperationException("Chuyến giao không ở trạng thái chờ bắt đầu.");
+            if (trip.Status != DeliveryTripStatus.Loading)
+                throw new InvalidOperationException("Chuyến giao phải ở trạng thái Bốc hàng (Loading) trước khi xuất phát.");
 
             var orderIds = trip.Orders.Select(o => o.Id).ToList();
             var confirmedHandoverOrderIds = await _context.HandoverRecords
@@ -139,6 +230,23 @@ namespace VietTien.API.Services.Implementations
         {
             var trip = await LoadTripAsync(tripId);
             return ToDto(trip);
+        }
+
+        public async Task<List<DeliveryTripResponseDto>> GetTripsAsync(DateTime? date, string? status)
+        {
+            var query = _context.DeliveryTrips
+                .Include(t => t.Vehicle)
+                .Include(t => t.Orders)
+                .AsQueryable();
+
+            if (date.HasValue)
+                query = query.Where(t => t.TripDate.Date == date.Value.Date);
+
+            if (!string.IsNullOrEmpty(status) && Enum.TryParse<DeliveryTripStatus>(status, out var statusEnum))
+                query = query.Where(t => t.Status == statusEnum);
+
+            var trips = await query.OrderByDescending(t => t.TripDate).ThenBy(t => t.Shift).ToListAsync();
+            return trips.Select(ToDto).ToList();
         }
 
         public async Task<RecordDeliveryAttemptResponseDto> RecordAttemptAsync(Guid recordedByUserId, RecordDeliveryAttemptRequestDto dto)

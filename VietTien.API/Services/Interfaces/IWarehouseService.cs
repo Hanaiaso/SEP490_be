@@ -13,11 +13,12 @@ namespace VietTien.API.Services.Interfaces
         Task AcceptPickTaskAsync(Guid pickTaskId, Guid staffId);
         Task UpdatePickTaskItemProgressAsync(Guid pickTaskId, Guid staffId, Guid productId, int pickedQty, string? imageUrl);
         Task CompletePickTaskAsync(Guid pickTaskId, Guid staffId);
+        Task CompletePackingAsync(Guid orderId, Guid staffId, int boxCount, decimal totalWeightKg, List<string> evidenceImageUrls);
         
         Task AcceptOrderAsync(Guid orderId, Guid staffId);
         Task ReportShortageAsync(Guid orderId, Guid staffId, ShortageAlertRequestDto alert);
         Task ConsolidateOrderAsync(Guid orderId, Guid staffId);
-        Task HandoverOrderAsync(Guid orderId, Guid staffId, string callerRole, HandoverRequestDto dto);
+        Task<HandoverResultDto> HandoverOrderAsync(Guid orderId, Guid staffId, string callerRole, HandoverRequestDto dto);
         Task PostGoodsIssueAsync(Guid orderId, Guid staffId);
 
         // FUL-08: gộp pick nhiều đơn — cần Sales Manager duyệt trước (MultiPickApproval)

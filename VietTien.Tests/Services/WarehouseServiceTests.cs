@@ -245,41 +245,62 @@ namespace VietTien.Tests.Services
             _db.PickTasks.Single(pt => pt.Id == task.Id).Status.Should().Be(PickTaskStatus.Picking);
         }
 
-        // L1-WH-09 | State-Valid | Tập kết sau khi mọi pick task xong (Ready) -> Consolidated
+        // L1-WH-09 | State-Valid | Tập kết sau khi mọi pick task xong (Ready) + đã đóng gói xong -> Consolidated
         [Fact]
-        public async Task L1_WH_09_Consolidate_AfterReady_Consolidated()
+        public async Task L1_WH_09_Consolidate_AfterReadyAndPacked_Consolidated()
         {
             var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Ready, _whStaff.Id);
+            order.PackingCompletedAt = DateTime.UtcNow;
+            _db.SaveChanges();
 
             await _sut.ConsolidateOrderAsync(order.Id, _whStaff.Id);
 
             _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.Consolidated);
         }
 
+        // L1-WH-09b | EP-Invalid | Chưa hoàn tất đóng gói (PackingCompletedAt = null) -> chặn tập kết
+        [Fact]
+        public async Task L1_WH_09b_Consolidate_PackingNotCompleted_Rejected()
+        {
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Ready, _whStaff.Id);
+
+            var act = () => _sut.ConsolidateOrderAsync(order.Id, _whStaff.Id);
+
+            await act.Should().ThrowAsync<Exception>();
+            _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.Ready);
+        }
+
         //  ▶ Block: HandoverOrderAsync() / PostGoodsIssueAsync()
 
-        // L1-WH-10 | EP-Valid | Bàn giao kèm chữ ký -> HandoverRecord lưu chữ ký + staff + thời điểm, đơn HandedOver
-        // (Code mới: cần ĐỦ 2 chữ ký Kho + Sales thì handover mới Confirmed và đơn mới sang HandedOver.)
+        // L1-WH-10 | EP-Valid | Bàn giao kèm chữ ký -> HandoverRecord lưu chữ ký + staff + thời điểm, đơn Fulfilled
+        // (Code mới: cần ĐỦ 2 chữ ký Kho + Sales thì handover mới Confirmed; đơn tự sinh phiếu xuất kho
+        // và chuyển thẳng sang Fulfilled, không còn dừng ở HandedOver trung gian.)
         [Fact]
         public async Task L1_WH_10_Handover_WithSignature_RecordCreated()
         {
-            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Consolidated, _whStaff.Id);
+            SeedDefaultWarehouseStock(_p1.Id, 10);
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Consolidated, _whStaff.Id, qty: 4);
 
             // BR-034: callerRole=Admin vì test này ký cả 2 phía trong 1 lần gọi (kiểm tra logic tạo
             // HandoverRecord đầy đủ) — WarehouseStaff/SalesStaff bị chặn ký thay phía kia, chỉ CEO/Admin
             // được phép ký cả hai.
-            await _sut.HandoverOrderAsync(order.Id, _whStaff.Id, nameof(SystemRole.Admin), new HandoverRequestDto
+            var result = await _sut.HandoverOrderAsync(order.Id, _whStaff.Id, nameof(SystemRole.Admin), new HandoverRequestDto
             {
                 WarehouseSignature = "wh-signature",
                 SalesSignature = "sales-signature"
             });
 
-            _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.HandedOver);
+            _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.Fulfilled);
             var record = _db.HandoverRecords.Single(h => h.OrderId == order.Id);
             record.WarehouseStaffId.Should().Be(_whStaff.Id);
             record.WarehouseSignature.Should().Be("wh-signature");
             record.Status.Should().Be(HandoverStatus.Confirmed);
             record.HandoverTime.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(10));
+
+            result.GoodsIssueId.Should().NotBeEmpty();
+            result.GoodsIssueCode.Should().NotBeNullOrWhiteSpace();
+            _db.Inventories.Single(i => i.ProductId == _p1.Id).OnHandQuantity.Should().Be(6);
+            _db.GoodsIssues.Should().ContainSingle(gi => gi.ReferenceId == order.Id && gi.Status == GoodsIssueStatus.Posted);
         }
 
         /// <summary>Code mới yêu cầu kho tập kết có Code = "WH-DEFAULT" — seed tồn kho tại đó.</summary>
@@ -370,6 +391,62 @@ namespace VietTien.Tests.Services
             _db.ChangeTracker.Clear();
             _db.Inventories.Single(i => i.ProductId == _p1.Id).OnHandQuantity.Should().Be(10);
             _db.Orders.Single(o => o.Id == order.Id).FulfillmentStatus.Should().Be(FulfillmentStatus.HandedOver);
+        }
+
+        //  ▶ Block: CompletePackingAsync()
+
+        // L1-WH-13 | EP-Valid | Đủ số thùng + cân nặng + ảnh bằng chứng -> lưu đủ 4 trường, không đổi FulfillmentStatus
+        [Fact]
+        public async Task L1_WH_13_CompletePacking_ValidData_FieldsSaved()
+        {
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Ready, _whStaff.Id);
+
+            await _sut.CompletePackingAsync(order.Id, _whStaff.Id, boxCount: 3, totalWeightKg: 12.5m,
+                evidenceImageUrls: new List<string> { "https://cdn/evidence1.jpg" });
+
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.PackedBoxCount.Should().Be(3);
+            updated.TotalPackedWeightKg.Should().Be(12.5m);
+            updated.PackingEvidenceUrls.Should().Be("https://cdn/evidence1.jpg");
+            updated.PackingCompletedAt.Should().NotBeNull();
+            updated.FulfillmentStatus.Should().Be(FulfillmentStatus.Ready, "hoàn tất packing không tự chuyển trạng thái, việc đó do ConsolidateOrderAsync đảm nhiệm");
+        }
+
+        // L1-WH-14 | EP-Invalid | Thiếu ảnh bằng chứng -> từ chối, không lưu field nào
+        [Fact]
+        public async Task L1_WH_14_CompletePacking_NoEvidence_Rejected()
+        {
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Ready, _whStaff.Id);
+
+            var act = () => _sut.CompletePackingAsync(order.Id, _whStaff.Id, boxCount: 3, totalWeightKg: 12.5m,
+                evidenceImageUrls: new List<string>());
+
+            await act.Should().ThrowAsync<ArgumentException>();
+            _db.Orders.Single(o => o.Id == order.Id).PackingCompletedAt.Should().BeNull();
+        }
+
+        // L1-WH-15 | EP-Invalid | Số thùng <= 0 -> từ chối
+        [Fact]
+        public async Task L1_WH_15_CompletePacking_ZeroBoxCount_Rejected()
+        {
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Ready, _whStaff.Id);
+
+            var act = () => _sut.CompletePackingAsync(order.Id, _whStaff.Id, boxCount: 0, totalWeightKg: 12.5m,
+                evidenceImageUrls: new List<string> { "https://cdn/evidence1.jpg" });
+
+            await act.Should().ThrowAsync<ArgumentException>();
+        }
+
+        // L1-WH-16 | EP-Invalid | Đơn chưa xong Picking (chưa Ready) -> từ chối hoàn tất packing
+        [Fact]
+        public async Task L1_WH_16_CompletePacking_NotReady_Rejected()
+        {
+            var order = SeedOrder(OrderStatus.Processing, FulfillmentStatus.Picking, _whStaff.Id);
+
+            var act = () => _sut.CompletePackingAsync(order.Id, _whStaff.Id, boxCount: 3, totalWeightKg: 12.5m,
+                evidenceImageUrls: new List<string> { "https://cdn/evidence1.jpg" });
+
+            await act.Should().ThrowAsync<Exception>();
         }
     }
 }

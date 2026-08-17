@@ -1,4 +1,5 @@
 ﻿using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Warehouse;
@@ -95,6 +96,24 @@ namespace VietTien.Tests.Services
             var inv = _db.Inventories.Single(i => i.WarehouseLocationId == _loc1.Id);
             inv.OnHandQuantity.Should().Be(5);
             inv.InTransitQuantity.Should().Be(5);
+        }
+
+        // L1-ST-03b | State-Valid | Dispatch -> tự sinh phiếu xuất kho (GoodsIssueType.StockTransfer), Posted, đúng số lượng
+        [Fact]
+        public async Task L1_ST_03b_Dispatch_CreatesPostedGoodsIssue()
+        {
+            SeedSourceStock(10);
+            var draft = await CreateDraft(qty: 5);
+
+            var dto = await _sut.DispatchAsync(draft.Id);
+
+            dto.GoodsIssueId.Should().NotBeNull().And.NotBe(Guid.Empty);
+            dto.GoodsIssueCode.Should().NotBeNullOrWhiteSpace();
+            var goodsIssue = _db.GoodsIssues.Include(gi => gi.Items).Single(gi => gi.ReferenceId == draft.Id);
+            goodsIssue.Type.Should().Be(GoodsIssueType.StockTransfer);
+            goodsIssue.Status.Should().Be(GoodsIssueStatus.Posted);
+            goodsIssue.WarehouseId.Should().Be(_w1.Id);
+            goodsIssue.Items.Should().ContainSingle(i => i.ProductId == _p1.Id && i.Quantity == 5);
         }
 
         // L1-ST-04 | State-Invalid | Dispatch phiếu không ở Draft -> conflict, tồn kho không đổi

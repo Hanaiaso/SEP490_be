@@ -1492,6 +1492,11 @@ namespace VietTien.API.Data
                 entity.Property(v => v.Capacity).HasPrecision(18, 2);
             });
 
+            // Cùng lý do như Vehicle.Capacity ở trên: decimal? không bị vòng lặp SetPrecision(18,2)
+            // phía dưới bắt được -> khai báo rõ ràng để tránh SQL Server âm thầm cắt phần thập phân.
+            modelBuilder.Entity<Order>().Property(o => o.TotalPackedWeightKg).HasPrecision(18, 2);
+            modelBuilder.Entity<Product>().Property(p => p.WeightKg).HasPrecision(18, 2);
+
             modelBuilder.Entity<DiscountTier>(entity =>
             {
                 entity.HasIndex(t => t.MinAmount);

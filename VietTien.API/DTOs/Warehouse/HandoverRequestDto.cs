@@ -12,4 +12,14 @@ namespace VietTien.API.DTOs.Warehouse
         [MaxLength(5_000_000, ErrorMessage = "Chữ ký điện tử vượt quá kích thước cho phép.")]
         public string? SalesSignature { get; set; }
     }
+
+    /// <summary>Kết quả bàn giao — GoodsIssueCode chỉ có giá trị khi cả 2 chữ ký đã đủ (phiếu xuất kho
+    /// tự động sinh ngay lúc đó).</summary>
+    public class HandoverResultDto
+    {
+        public string Message { get; set; } = string.Empty;
+        public bool IsConfirmed { get; set; }
+        public Guid? GoodsIssueId { get; set; }
+        public string? GoodsIssueCode { get; set; }
+    }
 }

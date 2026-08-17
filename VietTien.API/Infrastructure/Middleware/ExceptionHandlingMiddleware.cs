@@ -86,6 +86,9 @@ namespace VietTien.API.Infrastructure.Middleware
                 case VehicleShiftConflictException shiftConflictEx:
                     return (StatusCodes.Status409Conflict, new { code = "VEHICLE_SHIFT_CONFLICT", message = shiftConflictEx.Message });
 
+                case VehicleOverweightException overweightEx:
+                    return (StatusCodes.Status409Conflict, new { code = "VEHICLE_OVERWEIGHT", message = overweightEx.Message });
+
                 case HandoverNotReadyException handoverEx:
                     return (StatusCodes.Status409Conflict, new { code = "HANDOVER_NOT_READY", message = handoverEx.Message });
 

@@ -238,6 +238,43 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpPost("{orderId}/complete-packing")]
+        [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
+        public async Task<IActionResult> CompletePacking(Guid orderId, [FromForm] int boxCount, [FromForm] decimal totalWeightKg, List<IFormFile> evidenceFiles)
+        {
+            try
+            {
+                if (evidenceFiles == null || evidenceFiles.Count == 0 || evidenceFiles.All(f => f.Length == 0))
+                    return BadRequest(new { message = "Bắt buộc phải có ít nhất 1 ảnh bằng chứng đóng gói." });
+
+                var staffId = GetUserId();
+                var urls = new List<string>();
+                foreach (var file in evidenceFiles.Where(f => f.Length > 0))
+                {
+                    urls.Add(await _cloudinaryService.UploadEvidenceAsync(file, "viettien/packing-evidence"));
+                }
+
+                await _warehouseService.CompletePackingAsync(orderId, staffId, boxCount, totalWeightKg, urls);
+                return Ok(new { message = "Hoàn tất đóng gói thành công." });
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("{orderId}/consolidate")]
         [Authorize(Roles = "WarehouseStaff,CEO,Admin")]
         public async Task<IActionResult> ConsolidateOrder(Guid orderId)
@@ -283,8 +320,8 @@ namespace VietTien.API.Controllers
                 }
 
                 var role = User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
-                await _warehouseService.HandoverOrderAsync(orderId, staffId, role, request);
-                return Ok(new { message = "Bàn giao đơn hàng thành công." });
+                var result = await _warehouseService.HandoverOrderAsync(orderId, staffId, role, request);
+                return Ok(new { message = result.Message, isConfirmed = result.IsConfirmed, goodsIssueId = result.GoodsIssueId, goodsIssueCode = result.GoodsIssueCode });
             }
             catch (KeyNotFoundException ex)
             {

@@ -33,6 +33,10 @@ namespace VietTien.API.Models
         public int? ExcessThreshold { get; set; }    // vượt ngưỡng này = tồn đọng
         public DateTime? LastAlertSentDate { get; set; } // cooldown dùng chung cho cả 2 loại cảnh báo trên
 
+        // Trọng lượng 1 đơn vị sản phẩm (CEO cấu hình ở trang Quản lý sản phẩm) — dùng để tính tổng
+        // trọng lượng đơn hàng khi đóng gói/xếp xe. null = chưa cấu hình.
+        public decimal? WeightKg { get; set; }
+
         // Navigation Properties
         public Category Category { get; set; } = null!;
         public ICollection<Inventory> Inventories { get; set; } = new List<Inventory>();

@@ -95,6 +95,14 @@ namespace VietTien.API.Models
         /// <summary>Thời điểm hoàn thành chuẩn bị/đóng gói hàng</summary>
         public DateTime? PickingCompletedAt { get; set; }
 
+        // ─── Đóng gói (Packing): số thùng + trọng lượng + bằng chứng bắt buộc trước khi tập kết ───
+        public int? PackedBoxCount { get; set; }
+        public decimal? TotalPackedWeightKg { get; set; }
+
+        /// <summary>Nhiều ảnh bằng chứng đóng gói, nối dấu phẩy (mirror StockTransfer.ProofImageUrl)</summary>
+        public string? PackingEvidenceUrls { get; set; }
+        public DateTime? PackingCompletedAt { get; set; }
+
         // ─── P2-6: Sales Manager mở khóa giao lại (UC-35) ───
         /// <summary>Thời điểm Sales Manager mở khóa cho đơn giao lại</summary>
         public DateTime? UnblockedAt { get; set; }

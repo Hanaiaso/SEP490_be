@@ -400,6 +400,8 @@ namespace VietTien.Tests.Controllers
         {
             _cloudinary.Setup(c => c.UploadBase64ImageAsync(It.IsAny<string>(), "viettien/handovers", It.IsAny<string>()))
                 .ReturnsAsync("https://cdn/sig.png");
+            _service.Setup(s => s.HandoverOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<HandoverRequestDto>()))
+                .ReturnsAsync(new HandoverResultDto { Message = "ok", IsConfirmed = true, GoodsIssueId = Guid.NewGuid(), GoodsIssueCode = "GI-1" });
             var request = new HandoverRequestDto
             {
                 WarehouseSignature = "data:image/png;base64,AAA",
@@ -417,6 +419,8 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task HandoverOrder_WhenSignaturesAlreadyUrls_SkipsUpload()
         {
+            _service.Setup(s => s.HandoverOrderAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<HandoverRequestDto>()))
+                .ReturnsAsync(new HandoverResultDto { Message = "Đã ghi nhận chữ ký, chờ bên còn lại xác nhận.", IsConfirmed = false });
             var request = new HandoverRequestDto
             {
                 WarehouseSignature = "https://cdn/da-upload.png",

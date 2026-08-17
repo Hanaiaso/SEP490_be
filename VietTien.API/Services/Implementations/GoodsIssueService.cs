@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using ClosedXML.Excel;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using VietTien.API.Data;
@@ -64,6 +66,51 @@ namespace VietTien.API.Services.Implementations
                 staffId, issue.WarehouseId, "xem phiếu xuất kho", "GoodsIssue", issue.Id.ToString());
 
             return MapToDto(issue);
+        }
+
+        // Lần đầu dùng ClosedXML để GHI (trước giờ chỉ dùng để đọc file Excel import ở PurchaseOrderService).
+        public async Task<byte[]> ExportExcelAsync(Guid id, Guid staffId)
+        {
+            var issue = await LoadIssueAsync(id);
+
+            await _warehouseAccessGuard.EnsureWarehouseAccessAsync(
+                staffId, issue.WarehouseId, "xuất Excel phiếu xuất kho", "GoodsIssue", issue.Id.ToString());
+
+            using var workbook = new XLWorkbook();
+            var sheet = workbook.AddWorksheet("Phiếu xuất kho");
+
+            sheet.Cell(1, 1).Value = "Mã phiếu";
+            sheet.Cell(1, 2).Value = issue.Code;
+            sheet.Cell(2, 1).Value = "Loại phiếu";
+            sheet.Cell(2, 2).Value = issue.Type.ToString();
+            sheet.Cell(3, 1).Value = "Kho";
+            sheet.Cell(3, 2).Value = issue.Warehouse?.Name ?? "";
+            sheet.Cell(4, 1).Value = "Người xuất";
+            sheet.Cell(4, 2).Value = issue.IssuedByUser?.FullName ?? "";
+            sheet.Cell(5, 1).Value = "Ngày xuất";
+            sheet.Cell(5, 2).Value = (issue.IssueDate ?? issue.CreatedAt).ToString("dd/MM/yyyy HH:mm");
+            sheet.Range(1, 1, 5, 1).Style.Font.Bold = true;
+
+            var headerRow = 7;
+            sheet.Cell(headerRow, 1).Value = "SKU";
+            sheet.Cell(headerRow, 2).Value = "Tên sản phẩm / nguyên liệu";
+            sheet.Cell(headerRow, 3).Value = "Số lượng";
+            sheet.Range(headerRow, 1, headerRow, 3).Style.Font.Bold = true;
+
+            var row = headerRow + 1;
+            foreach (var item in issue.Items)
+            {
+                sheet.Cell(row, 1).Value = item.Product?.Sku ?? "";
+                sheet.Cell(row, 2).Value = item.Product?.Name ?? item.Material?.Name ?? "";
+                sheet.Cell(row, 3).Value = item.Quantity;
+                row++;
+            }
+
+            sheet.Columns().AdjustToContents();
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
         }
 
         private async Task<GoodsIssue> LoadIssueAsync(Guid id)

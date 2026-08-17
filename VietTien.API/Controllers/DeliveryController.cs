@@ -387,7 +387,43 @@ namespace VietTien.API.Controllers
             return Ok(result);
         }
 
-        /// <summary>Bắt đầu chuyến giao — yêu cầu mọi đơn trong chuyến đã có HandoverRecord Confirmed.</summary>
+        /// <summary>Danh sách chuyến giao, lọc theo ngày/trạng thái (tuỳ chọn).</summary>
+        [HttpGet("trips")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> GetTrips([FromQuery] DateTime? date, [FromQuery] string? status)
+        {
+            var result = await _deliveryTripService.GetTripsAsync(date, status);
+            return Ok(result);
+        }
+
+        /// <summary>Bắt đầu bốc hàng lên xe — Scheduled → Loading. Có thể nhập kèm giờ xuất phát/đến dự kiến.</summary>
+        [HttpPost("trips/{id:guid}/start-loading")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> StartLoading(Guid id, [FromBody] StartLoadingRequestDto dto)
+        {
+            var result = await _deliveryTripService.StartLoadingAsync(id, dto);
+            return Ok(result);
+        }
+
+        /// <summary>Thêm đơn vào chuyến đang Bốc hàng (Loading) — chặn cứng nếu vượt tải trọng xe.</summary>
+        [HttpPost("trips/{id:guid}/orders")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> AddOrdersToTrip(Guid id, [FromBody] AddOrdersToTripRequestDto dto)
+        {
+            var result = await _deliveryTripService.AddOrdersToTripAsync(id, dto);
+            return Ok(result);
+        }
+
+        /// <summary>Rút 1 đơn khỏi chuyến đang Bốc hàng (Loading), để chuyển sang chuyến/xe khác.</summary>
+        [HttpDelete("trips/{id:guid}/orders/{orderId:guid}")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> RemoveOrderFromTrip(Guid id, Guid orderId)
+        {
+            var result = await _deliveryTripService.RemoveOrderFromTripAsync(id, orderId);
+            return Ok(result);
+        }
+
+        /// <summary>Xuất phát — yêu cầu chuyến đang Loading và mọi đơn trong chuyến đã có HandoverRecord Confirmed.</summary>
         [HttpPost("trips/{id:guid}/start")]
         [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
         public async Task<IActionResult> StartTrip(Guid id)

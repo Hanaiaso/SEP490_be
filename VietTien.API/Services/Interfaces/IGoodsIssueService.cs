@@ -12,6 +12,7 @@ namespace VietTien.API.Services.Interfaces
         // đối chiếu kho được phân công (SRS NAC-05), kể cả các hàm chỉ đọc/sửa metadata chứng từ.
         Task<IEnumerable<GoodsIssueDto>> GetGoodsIssuesAsync(string? type, Guid staffId);
         Task<GoodsIssueDto> GetGoodsIssueByIdAsync(Guid id, Guid staffId);
+        Task<byte[]> ExportExcelAsync(Guid id, Guid staffId);
         Task<GoodsIssueDto> CreateGoodsIssueAsync(CreateGoodsIssueRequestDto request, Guid staffId);
         Task<GoodsIssueDto> UploadProofAsync(Guid issueId, Guid staffId, IFormFile file);
         Task<GoodsIssueDto> UpdateHandoverInfoAsync(Guid issueId, Guid staffId, UpdateGoodsIssueHandoverDto dto);

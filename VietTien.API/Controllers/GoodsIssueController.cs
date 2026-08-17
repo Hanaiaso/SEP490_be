@@ -73,6 +73,30 @@ namespace VietTien.API.Controllers
             }
         }
 
+        [HttpGet("{id}/export-excel")]
+        [Authorize(Roles = "WarehouseStaff,SalesStaff,SalesManager,CEO,Admin")]
+        public async Task<IActionResult> ExportExcel(Guid id)
+        {
+            try
+            {
+                var bytes = await _goodsIssueService.ExportExcelAsync(id, GetUserId());
+                var fileName = $"phieu-xuat-kho-{id}.xlsx";
+                return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return Forbid();
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost]
         [Authorize(Roles = "WarehouseStaff")]
         public async Task<IActionResult> CreateGoodsIssue([FromBody] CreateGoodsIssueRequestDto request)
