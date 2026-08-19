@@ -2669,11 +2669,19 @@ namespace VietTien.API.Services.Implementations
             var collectionPending = deliveryOrders.Count(o =>
                 o.PaymentMethod != "Transfer" && collectionPendingStatuses.Contains(o.DeliveryStatus));
 
+            // BUGFIX: phải lọc theo Order.SalesStaffId (snapshot Sale tại thời điểm tạo đơn) giống hệt
+            // GetSalesOrdersAsync — KHÔNG phải CustomerProfile.AssignedSalesStaffId (chủ khách HIỆN TẠI,
+            // có thể đã đổi Sale sau khi đơn được tạo). SalesWarehouseCoordPage.tsx đọc từ
+            // /api/orders/sales (lọc theo SalesStaffId), nên lọc khác đi sẽ ra số lệch nhau giữa
+            // sidebar và trang thật — phát hiện qua smoke test (25 vs 26).
             var warehouseCoordPending = await _context.Orders.CountAsync(o =>
-                o.CustomerProfile.AssignedSalesStaffId == salesStaffId && !WarehouseCoordDoneStatuses.Contains(o.FulfillmentStatus));
+                o.SalesStaffId == salesStaffId && !WarehouseCoordDoneStatuses.Contains(o.FulfillmentStatus));
 
-            var pendingHandover = await _context.Orders.CountAsync(o =>
-                o.CustomerProfile.AssignedSalesStaffId == salesStaffId && o.FulfillmentStatus == FulfillmentStatus.Consolidated);
+            // "Bàn giao Sales" là hàng đợi CHUNG toàn hệ thống (giống hệt tabType="Handover" của
+            // GetOrdersForWarehouseAsync — không lọc theo staff), vì bất kỳ Sales nào đăng nhập cũng
+            // ký được cho đơn không phải khách của mình (WarehouseHandover.tsx/SalesWarehouseHandoverPage.tsx
+            // đều không lọc theo người xem) — không được scope theo salesStaffId ở đây.
+            var pendingHandover = await _context.Orders.CountAsync(o => o.FulfillmentStatus == FulfillmentStatus.Consolidated);
 
             return new SalesDeliverySidebarCountsDto
             {

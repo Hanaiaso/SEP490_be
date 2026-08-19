@@ -7,29 +7,46 @@ namespace VietTien.Tests.Services
 {
     /// <summary>
     /// GetSalesDeliverySidebarCountsAsync — số badge sidebar mục "Giao hàng" của Sales. Phải khớp
-    /// đúng điều kiện lọc mà SalesDeliveryPage.tsx đang tự tính phía client (xem comment trong
-    /// OrderService.cs), tái dùng GetDeliveryOrdersAsync/GetPendingPickupsAsync làm nguồn duy nhất.
+    /// đúng điều kiện lọc + đúng field scoping mà từng trang thật đang dùng (xem comment trong
+    /// OrderService.cs) — TripsPending/ArrangementPending/CollectionPending tái dùng nguyên
+    /// GetDeliveryOrdersAsync/GetPendingPickupsAsync; WarehouseCoordPending lọc theo Order.SalesStaffId
+    /// (snapshot, giống GetSalesOrdersAsync — KHÔNG phải CustomerProfile.AssignedSalesStaffId hiện tại,
+    /// phát hiện lệch số 25 vs 26 khi smoke test); PendingHandover là hàng đợi CHUNG không lọc theo staff.
     /// </summary>
     public partial class OrderServiceTests
     {
-        // DEL-SB-01 | EP-Valid | Đơn Consolidated của đúng Sales Staff -> tính vào PendingHandover
+        // DEL-SB-01 | EP-Valid | PendingHandover là hàng đợi CHUNG toàn hệ thống, không lọc theo Sales Staff gọi
         [Fact]
-        public async Task DEL_SB_01_PendingHandover_CountsOnlyConsolidatedOrdersForThisSalesStaff()
+        public async Task DEL_SB_01_PendingHandover_IsGlobalNotScopedByCaller()
         {
             SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Consolidated; });
             SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Ready; }); // chưa tập kết -> không tính
 
+            var otherStaff = TestData.User(u => u.Role = SystemRole.SalesStaff);
+            _db.Users.Add(otherStaff);
+            _db.SaveChanges();
+            var otherOrder = TestData.Order(_profile.Id, o => { o.FulfillmentStatus = FulfillmentStatus.Consolidated; o.SalesStaffId = otherStaff.Id; });
+            _db.Orders.Add(otherOrder);
+            _db.SaveChanges();
+
             var result = await _sut.GetSalesDeliverySidebarCountsAsync(_salesStaff.Id);
 
-            result.PendingHandover.Should().Be(1);
+            result.PendingHandover.Should().Be(2, "Bàn giao Sales là hàng đợi chung — bất kỳ Sales nào đăng nhập cũng thấy đủ mọi đơn đang chờ ký, không riêng đơn của mình");
         }
 
-        // DEL-SB-02 | EP-Valid | Đơn chưa đạt trạng thái "đã xử lý xong ở kho" -> tính vào WarehouseCoordPending
+        // DEL-SB-02 | EP-Valid | WarehouseCoordPending lọc theo Order.SalesStaffId (snapshot), khớp GetSalesOrdersAsync
         [Fact]
-        public async Task DEL_SB_02_WarehouseCoordPending_ExcludesOrdersAlreadyReadyOrBeyond()
+        public async Task DEL_SB_02_WarehouseCoordPending_ScopesBySalesStaffIdSnapshot()
         {
-            SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Picking; });   // đang xử lý -> tính
-            SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Fulfilled; }); // đã xong -> không tính
+            SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Picking; o.SalesStaffId = _salesStaff.Id; });   // đang xử lý, của mình -> tính
+            SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Fulfilled; o.SalesStaffId = _salesStaff.Id; }); // đã xong -> không tính
+
+            var otherStaff = TestData.User(u => u.Role = SystemRole.SalesStaff);
+            _db.Users.Add(otherStaff);
+            _db.SaveChanges();
+            // Đơn của Sales KHÁC (dù cùng khách hàng do _salesStaff phụ trách hiện tại) -> không được tính,
+            // vì đây là snapshot Sale lúc TẠO đơn, không phải chủ khách hiện tại (đúng ý nghĩa "đổi Sale").
+            SeedOrder(o => { o.FulfillmentStatus = FulfillmentStatus.Picking; o.SalesStaffId = otherStaff.Id; });
 
             var result = await _sut.GetSalesDeliverySidebarCountsAsync(_salesStaff.Id);
 
@@ -69,23 +86,28 @@ namespace VietTien.Tests.Services
             result.CollectionPending.Should().Be(1, "đơn đã lên lịch giao -> chuyển sang chờ giao/thu tiền");
         }
 
-        // DEL-SB-05 | EP-Valid | Đơn khác Sales Staff không được tính vào bất kỳ số nào của mình
+        // DEL-SB-05 | EP-Valid | Đơn của khách hàng do Sales khác phụ trách (AssignedSalesStaffId khác)
+        // không được tính vào TripsPending/ArrangementPending/CollectionPending của mình
         [Fact]
-        public async Task DEL_SB_05_OrdersOfOtherSalesStaff_AreNotCounted()
+        public async Task DEL_SB_05_OrdersOfOtherAssignedSalesStaff_AreNotCountedInDeliveryOrderBasedMetrics()
         {
             var otherStaff = TestData.User(u => u.Role = SystemRole.SalesStaff);
             _db.Users.Add(otherStaff);
             var (_, otherProfile) = TestData.SeedCustomer(_db, u => u.IsPhoneVerified = true);
             otherProfile.AssignedSalesStaffId = otherStaff.Id;
             _db.SaveChanges();
-            var otherOrder = TestData.Order(otherProfile.Id, o => o.FulfillmentStatus = FulfillmentStatus.Consolidated);
+            var otherOrder = TestData.Order(otherProfile.Id, o =>
+            {
+                o.FulfillmentStatus = FulfillmentStatus.Fulfilled;
+                o.DeliveryStatus = DeliveryStatus.NotScheduled;
+                o.PaymentMethod = PaymentMethod.COD;
+            });
             _db.Orders.Add(otherOrder);
             _db.SaveChanges();
 
             var result = await _sut.GetSalesDeliverySidebarCountsAsync(_salesStaff.Id);
 
-            result.PendingHandover.Should().Be(0);
-            result.WarehouseCoordPending.Should().Be(0);
+            result.TripsPending.Should().Be(0);
         }
     }
 }
