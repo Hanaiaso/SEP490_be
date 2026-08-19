@@ -235,6 +235,10 @@ namespace VietTien.API.DTOs.Delivery
         // này để tính KPI QualityCheckPending/ReturnQuarantinePending, nhưng DTO trước đây không trả
         // GoodsReceiptItemId nên trang chi tiết không lọc được, luôn ra danh sách rỗng.
         public Guid? GoodsReceiptItemId { get; set; }
+        // "CustomerReturn" (khách trả hàng, gắn OrderId) hoặc "GoodsReceiptQc" (hàng lỗi/thừa/sai
+        // phát hiện lúc nhập kho từ PO, gắn GoodsReceiptItemId) — FE dùng để gắn nhãn phân biệt 2
+        // nguồn cách ly trên cùng 1 danh sách thay vì suy luận từ OrderCode rỗng.
+        public string Source { get; set; } = string.Empty;
         public Guid? ProductId { get; set; }
         public Guid? MaterialId { get; set; }
         public string ItemName { get; set; } = string.Empty;

@@ -171,6 +171,7 @@ namespace VietTien.API.Controllers
                         OrderId = q.OrderId,
                         OrderCode = q.Order != null ? q.Order.OrderCode : null,
                         GoodsReceiptItemId = q.GoodsReceiptItemId,
+                        Source = q.OrderId != null ? "CustomerReturn" : "GoodsReceiptQc",
                         ProductId = q.ProductId,
                         MaterialId = q.MaterialId,
                         ItemName = q.Product != null ? q.Product.Name : q.Material != null ? q.Material.Name : "N/A",
