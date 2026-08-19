@@ -86,7 +86,13 @@ namespace VietTien.Tests.Services
             result.OrderIds.Should().ContainSingle().Which.Should().Be(order.Id);
             result.TotalWeightKg.Should().Be(300m);
             result.RemainingCapacityKg.Should().Be(700m);
-            _db.Orders.Single(o => o.Id == order.Id).DeliveryTripId.Should().Be(result.Id);
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.DeliveryTripId.Should().Be(result.Id);
+            // BUGFIX: OrderDetail.jsx/SalesOrderDetailPage.tsx vẫn đọc 3 field cũ này để hiện
+            // ngày/ca giao dự kiến — luồng Trip-based (mới) phải đồng bộ ngược, không để trống.
+            updated.DeliveryVehicleId.Should().Be(vehicle.VehicleNumber);
+            updated.DeliveryShift.Should().Be("Sáng");
+            updated.ScheduledDeliveryDate.Should().Be(DateTime.UtcNow.Date.AddDays(1));
         }
 
         // DEL-02 | EP-Invalid | Tổng trọng lượng đơn vượt tải trọng xe -> chặn cứng, không tạo chuyến
@@ -161,6 +167,26 @@ namespace VietTien.Tests.Services
             _db.Orders.Single(o => o.Id == newOrder.Id).DeliveryTripId.Should().BeNull();
         }
 
+        // DEL-05b | State-Valid | Thêm đơn trong hạn tải trọng -> gán đúng đơn + đồng bộ ngược 3 field cũ
+        [Fact]
+        public async Task DEL_05b_AddOrders_WithinCapacity_SyncsLegacyDeliveryFields()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Trưa", TripDate = DateTime.UtcNow.Date.AddDays(2), Status = DeliveryTripStatus.Loading };
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+            var order = SeedPackedOrder(200m);
+
+            var result = await _sut.AddOrdersToTripAsync(trip.Id, new AddOrdersToTripRequestDto { OrderIds = new List<Guid> { order.Id } });
+
+            result.OrderIds.Should().ContainSingle().Which.Should().Be(order.Id);
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.DeliveryTripId.Should().Be(trip.Id);
+            updated.DeliveryVehicleId.Should().Be(vehicle.VehicleNumber);
+            updated.DeliveryShift.Should().Be("Trưa");
+            updated.ScheduledDeliveryDate.Should().Be(trip.TripDate);
+        }
+
         // DEL-06 | State-Valid | Rút đơn khỏi chuyến đang Loading -> đơn trở lại NotScheduled, không còn gắn chuyến
         [Fact]
         public async Task DEL_06_RemoveOrder_FromLoadingTrip_Unassigned()
@@ -171,6 +197,9 @@ namespace VietTien.Tests.Services
             trip.Orders.Add(order);
             order.DeliveryTripId = trip.Id;
             order.DeliveryStatus = DeliveryStatus.Scheduled;
+            order.DeliveryVehicleId = vehicle.VehicleNumber;
+            order.DeliveryShift = "Sáng";
+            order.ScheduledDeliveryDate = trip.TripDate;
             _db.DeliveryTrips.Add(trip);
             _db.SaveChanges();
 
@@ -180,6 +209,9 @@ namespace VietTien.Tests.Services
             var updated = _db.Orders.Single(o => o.Id == order.Id);
             updated.DeliveryTripId.Should().BeNull();
             updated.DeliveryStatus.Should().Be(DeliveryStatus.NotScheduled);
+            updated.DeliveryVehicleId.Should().BeNull();
+            updated.DeliveryShift.Should().BeNull();
+            updated.ScheduledDeliveryDate.Should().BeNull();
         }
 
         // DEL-07 | EP-Invalid | Xuất phát khi còn đơn chưa có HandoverRecord Confirmed -> chặn

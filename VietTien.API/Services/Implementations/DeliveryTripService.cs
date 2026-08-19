@@ -124,6 +124,12 @@ namespace VietTien.API.Services.Implementations
             {
                 order.DeliveryTripId = trip.Id;
                 order.DeliveryStatus = DeliveryStatus.Scheduled;
+                // Đồng bộ ngược 3 field cũ (DeliveryVehicleId/Shift/ScheduledDeliveryDate) mà
+                // OrderDetail.jsx/SalesOrderDetailPage.tsx vẫn đang đọc để hiện ngày/ca giao —
+                // luồng Trip-based không thay thế các field này, chỉ thêm DeliveryTripId song song.
+                order.DeliveryVehicleId = vehicle.VehicleNumber;
+                order.DeliveryShift = dto.Shift;
+                order.ScheduledDeliveryDate = tripDate;
             }
 
             await _context.SaveChangesAsync();
@@ -170,11 +176,17 @@ namespace VietTien.API.Services.Implementations
             {
                 order.DeliveryTripId = trip.Id;
                 order.DeliveryStatus = DeliveryStatus.Scheduled;
+                order.DeliveryVehicleId = trip.Vehicle.VehicleNumber;
+                order.DeliveryShift = trip.Shift;
+                order.ScheduledDeliveryDate = trip.TripDate;
             }
 
             await _context.SaveChangesAsync();
 
-            trip.Orders = trip.Orders.Concat(eligibleOrders).ToList();
+            // BUGFIX: KHÔNG nối thủ công eligibleOrders vào trip.Orders — EF Core tự động fixup
+            // navigation collection ngay khi order.DeliveryTripId được set ở trên (cùng DbContext),
+            // nên trip.Orders đã chứa sẵn các đơn mới; Concat lại ở đây từng khiến ToDto() trả về
+            // OrderIds/OrderCodes bị lặp đôi cho mọi đơn vừa thêm.
             return ToDto(trip);
         }
 
@@ -190,6 +202,9 @@ namespace VietTien.API.Services.Implementations
 
             order.DeliveryTripId = null;
             order.DeliveryStatus = DeliveryStatus.NotScheduled;
+            order.DeliveryVehicleId = null;
+            order.DeliveryShift = null;
+            order.ScheduledDeliveryDate = null;
 
             await _context.SaveChangesAsync();
 
