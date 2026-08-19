@@ -39,6 +39,10 @@ namespace VietTien.API.Controllers
             return id;
         }
 
+        private string GetUserEmail() => User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
+        private string? GetUserRole() => User.FindFirst(ClaimTypes.Role)?.Value;
+        private string? GetIp() => HttpContext.Connection.RemoteIpAddress?.ToString();
+
         /// <summary>
         /// Id các vị trí lưu trữ thuộc một kho. Lọc tồn kho qua Inventory.WarehouseLocationId (khoá
         /// ngoại vô hướng) thay vì đi qua navigation Inventory.WarehouseLocation: dữ liệu cũ có dòng
@@ -92,6 +96,18 @@ namespace VietTien.API.Controllers
             try
             {
                 var result = await _service.CreateWarehouseAsync(dto);
+
+                await _auditLogService.LogAsync(
+                    entityName: "Warehouse",
+                    entityId: result.Id.ToString(),
+                    action: "CREATE",
+                    actorUserId: GetUserId(),
+                    actorEmail: GetUserEmail(),
+                    actorRole: GetUserRole(),
+                    before: null,
+                    after: result,
+                    ipAddress: GetIp());
+
                 return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
             }
             catch (Exception ex)
@@ -107,7 +123,20 @@ namespace VietTien.API.Controllers
             if (!ModelState.IsValid) return BadRequest(ModelState);
             try
             {
+                var before = await _service.GetWarehouseByIdAsync(id);
                 var result = await _service.UpdateWarehouseAsync(id, dto);
+
+                await _auditLogService.LogAsync(
+                    entityName: "Warehouse",
+                    entityId: id.ToString(),
+                    action: "UPDATE",
+                    actorUserId: GetUserId(),
+                    actorEmail: GetUserEmail(),
+                    actorRole: GetUserRole(),
+                    before: before,
+                    after: result,
+                    ipAddress: GetIp());
+
                 return Ok(result);
             }
             catch (Exception ex)
@@ -122,7 +151,20 @@ namespace VietTien.API.Controllers
         {
             try
             {
+                var before = await _service.GetWarehouseByIdAsync(id);
                 await _service.DeleteWarehouseAsync(id);
+
+                await _auditLogService.LogAsync(
+                    entityName: "Warehouse",
+                    entityId: id.ToString(),
+                    action: "DELETE",
+                    actorUserId: GetUserId(),
+                    actorEmail: GetUserEmail(),
+                    actorRole: GetUserRole(),
+                    before: before,
+                    after: null,
+                    ipAddress: GetIp());
+
                 return Ok(new { message = "Xóa kho thành công." });
             }
             catch (Exception ex)

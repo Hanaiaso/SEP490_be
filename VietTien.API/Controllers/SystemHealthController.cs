@@ -15,12 +15,14 @@ namespace VietTien.API.Controllers
         private readonly IJobRunService _jobRunService;
         private readonly IWebhookLogService _webhookLogService;
         private readonly IEnumerable<IScheduledJob> _jobs;
+        private readonly IAuditLogService _auditLogService;
 
-        public SystemHealthController(IJobRunService jobRunService, IWebhookLogService webhookLogService, IEnumerable<IScheduledJob> jobs)
+        public SystemHealthController(IJobRunService jobRunService, IWebhookLogService webhookLogService, IEnumerable<IScheduledJob> jobs, IAuditLogService auditLogService)
         {
             _jobRunService = jobRunService;
             _webhookLogService = webhookLogService;
             _jobs = jobs;
+            _auditLogService = auditLogService;
         }
 
         private Guid GetUserId()
@@ -30,6 +32,9 @@ namespace VietTien.API.Controllers
                 throw new UnauthorizedAccessException("Invalid user token.");
             return userId;
         }
+
+        private string GetUserEmail() => User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
+        private string? GetIp() => HttpContext.Connection.RemoteIpAddress?.ToString();
 
         [HttpGet("job-runs")]
         public async Task<IActionResult> SearchJobRuns([FromQuery] JobRunQueryDto query)
@@ -67,7 +72,14 @@ namespace VietTien.API.Controllers
             if (job == null)
                 return NotFound(new { message = $"Không tìm thấy job '{jobName}'." });
 
-            var result = await _jobRunService.RunTrackedAsync(job, JobTriggerType.Manual, GetUserId());
+            var actorId = GetUserId();
+            var result = await _jobRunService.RunTrackedAsync(job, JobTriggerType.Manual, actorId);
+
+            await _auditLogService.LogAsync(
+                entityName: "JobRun", entityId: jobName, action: "RETRY",
+                actorUserId: actorId, actorEmail: GetUserEmail(), actorRole: "Admin",
+                before: null, after: result, ipAddress: GetIp());
+
             return Ok(result);
         }
 
@@ -91,6 +103,12 @@ namespace VietTien.API.Controllers
             try
             {
                 var result = await _webhookLogService.RetryAsync(id);
+
+                await _auditLogService.LogAsync(
+                    entityName: "WebhookLog", entityId: id.ToString(), action: "RETRY",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: "Admin",
+                    before: null, after: result, ipAddress: GetIp());
+
                 return Ok(result);
             }
             catch (Exception ex)

@@ -793,12 +793,13 @@ namespace VietTien.Tests.Controllers
     {
         private readonly Mock<IWarehouseManagementService> _service = new();
         private readonly ApplicationDbContext _db = TestDbFactory.Create();
+        private readonly Mock<IAuditLogService> _audit = new();
         private readonly WarehouseManagementController _sut;
         private readonly Guid _userId = Guid.NewGuid();
 
         public WarehouseManagementControllerTests()
             => _sut = new WarehouseManagementController(
-                    _service.Object, _db, TestWarehouseAccessGuard.Create(_db), new NoOpAuditLogService())
+                    _service.Object, _db, TestWarehouseAccessGuard.Create(_db), _audit.Object)
                 .WithUser(_userId, "WarehouseStaff");
 
         // ── CRUD kho ─────────────────────────────────────────────────────────
@@ -848,10 +849,15 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task Create_Success_Returns201()
         {
+            var warehouseId = Guid.NewGuid();
             _service.Setup(s => s.CreateWarehouseAsync(It.IsAny<CreateWarehouseDto>()))
-                .ReturnsAsync(new WarehouseDto { Id = Guid.NewGuid() });
+                .ReturnsAsync(new WarehouseDto { Id = warehouseId });
 
             (await _sut.Create(new CreateWarehouseDto())).StatusOf().Should().Be(201);
+            _audit.Verify(a => a.LogAsync(
+                "Warehouse", warehouseId.ToString(), "CREATE",
+                _userId, It.IsAny<string>(), It.IsAny<string>(),
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
         }
 
         [Fact]
@@ -874,10 +880,16 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task Update_Success_ReturnsOk()
         {
-            _service.Setup(s => s.UpdateWarehouseAsync(It.IsAny<Guid>(), It.IsAny<UpdateWarehouseDto>()))
-                .ReturnsAsync(new WarehouseDto());
+            var warehouseId = Guid.NewGuid();
+            _service.Setup(s => s.GetWarehouseByIdAsync(warehouseId)).ReturnsAsync(new WarehouseDto { Id = warehouseId });
+            _service.Setup(s => s.UpdateWarehouseAsync(warehouseId, It.IsAny<UpdateWarehouseDto>()))
+                .ReturnsAsync(new WarehouseDto { Id = warehouseId });
 
-            (await _sut.Update(Guid.NewGuid(), new UpdateWarehouseDto())).StatusOf().Should().Be(200);
+            (await _sut.Update(warehouseId, new UpdateWarehouseDto())).StatusOf().Should().Be(200);
+            _audit.Verify(a => a.LogAsync(
+                "Warehouse", warehouseId.ToString(), "UPDATE",
+                _userId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
         }
 
         [Fact]
@@ -892,8 +904,15 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task Delete_Success_ReturnsOk()
         {
-            (await _sut.Delete(Guid.NewGuid())).StatusOf().Should().Be(200);
-            _service.Verify(s => s.DeleteWarehouseAsync(It.IsAny<Guid>()), Times.Once);
+            var warehouseId = Guid.NewGuid();
+            _service.Setup(s => s.GetWarehouseByIdAsync(warehouseId)).ReturnsAsync(new WarehouseDto { Id = warehouseId });
+
+            (await _sut.Delete(warehouseId)).StatusOf().Should().Be(200);
+            _service.Verify(s => s.DeleteWarehouseAsync(warehouseId), Times.Once);
+            _audit.Verify(a => a.LogAsync(
+                "Warehouse", warehouseId.ToString(), "DELETE",
+                _userId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), null, null, It.IsAny<string>()), Times.Once);
         }
 
         [Fact]

@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using VietTien.API.DTOs.Product;
@@ -11,10 +12,30 @@ namespace VietTien.API.Controllers
     public class ProductController : ControllerBase
     {
         private readonly IProductService _productService;
+        private readonly IAuditLogService _auditLogService;
 
-        public ProductController(IProductService productService)
+        public ProductController(IProductService productService, IAuditLogService auditLogService)
         {
             _productService = productService;
+            _auditLogService = auditLogService;
+        }
+
+        private Guid GetUserId()
+        {
+            var v = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(v) || !Guid.TryParse(v, out var id))
+                throw new UnauthorizedAccessException("Invalid user token.");
+            return id;
+        }
+
+        private string GetUserEmail() => User.FindFirst(ClaimTypes.Email)?.Value ?? string.Empty;
+        private string? GetUserRole() => User.FindFirst(ClaimTypes.Role)?.Value;
+        private string? GetIp() => HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        private async Task<CategoryDto?> FindCategoryAsync(Guid id)
+        {
+            var categories = await _productService.GetCategoriesForManagementAsync();
+            return categories.FirstOrDefault(c => c.Id == id);
         }
 
         /// <summary>Lấy danh sách sản phẩm (có phân trang, lọc danh mục, tìm kiếm)</summary>
@@ -78,6 +99,12 @@ namespace VietTien.API.Controllers
             try
             {
                 var result = await _productService.CreateCategoryAsync(dto);
+
+                await _auditLogService.LogAsync(
+                    entityName: "ProductCategory", entityId: result.Id.ToString(), action: "CREATE",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: GetUserRole(),
+                    before: null, after: result, ipAddress: GetIp());
+
                 return Ok(result);
             }
             catch (InvalidOperationException ex)
@@ -98,7 +125,14 @@ namespace VietTien.API.Controllers
         {
             try
             {
+                var before = await FindCategoryAsync(id);
                 var result = await _productService.UpdateCategoryAsync(id, dto);
+
+                await _auditLogService.LogAsync(
+                    entityName: "ProductCategory", entityId: id.ToString(), action: "UPDATE",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: GetUserRole(),
+                    before: before, after: result, ipAddress: GetIp());
+
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
@@ -123,7 +157,14 @@ namespace VietTien.API.Controllers
         {
             try
             {
+                var before = await FindCategoryAsync(id);
                 await _productService.DeleteCategoryAsync(id);
+
+                await _auditLogService.LogAsync(
+                    entityName: "ProductCategory", entityId: id.ToString(), action: "DELETE",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: GetUserRole(),
+                    before: before, after: null, ipAddress: GetIp());
+
                 return NoContent();
             }
             catch (KeyNotFoundException ex)
@@ -142,6 +183,12 @@ namespace VietTien.API.Controllers
             try
             {
                 var result = await _productService.CreateProductAsync(dto);
+
+                await _auditLogService.LogAsync(
+                    entityName: "Product", entityId: result.Id.ToString(), action: "CREATE",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: GetUserRole(),
+                    before: null, after: result, ipAddress: GetIp());
+
                 return CreatedAtAction(nameof(GetProductById), new { id = result.Id }, result);
             }
             catch (Exception ex)
@@ -200,7 +247,14 @@ namespace VietTien.API.Controllers
         {
             try
             {
+                var before = await _productService.GetProductByIdAsync(id);
                 var result = await _productService.UpdateProductAsync(id, dto);
+
+                await _auditLogService.LogAsync(
+                    entityName: "Product", entityId: id.ToString(), action: "UPDATE",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: GetUserRole(),
+                    before: before, after: result, ipAddress: GetIp());
+
                 return Ok(result);
             }
             catch (KeyNotFoundException ex)
@@ -227,7 +281,14 @@ namespace VietTien.API.Controllers
         {
             try
             {
+                var before = await _productService.GetProductByIdAsync(id);
                 await _productService.DeleteProductAsync(id);
+
+                await _auditLogService.LogAsync(
+                    entityName: "Product", entityId: id.ToString(), action: "DELETE",
+                    actorUserId: GetUserId(), actorEmail: GetUserEmail(), actorRole: GetUserRole(),
+                    before: before, after: null, ipAddress: GetIp());
+
                 return NoContent();
             }
             catch (KeyNotFoundException ex)

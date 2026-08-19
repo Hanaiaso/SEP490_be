@@ -24,9 +24,11 @@ namespace VietTien.Tests.Controllers
     public class SuppliersControllerTests
     {
         private readonly Mock<ISupplierService> _service = new();
+        private readonly Mock<IAuditLogService> _audit = new();
+        private readonly Guid _actorId = Guid.NewGuid();
         private readonly SuppliersController _sut;
 
-        public SuppliersControllerTests() => _sut = new SuppliersController(_service.Object).WithUser();
+        public SuppliersControllerTests() => _sut = new SuppliersController(_service.Object, _audit.Object).WithUser(_actorId, "Admin");
 
         [Fact]
         public async Task GetAll_ReturnsOkWithItems()
@@ -65,10 +67,15 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task Create_Success_ReturnsOk()
         {
+            var newId = Guid.NewGuid();
             _service.Setup(s => s.CreateAsync(It.IsAny<CreateSupplierRequest>()))
-                .ReturnsAsync(new SupplierDto { Name = "Moi" });
+                .ReturnsAsync(new SupplierDto { Id = newId, Name = "Moi" });
 
             (await _sut.Create(new CreateSupplierRequest())).StatusOf().Should().Be(200);
+            _audit.Verify(a => a.LogAsync(
+                "Supplier", newId.ToString(), "CREATE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
         }
 
         [Theory]
@@ -85,10 +92,15 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task Update_Success_ReturnsOk()
         {
-            _service.Setup(s => s.UpdateAsync(It.IsAny<Guid>(), It.IsAny<UpdateSupplierRequest>()))
-                .ReturnsAsync(new SupplierDto { Name = "Da sua" });
+            var id = Guid.NewGuid();
+            _service.Setup(s => s.UpdateAsync(id, It.IsAny<UpdateSupplierRequest>()))
+                .ReturnsAsync(new SupplierDto { Id = id, Name = "Da sua" });
 
-            (await _sut.Update(Guid.NewGuid(), new UpdateSupplierRequest())).StatusOf().Should().Be(200);
+            (await _sut.Update(id, new UpdateSupplierRequest())).StatusOf().Should().Be(200);
+            _audit.Verify(a => a.LogAsync(
+                "Supplier", id.ToString(), "UPDATE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
         }
 
         [Theory]

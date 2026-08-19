@@ -150,9 +150,11 @@ namespace VietTien.Tests.Controllers
     public class ProductControllerTests
     {
         private readonly Mock<IProductService> _service = new();
+        private readonly Mock<IAuditLogService> _audit = new();
+        private readonly Guid _actorId = Guid.NewGuid();
         private readonly ProductController _sut;
 
-        public ProductControllerTests() => _sut = new ProductController(_service.Object).WithUser();
+        public ProductControllerTests() => _sut = new ProductController(_service.Object, _audit.Object).WithUser(_actorId, "Admin");
 
         [Fact]
         public async Task GetProducts_PassesAllFiltersThroughToService()
@@ -222,10 +224,15 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateProduct_Success_ReturnsOk()
         {
-            _service.Setup(s => s.UpdateProductAsync(It.IsAny<Guid>(), It.IsAny<UpdateProductDto>()))
+            var id = Guid.NewGuid();
+            _service.Setup(s => s.UpdateProductAsync(id, It.IsAny<UpdateProductDto>()))
                 .ReturnsAsync(new ProductDetailDto());
 
-            (await _sut.UpdateProduct(Guid.NewGuid(), new UpdateProductDto())).StatusOf().Should().Be(200);
+            (await _sut.UpdateProduct(id, new UpdateProductDto())).StatusOf().Should().Be(200);
+            _audit.Verify(a => a.LogAsync(
+                "Product", id.ToString(), "UPDATE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
         }
 
         [Fact]
@@ -249,9 +256,77 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task DeleteProduct_Success_ReturnsNoContent()
         {
-            _service.Setup(s => s.DeleteProductAsync(It.IsAny<Guid>())).Returns(Task.CompletedTask);
+            var id = Guid.NewGuid();
+            _service.Setup(s => s.DeleteProductAsync(id)).Returns(Task.CompletedTask);
 
-            (await _sut.DeleteProduct(Guid.NewGuid())).StatusOf().Should().Be(204);
+            (await _sut.DeleteProduct(id)).StatusOf().Should().Be(204);
+            _audit.Verify(a => a.LogAsync(
+                "Product", id.ToString(), "DELETE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), null, null, It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task CreateProduct_Success_WritesAuditLog()
+        {
+            var newId = Guid.NewGuid();
+            _service.Setup(s => s.CreateProductAsync(It.IsAny<CreateProductDto>()))
+                .ReturnsAsync(new ProductDetailDto { Id = newId });
+
+            await _sut.CreateProduct(new CreateProductDto());
+
+            _audit.Verify(a => a.LogAsync(
+                "Product", newId.ToString(), "CREATE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task CreateCategory_Success_WritesAuditLog()
+        {
+            var newId = Guid.NewGuid();
+            _service.Setup(s => s.CreateCategoryAsync(It.IsAny<CreateCategoryRequest>()))
+                .ReturnsAsync(new CategoryDto { Id = newId, Name = "Danh muc moi" });
+
+            await _sut.CreateCategory(new CreateCategoryRequest());
+
+            _audit.Verify(a => a.LogAsync(
+                "ProductCategory", newId.ToString(), "CREATE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task UpdateCategory_Success_WritesAuditLog()
+        {
+            var id = Guid.NewGuid();
+            _service.Setup(s => s.GetCategoriesForManagementAsync())
+                .ReturnsAsync(new List<CategoryDto> { new() { Id = id, Name = "Cu" } });
+            _service.Setup(s => s.UpdateCategoryAsync(id, It.IsAny<UpdateCategoryRequest>()))
+                .ReturnsAsync(new CategoryDto { Id = id, Name = "Moi" });
+
+            await _sut.UpdateCategory(id, new UpdateCategoryRequest());
+
+            _audit.Verify(a => a.LogAsync(
+                "ProductCategory", id.ToString(), "UPDATE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task DeleteCategory_Success_WritesAuditLog()
+        {
+            var id = Guid.NewGuid();
+            _service.Setup(s => s.GetCategoriesForManagementAsync())
+                .ReturnsAsync(new List<CategoryDto> { new() { Id = id, Name = "Sap xoa" } });
+            _service.Setup(s => s.DeleteCategoryAsync(id)).Returns(Task.CompletedTask);
+
+            await _sut.DeleteCategory(id);
+
+            _audit.Verify(a => a.LogAsync(
+                "ProductCategory", id.ToString(), "DELETE",
+                _actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), null, null, It.IsAny<string>()), Times.Once);
         }
     }
 
@@ -387,6 +462,7 @@ namespace VietTien.Tests.Controllers
     {
         private readonly Mock<IJobRunService> _jobRuns = new();
         private readonly Mock<IWebhookLogService> _webhooks = new();
+        private readonly Mock<IAuditLogService> _audit = new();
         private readonly List<IScheduledJob> _jobs;
         private readonly SystemHealthController _sut;
         private readonly Guid _adminId = Guid.NewGuid();
@@ -407,7 +483,7 @@ namespace VietTien.Tests.Controllers
                 new StubJob("QuotationExpiryJob", TimeSpan.FromHours(6)),
                 new StubJob("MonthlyReportJob", TimeSpan.FromDays(30))
             };
-            _sut = new SystemHealthController(_jobRuns.Object, _webhooks.Object, _jobs).WithUser(_adminId, "Admin");
+            _sut = new SystemHealthController(_jobRuns.Object, _webhooks.Object, _jobs, _audit.Object).WithUser(_adminId, "Admin");
         }
 
         [Fact]
@@ -485,6 +561,11 @@ namespace VietTien.Tests.Controllers
                 It.Is<IScheduledJob>(j => j.JobName == "ReservationExpiryJob"),
                 JobTriggerType.Manual, _adminId, It.IsAny<CancellationToken>()), Times.Once,
                 "chạy tay phải ghi nhận là Manual kèm id admin bấm nút");
+            _audit.Verify(a => a.LogAsync(
+                "JobRun", "reservationexpiryjob", "RETRY",
+                _adminId, It.IsAny<string>(), "Admin",
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once,
+                "chạy tay 1 job phải ghi vào audit trail chung, không chỉ nằm trong bảng JobRun riêng");
         }
 
         [Fact]
@@ -508,9 +589,14 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task RetryWebhookLog_Success_ReturnsOk()
         {
-            _webhooks.Setup(s => s.RetryAsync(It.IsAny<Guid>())).ReturnsAsync(new WebhookLogDto());
+            var id = Guid.NewGuid();
+            _webhooks.Setup(s => s.RetryAsync(id)).ReturnsAsync(new WebhookLogDto());
 
-            (await _sut.RetryWebhookLog(Guid.NewGuid())).StatusOf().Should().Be(200);
+            (await _sut.RetryWebhookLog(id)).StatusOf().Should().Be(200);
+            _audit.Verify(a => a.LogAsync(
+                "WebhookLog", id.ToString(), "RETRY",
+                _adminId, It.IsAny<string>(), "Admin",
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
         }
 
         [Fact]
@@ -540,7 +626,7 @@ namespace VietTien.Tests.Controllers
             });
             await _db.SaveChangesAsync();
 
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
             var result = await sut.GetShifts();
 
             result.StatusOf().Should().Be(200);
@@ -552,7 +638,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task GetShifts_WhenEmpty_ReturnsEmptyList()
         {
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.GetShifts();
 
@@ -566,7 +652,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task CreateShift_Valid_SavesAndReturnsDto()
         {
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.CreateShift(new CreateWarehouseShiftRequest
             {
@@ -585,7 +671,7 @@ namespace VietTien.Tests.Controllers
         {
             _db.WarehouseShifts.Add(new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) });
             await _db.SaveChangesAsync();
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.CreateShift(new CreateWarehouseShiftRequest { Name = "Ca Sáng", StartTime = "06:00", EndTime = "14:00" });
 
@@ -595,7 +681,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task CreateShift_InvalidTimeFormat_Returns400()
         {
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.CreateShift(new CreateWarehouseShiftRequest { Name = "Ca Lạ", StartTime = "not-a-time", EndTime = "14:00" });
 
@@ -609,7 +695,7 @@ namespace VietTien.Tests.Controllers
             var s2 = new WarehouseShift { Name = "Ca Trưa", StartTime = new TimeSpan(14, 0, 0), EndTime = new TimeSpan(22, 0, 0) };
             _db.WarehouseShifts.AddRange(s1, s2);
             await _db.SaveChangesAsync();
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.UpdateShift(s2.Id, new UpdateWarehouseShiftRequest { Name = "Ca Sáng", StartTime = "14:00", EndTime = "22:00" });
 
@@ -620,7 +706,7 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task UpdateShift_WhenMissing_Returns404()
         {
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.UpdateShift(Guid.NewGuid(), new UpdateWarehouseShiftRequest { Name = "X", StartTime = "06:00", EndTime = "14:00" });
 
@@ -633,7 +719,7 @@ namespace VietTien.Tests.Controllers
             var shift = new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) };
             _db.WarehouseShifts.Add(shift);
             await _db.SaveChangesAsync();
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.DeleteShift(shift.Id);
 
@@ -644,11 +730,65 @@ namespace VietTien.Tests.Controllers
         [Fact]
         public async Task DeleteShift_WhenMissing_Returns404()
         {
-            var sut = new WarehouseShiftController(_db).WithUser();
+            var sut = new WarehouseShiftController(_db, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
             var result = await sut.DeleteShift(Guid.NewGuid());
 
             result.StatusOf().Should().Be(404);
+        }
+
+        // ── audit log: mọi thao tác CRUD ca làm việc phải ghi lại được ai/khi nào ──
+
+        [Fact]
+        public async Task CreateShift_Success_WritesAuditLog()
+        {
+            var audit = new Mock<IAuditLogService>();
+            var actorId = Guid.NewGuid();
+            var sut = new WarehouseShiftController(_db, audit.Object).WithUser(actorId, "Admin");
+
+            var result = await sut.CreateShift(new CreateWarehouseShiftRequest { Name = "Ca Chieu", StartTime = "14:00", EndTime = "22:00" });
+            var createdId = ((result.Result as ObjectResult)!.Value as WarehouseShiftDto)!.Id;
+
+            audit.Verify(a => a.LogAsync(
+                "WarehouseShift", createdId.ToString(), "CREATE",
+                actorId, It.IsAny<string>(), It.IsAny<string>(),
+                null, It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task UpdateShift_Success_WritesAuditLog()
+        {
+            var shift = new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) };
+            _db.WarehouseShifts.Add(shift);
+            await _db.SaveChangesAsync();
+            var audit = new Mock<IAuditLogService>();
+            var actorId = Guid.NewGuid();
+            var sut = new WarehouseShiftController(_db, audit.Object).WithUser(actorId, "Admin");
+
+            await sut.UpdateShift(shift.Id, new UpdateWarehouseShiftRequest { Name = "Ca Sáng Sớm", StartTime = "05:00", EndTime = "13:00" });
+
+            audit.Verify(a => a.LogAsync(
+                "WarehouseShift", shift.Id.ToString(), "UPDATE",
+                actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), It.IsAny<object>(), null, It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task DeleteShift_Success_WritesAuditLog()
+        {
+            var shift = new WarehouseShift { Name = "Ca Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) };
+            _db.WarehouseShifts.Add(shift);
+            await _db.SaveChangesAsync();
+            var audit = new Mock<IAuditLogService>();
+            var actorId = Guid.NewGuid();
+            var sut = new WarehouseShiftController(_db, audit.Object).WithUser(actorId, "Admin");
+
+            await sut.DeleteShift(shift.Id);
+
+            audit.Verify(a => a.LogAsync(
+                "WarehouseShift", shift.Id.ToString(), "DELETE",
+                actorId, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<object>(), null, null, It.IsAny<string>()), Times.Once);
         }
     }
 }

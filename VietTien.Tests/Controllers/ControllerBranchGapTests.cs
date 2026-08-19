@@ -616,7 +616,7 @@ namespace VietTien.Tests.Controllers
         private readonly ProductController _sut;
 
         public ProductControllerBranchGapTests()
-            => _sut = new ProductController(_service.Object).WithUser();
+            => _sut = new ProductController(_service.Object, new NoOpAuditLogService()).WithUser(Guid.NewGuid(), "Admin");
 
         [Fact]
         public async Task GetProducts_UsesDefaultPagingWhenNoArgumentsGiven()
