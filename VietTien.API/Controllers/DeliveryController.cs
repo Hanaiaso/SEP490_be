@@ -116,6 +116,24 @@ namespace VietTien.API.Controllers
             }
         }
 
+        /// <summary>Số lượng việc chờ xử lý cho từng mục con "Giao hàng" ở sidebar (badge) — cho Sale
+        /// thấy trực quan chỗ nào có việc cần làm mà không phải mở từng trang.</summary>
+        [HttpGet("sales-sidebar-counts")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<ActionResult<SalesDeliverySidebarCountsDto>> GetSalesSidebarCounts()
+        {
+            try
+            {
+                var userId = GetUserId();
+                var result = await _orderService.GetSalesDeliverySidebarCountsAsync(userId);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         // ─── BƯỚC 2: GHI NHẬN KẾT QUẢ GIAO HÀNG (POD + COD) ────────────────
         /// <summary>Sale ghi nhận kết quả giao hàng: chữ ký số, ảnh POD, số tiền thu</summary>
         [HttpPost("{orderId:guid}/complete")]

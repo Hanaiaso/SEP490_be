@@ -139,5 +139,60 @@ namespace VietTien.Tests.Services
             history.First().ActorEmail.Should().Be(ActorEmail);
             history.Single(h => h.IsCurrentlyEffective).Value.Should().Be("15");
         }
+
+        // ── Block: GetForOwnerAsync() / SetValueAsync(requiredOwnerToken) — CEO-scoped access ──
+
+        private void SeedConfigWithOwner(string key, string value, string ownerLevel, bool isSecret = false)
+        {
+            _db.SystemConfigs.Add(new SystemConfig { Key = key, ValueType = SystemConfigValueType.Int, OwnerLevel = ownerLevel, IsSecret = isSecret });
+            _db.SystemConfigVersions.Add(new SystemConfigVersion { ConfigKey = key, Value = value, EffectiveDate = DateTime.UtcNow.AddDays(-1), CreatedAt = DateTime.UtcNow.AddDays(-1) });
+            _db.SaveChanges();
+        }
+
+        // L1-CFG-07 | EP-Valid | GetForOwnerAsync("CEO") chỉ trả config có OwnerLevel chứa "CEO", bỏ qua Admin-only và secret
+        [Fact]
+        public async Task L1_CFG_07_GetForOwner_FiltersToOwnedNonSecretConfigsOnly()
+        {
+            SeedConfigWithOwner("SLOW_MOVING_DAYS_THRESHOLD", "30", "Admin/CEO");
+            SeedConfigWithOwner("PRICE_LOCK_HOURS", "24", "Admin");
+            SeedConfigWithOwner("SEPAY_API_TOKEN", "secret-value", "Admin/CEO", isSecret: true);
+
+            var result = await _sut.GetForOwnerAsync("CEO");
+
+            result.Select(c => c.Key).Should().BeEquivalentTo(new[] { "SLOW_MOVING_DAYS_THRESHOLD" },
+                "chỉ config CEO cùng sở hữu và không phải secret mới lộ ra dù key secret cũng gắn OwnerLevel CEO");
+        }
+
+        // L1-CFG-08 | EP-Invalid | CEO cố sửa config Admin-only (không thuộc OwnerLevel của mình) -> chặn
+        [Fact]
+        public async Task L1_CFG_08_SetValue_RequiredOwnerToken_RejectsUnownedConfig()
+        {
+            TestData.SeedConfig(_db, "PRICE_LOCK_HOURS", "24"); // OwnerLevel = "Admin" (mặc định của helper)
+
+            var act = () => _sut.SetValueAsync("PRICE_LOCK_HOURS",
+                new UpdateSystemConfigRequest { Value = "48", Reason = "CEO thử sửa" },
+                ActorId, ActorEmail, ActorIp, requiredOwnerToken: "CEO");
+
+            await act.Should().ThrowAsync<UnauthorizedAccessException>("PRICE_LOCK_HOURS chỉ Admin sở hữu, CEO không được sửa");
+            (await _sut.GetEffectiveValueAsync("PRICE_LOCK_HOURS")).Should().Be("24", "giá trị không được đổi khi bị chặn quyền");
+        }
+
+        // L1-CFG-09 | EP-Valid | CEO sửa đúng config OwnerLevel="Admin/CEO" -> thành công, audit ghi actorRole=CEO
+        [Fact]
+        public async Task L1_CFG_09_SetValue_RequiredOwnerToken_AllowsOwnedConfig()
+        {
+            SeedConfigWithOwner("SLOW_MOVING_DAYS_THRESHOLD", "30", "Admin/CEO");
+
+            await _sut.SetValueAsync("SLOW_MOVING_DAYS_THRESHOLD",
+                new UpdateSystemConfigRequest { Value = "45", Reason = "Kho quay vòng chậm hơn dự kiến" },
+                ActorId, ActorEmail, ActorIp, requiredOwnerToken: "CEO");
+
+            (await _sut.GetEffectiveValueAsync("SLOW_MOVING_DAYS_THRESHOLD")).Should().Be("45");
+            _audit.Verify(a => a.LogAsync(
+                "SystemConfig", "SLOW_MOVING_DAYS_THRESHOLD", "CONFIG_CHANGE",
+                ActorId, ActorEmail, "CEO",
+                It.IsAny<object>(), It.IsAny<object>(),
+                It.IsAny<string>(), ActorIp), Times.Once);
+        }
     }
 }

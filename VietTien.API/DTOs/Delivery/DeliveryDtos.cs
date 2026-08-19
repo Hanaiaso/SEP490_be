@@ -86,6 +86,19 @@ namespace VietTien.API.DTOs.Delivery
         public decimal? TotalPackedWeightKg { get; set; }
     }
 
+    /// <summary>Số lượng việc đang chờ xử lý cho từng mục "Giao hàng" ở sidebar Sales — cho
+    /// Sale thấy trực quan chỗ nào có việc cần làm mà không phải mở từng trang. Tính riêng theo
+    /// từng Sales Staff (khách hàng do chính họ phụ trách), trừ ArrangementPending (điều chuyển
+    /// nội bộ + thu hồi) và PendingHandover dùng chung hàng đợi toàn hệ thống như trang gốc.</summary>
+    public class SalesDeliverySidebarCountsDto
+    {
+        public int PendingHandover { get; set; }
+        public int WarehouseCoordPending { get; set; }
+        public int TripsPending { get; set; }
+        public int ArrangementPending { get; set; }
+        public int CollectionPending { get; set; }
+    }
+
     // ─── BƯỚC 2: GHI NHẬN KẾT QUẢ GIAO HÀNG (POD + COD) ────────────────────
     public class RecordDeliveryResultDto
     {

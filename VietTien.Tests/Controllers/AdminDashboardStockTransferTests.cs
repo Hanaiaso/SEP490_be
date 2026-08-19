@@ -61,13 +61,13 @@ namespace VietTien.Tests.Controllers
         public async Task Update_Success_PassesActorIdentityForAuditTrail()
         {
             _service.Setup(s => s.SetValueAsync(It.IsAny<string>(), It.IsAny<UpdateSystemConfigRequest>(),
-                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()))
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
                 .ReturnsAsync(new SystemConfigDto());
 
             (await _sut.Update("SePayThresholdMinutes", new UpdateSystemConfigRequest())).StatusOf().Should().Be(200);
 
             _service.Verify(s => s.SetValueAsync("SePayThresholdMinutes", It.IsAny<UpdateSystemConfigRequest>(),
-                _adminId, It.IsAny<string>(), It.IsAny<string?>()), Times.Once,
+                _adminId, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Once,
                 "đổi cấu hình hệ thống phải ghi lại ai đổi để truy vết");
         }
 
@@ -75,7 +75,7 @@ namespace VietTien.Tests.Controllers
         public async Task Update_WhenKeyUnknown_Returns404()
         {
             _service.Setup(s => s.SetValueAsync(It.IsAny<string>(), It.IsAny<UpdateSystemConfigRequest>(),
-                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()))
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
                 .ThrowsAsync(new KeyNotFoundException("x"));
 
             (await _sut.Update("x", new UpdateSystemConfigRequest())).StatusOf().Should().Be(404);
@@ -85,7 +85,7 @@ namespace VietTien.Tests.Controllers
         public async Task Update_WhenValueOutOfRange_Returns400()
         {
             _service.Setup(s => s.SetValueAsync(It.IsAny<string>(), It.IsAny<UpdateSystemConfigRequest>(),
-                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()))
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
                 .ThrowsAsync(new ArgumentException("Gia tri ngoai khoang cho phep"));
 
             (await _sut.Update("x", new UpdateSystemConfigRequest())).StatusOf().Should().Be(400);
@@ -98,7 +98,7 @@ namespace VietTien.Tests.Controllers
 
             (await _sut.Update("x", new UpdateSystemConfigRequest())).StatusOf().Should().Be(400);
             _service.Verify(s => s.SetValueAsync(It.IsAny<string>(), It.IsAny<UpdateSystemConfigRequest>(),
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
         }
     }
 

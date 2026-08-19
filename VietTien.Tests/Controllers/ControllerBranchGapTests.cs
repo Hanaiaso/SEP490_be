@@ -446,14 +446,14 @@ namespace VietTien.Tests.Controllers
             (await _sut.Update("SePayThresholdMinutes", new UpdateSystemConfigRequest()))
                 .StatusOf().Should().Be(400);
             _service.Verify(s => s.SetValueAsync(It.IsAny<string>(), It.IsAny<UpdateSystemConfigRequest>(),
-                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()), Times.Never);
         }
 
         [Fact]
         public async Task Update_ForwardsActorEmailAndIpToAuditTrail()
         {
             _service.Setup(s => s.SetValueAsync(It.IsAny<string>(), It.IsAny<UpdateSystemConfigRequest>(),
-                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()))
+                    It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()))
                 .ReturnsAsync(new SystemConfigDto());
             _sut.WithEmailClaim("admin@viettien.vn").WithRemoteIp("192.0.2.99");
 
@@ -461,7 +461,7 @@ namespace VietTien.Tests.Controllers
                 .StatusOf().Should().Be(200);
 
             _service.Verify(s => s.SetValueAsync("SePayThresholdMinutes", It.IsAny<UpdateSystemConfigRequest>(),
-                _adminId, "admin@viettien.vn", "192.0.2.99"), Times.Once,
+                _adminId, "admin@viettien.vn", "192.0.2.99", It.IsAny<string?>()), Times.Once,
                 "đổi cấu hình hệ thống phải truy vết được email + IP");
         }
     }

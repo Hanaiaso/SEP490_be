@@ -9,15 +9,17 @@ namespace VietTien.API.Services.Implementations
     public class WarehouseDashboardService : IWarehouseDashboardService
     {
         private const int RecentListLimit = 5;
-        private const int SlowMovingDaysThreshold = 14; // "trên 2 tuần"
+        private const int DefaultSlowMovingDaysThreshold = 30;
 
         private readonly ApplicationDbContext _context;
         private readonly IInventoryService _inventoryService;
+        private readonly ISystemConfigService _systemConfigService;
 
-        public WarehouseDashboardService(ApplicationDbContext context, IInventoryService inventoryService)
+        public WarehouseDashboardService(ApplicationDbContext context, IInventoryService inventoryService, ISystemConfigService systemConfigService)
         {
             _context = context;
             _inventoryService = inventoryService;
+            _systemConfigService = systemConfigService;
         }
 
         public async Task<WarehouseDashboardDto> GetDashboardAsync()
@@ -40,7 +42,12 @@ namespace VietTien.API.Services.Implementations
             // "<=", bỏ sót hoàn toàn Material) nên số liệu lệch với trang Cảnh báo tồn thấp và Báo cáo.
             var lowStockAlertsCanonical = await _inventoryService.GetLowStockAlertsAsync();
 
-            var slowMovingItems = await _inventoryService.GetSlowMovingItemsAsync(null, SlowMovingDaysThreshold);
+            // Dùng chung SLOW_MOVING_DAYS_THRESHOLD với SlowMovingStockAlertJob (CEO cấu hình qua
+            // api/ceo/system-configs) — trước đây Dashboard tự hardcode 14 ngày khác với ngưỡng cảnh
+            // báo chủ động (30 ngày), khiến 2 nơi cùng nói "chậm luân chuyển" nhưng lệch định nghĩa.
+            var slowMovingDaysRaw = await _systemConfigService.GetEffectiveValueAsync("SLOW_MOVING_DAYS_THRESHOLD");
+            var slowMovingDaysThreshold = int.TryParse(slowMovingDaysRaw, out var days) && days > 0 ? days : DefaultSlowMovingDaysThreshold;
+            var slowMovingItems = await _inventoryService.GetSlowMovingItemsAsync(null, slowMovingDaysThreshold);
 
             // Các công thức KPI dưới đây PHẢI khớp chính xác điều kiện lọc mà trang bấm-xem-chi-tiết
             // tương ứng đang dùng (WarehouseService.GetOrdersForWarehouseAsync/GetPickTasksAsync) —
@@ -56,6 +63,7 @@ namespace VietTien.API.Services.Implementations
                     o.FulfillmentStatus == FulfillmentStatus.Ready || o.FulfillmentStatus == FulfillmentStatus.Consolidating),
                 CompletedToday = await _context.PickTasks.CountAsync(p =>
                     p.Status == PickTaskStatus.Completed && p.CompletedAt != null && p.CompletedAt >= todayStart && p.CompletedAt < tomorrowStart),
+                PendingHandover = await _context.Orders.CountAsync(o => o.FulfillmentStatus == FulfillmentStatus.Consolidated),
             };
 
             var inbound = new WarehouseInboundKpiDto

@@ -56,6 +56,20 @@ namespace VietTien.API.Services.Implementations
             return result.OrderBy(c => c.Key).ToList();
         }
 
+        public async Task<List<SystemConfigDto>> GetForOwnerAsync(string ownerToken)
+        {
+            var all = await GetAllWithEffectiveValuesAsync();
+            return all.Where(c => !c.IsSecret && OwnsConfig(c.OwnerLevel, ownerToken)).ToList();
+        }
+
+        // "Admin/CEO" nghĩa là cả 2 cấp cùng sở hữu — tách theo "/" rồi so khớp từng phần, không phải
+        // substring thô (tránh "Admin" khớp nhầm token "AdminX" giả định trong tương lai).
+        private static bool OwnsConfig(string ownerLevel, string token)
+        {
+            return ownerLevel.Split('/', StringSplitOptions.TrimEntries)
+                .Any(part => string.Equals(part, token, StringComparison.OrdinalIgnoreCase));
+        }
+
         // Dùng nội bộ bởi các service khác (OrderService, AuthService, eSmsService...) để đọc giá trị
         // THẬT (đã giải mã nếu là secret) — không phải endpoint public, không đi qua mask.
         public async Task<string?> GetEffectiveValueAsync(string key, DateTime? asOf = null)
@@ -112,10 +126,15 @@ namespace VietTien.API.Services.Implementations
             }).ToList();
         }
 
-        public async Task<SystemConfigDto> SetValueAsync(string key, UpdateSystemConfigRequest request, Guid actorUserId, string actorEmail, string? ipAddress)
+        public async Task<SystemConfigDto> SetValueAsync(string key, UpdateSystemConfigRequest request, Guid actorUserId, string actorEmail, string? ipAddress, string? requiredOwnerToken = null)
         {
             var config = await _context.SystemConfigs.FirstOrDefaultAsync(c => c.Key == key);
             if (config == null) throw new KeyNotFoundException($"Không tìm thấy tham số cấu hình '{key}'.");
+
+            // Portal ngoài Admin (vd CEO) chỉ được sửa đúng config thuộc OwnerLevel của mình, và
+            // không bao giờ được đụng vào key secret (integration token/password) dù có khớp OwnerLevel.
+            if (requiredOwnerToken != null && (config.IsSecret || !OwnsConfig(config.OwnerLevel, requiredOwnerToken)))
+                throw new UnauthorizedAccessException("Bạn không có quyền chỉnh tham số cấu hình này.");
 
             if (string.IsNullOrWhiteSpace(request.Value))
                 throw new Exception("Giá trị cấu hình không được để trống.");
@@ -153,7 +172,7 @@ namespace VietTien.API.Services.Implementations
                 action: "CONFIG_CHANGE",
                 actorUserId: actorUserId,
                 actorEmail: actorEmail,
-                actorRole: "Admin",
+                actorRole: requiredOwnerToken ?? "Admin",
                 before: beforeVersion == null ? null : new { Value = config.IsSecret ? SecretMask : beforeVersion.Value, beforeVersion.EffectiveDate },
                 after: new { Value = config.IsSecret ? SecretMask : newVersion.Value, newVersion.EffectiveDate },
                 reason: request.Reason,

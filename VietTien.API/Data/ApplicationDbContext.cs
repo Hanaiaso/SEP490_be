@@ -1414,6 +1414,7 @@ namespace VietTien.API.Data
                 ("MAX_SCHEDULED_MARKETING_POSTS", "30", SystemConfigValueType.Int, "Bài viết", "Admin", "Số bài viết marketing được lên lịch tối đa", Guid.Parse("a0000001-0001-4001-a001-000000000011")),
                 ("DELIVERY_FAILURE_MANAGER_THRESHOLD", "3", SystemConfigValueType.Int, "Lần thử giao", "Admin/Manager", "Số lần giao thất bại trước khi báo Manager", Guid.Parse("a0000001-0001-4001-a001-000000000012")),
                 ("INVENTORY_COUNT_VARIANCE_THRESHOLD", "5", SystemConfigValueType.Int, "Đơn vị", "Admin/CEO", "Chênh lệch tối đa (số lượng tuyệt đối) khi đóng phiên kiểm kê được áp dụng thẳng; vượt ngưỡng bắt buộc CEO duyệt", Guid.Parse("a0000001-0001-4001-a001-000000000013")),
+                ("SLOW_MOVING_DAYS_THRESHOLD", "30", SystemConfigValueType.Int, "Ngày", "Admin/CEO", "Số ngày không phát sinh xuất kho để tính là hàng chậm luân chuyển / tồn đọng (dùng chung cho cảnh báo chủ động và KPI Dashboard Kho)", Guid.Parse("a0000001-0001-4001-a001-000000000014")),
             };
 
             modelBuilder.Entity<SystemConfig>().HasData(

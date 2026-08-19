@@ -27,6 +27,10 @@ namespace VietTien.API.DTOs.Warehouse
         public int PickingInProgress { get; set; }
         public int ConsolidationArea { get; set; }
         public int CompletedToday { get; set; }
+
+        /// <summary>Đơn đã tập kết (Consolidated), đang chờ MỘT trong hai chữ ký kho/Sales — badge
+        /// sidebar "Bàn giao Sales" (khớp đúng tabType="Handover" của GetOrdersForWarehouseAsync).</summary>
+        public int PendingHandover { get; set; }
     }
 
     public class WarehouseInboundKpiDto

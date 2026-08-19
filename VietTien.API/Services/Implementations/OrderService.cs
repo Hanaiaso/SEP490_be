@@ -2643,6 +2643,48 @@ namespace VietTien.API.Services.Implementations
             return result;
         }
 
+        // Đếm cho badge sidebar "Giao hàng" của Sales — tái dùng đúng 2 nguồn dữ liệu đã có
+        // (GetDeliveryOrdersAsync/GetPendingPickupsAsync) và ĐÚNG điều kiện lọc mà
+        // SalesDeliveryPage.tsx đang tự tính phía client, để số trên sidebar luôn khớp số trên
+        // trang "Giao hàng" — không viết lại logic lọc ở một nơi thứ 3 rồi lệch nhau.
+        private static readonly FulfillmentStatus[] WarehouseCoordDoneStatuses =
+        {
+            FulfillmentStatus.Ready, FulfillmentStatus.Consolidating, FulfillmentStatus.Consolidated,
+            FulfillmentStatus.HandedOver, FulfillmentStatus.Fulfilled
+        };
+
+        public async Task<SalesDeliverySidebarCountsDto> GetSalesDeliverySidebarCountsAsync(Guid salesStaffId)
+        {
+            var deliveryOrders = await GetDeliveryOrdersAsync(salesStaffId);
+            var pickups = await GetPendingPickupsAsync(salesStaffId);
+
+            var tripsPending = deliveryOrders.Count(o =>
+                o.PaymentMethod != "Transfer" && (o.DeliveryStatus == "NotScheduled" || o.DeliveryStatus == "Rescheduled"));
+
+            var arrangementPending = deliveryOrders.Count(o =>
+                o.PaymentMethod == "Transfer" && (o.DeliveryStatus == "NotScheduled" || o.DeliveryStatus == "Rescheduled"))
+                + pickups.Count(p => p.PickupStatus == "NotScheduled");
+
+            var collectionPendingStatuses = new[] { "Scheduled", "InDelivery", "Rescheduled", "Failed" };
+            var collectionPending = deliveryOrders.Count(o =>
+                o.PaymentMethod != "Transfer" && collectionPendingStatuses.Contains(o.DeliveryStatus));
+
+            var warehouseCoordPending = await _context.Orders.CountAsync(o =>
+                o.CustomerProfile.AssignedSalesStaffId == salesStaffId && !WarehouseCoordDoneStatuses.Contains(o.FulfillmentStatus));
+
+            var pendingHandover = await _context.Orders.CountAsync(o =>
+                o.CustomerProfile.AssignedSalesStaffId == salesStaffId && o.FulfillmentStatus == FulfillmentStatus.Consolidated);
+
+            return new SalesDeliverySidebarCountsDto
+            {
+                PendingHandover = pendingHandover,
+                WarehouseCoordPending = warehouseCoordPending,
+                TripsPending = tripsPending,
+                ArrangementPending = arrangementPending,
+                CollectionPending = collectionPending
+            };
+        }
+
         // =====================================================================
         // LUỒNG 5 – BƯỚC 2: GHI NHẬN KẾT QUẢ GIAO HÀNG (POD + COD)
         // =====================================================================

@@ -10,7 +10,7 @@ namespace VietTien.API.Services.ScheduledJobs
     // chỉ thêm phần gửi notification + cooldown per-row (mirror LowStockAlertJob).
     public class SlowMovingStockAlertJob : IScheduledJob
     {
-        private const int SlowMovingDaysThreshold = 30;
+        private const int DefaultSlowMovingDaysThreshold = 30;
         private static readonly TimeSpan AlertCooldown = TimeSpan.FromDays(2); // giống Material.LastAlertSentDate
 
         public string JobName => "SlowMovingStockAlert";
@@ -19,18 +19,29 @@ namespace VietTien.API.Services.ScheduledJobs
         private readonly ApplicationDbContext _context;
         private readonly IInventoryService _inventoryService;
         private readonly INotificationService _notificationService;
+        private readonly ISystemConfigService _systemConfigService;
         private readonly ILogger<SlowMovingStockAlertJob> _logger;
 
         public SlowMovingStockAlertJob(
             ApplicationDbContext context,
             IInventoryService inventoryService,
             INotificationService notificationService,
+            ISystemConfigService systemConfigService,
             ILogger<SlowMovingStockAlertJob> logger)
         {
             _context = context;
             _inventoryService = inventoryService;
             _notificationService = notificationService;
+            _systemConfigService = systemConfigService;
             _logger = logger;
+        }
+
+        // CEO cấu hình được qua SLOW_MOVING_DAYS_THRESHOLD (api/ceo/system-configs) — fallback về
+        // mặc định 30 ngày nếu chưa cấu hình hoặc giá trị không hợp lệ.
+        private async Task<int> GetSlowMovingDaysThresholdAsync()
+        {
+            var raw = await _systemConfigService.GetEffectiveValueAsync("SLOW_MOVING_DAYS_THRESHOLD");
+            return int.TryParse(raw, out var days) && days > 0 ? days : DefaultSlowMovingDaysThreshold;
         }
 
         public async Task<int> RunAsync(CancellationToken ct)
@@ -38,7 +49,8 @@ namespace VietTien.API.Services.ScheduledJobs
             var alertsSent = 0;
             var now = DateTime.UtcNow;
 
-            var slowMovingItems = await _inventoryService.GetSlowMovingItemsAsync(warehouseId: null, days: SlowMovingDaysThreshold);
+            var daysThreshold = await GetSlowMovingDaysThresholdAsync();
+            var slowMovingItems = await _inventoryService.GetSlowMovingItemsAsync(warehouseId: null, days: daysThreshold);
 
             foreach (var item in slowMovingItems)
             {

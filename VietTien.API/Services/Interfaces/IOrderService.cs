@@ -37,6 +37,9 @@ namespace VietTien.API.Services.Interfaces
         Task<ScheduleDeliveryResponseDto> ScheduleDeliveryAsync(Guid scheduledByUserId, ScheduleDeliveryRequestDto dto);
         Task<List<DeliveryOrderListDto>> GetDeliveryOrdersAsync(Guid salesStaffId);
 
+        /// <summary>Đếm số việc chờ xử lý cho từng mục con "Giao hàng" ở sidebar Sales (badge).</summary>
+        Task<SalesDeliverySidebarCountsDto> GetSalesDeliverySidebarCountsAsync(Guid salesStaffId);
+
         // UC-34: Sales Manager xử lý xung đột lịch xe/ca
         Task<List<DeliveryScheduleConflictDto>> GetPendingDeliveryConflictsAsync();
         Task<DeliveryScheduleConflictDto> ResolveDeliveryConflictAsync(Guid conflictId, Guid managerId, ResolveDeliveryConflictRequestDto dto);
