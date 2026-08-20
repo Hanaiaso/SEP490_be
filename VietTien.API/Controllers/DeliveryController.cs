@@ -46,6 +46,11 @@ namespace VietTien.API.Controllers
                 // 409: FE dựa vào code này để báo khách đã gửi yêu cầu tới Sales Manager thay vì lỗi chung
                 return Conflict(new { code = "SCHEDULE_CONFLICT", conflictId = ex.ConflictId, message = ex.Message });
             }
+            catch (VehicleOverweightException ex)
+            {
+                // 409: FE dựa vào code này để hiện toast "Vượt tải trọng xe" riêng thay vì lỗi chung
+                return Conflict(new { code = "VEHICLE_OVERWEIGHT", message = ex.Message });
+            }
             catch (InvalidOperationException ex)
             {
                 return Conflict(new { message = ex.Message });
@@ -87,6 +92,10 @@ namespace VietTien.API.Controllers
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (VehicleOverweightException ex)
+            {
+                return Conflict(new { code = "VEHICLE_OVERWEIGHT", message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {
@@ -270,6 +279,10 @@ namespace VietTien.API.Controllers
             catch (KeyNotFoundException ex)
             {
                 return NotFound(new { message = ex.Message });
+            }
+            catch (VehicleOverweightException ex)
+            {
+                return Conflict(new { code = "VEHICLE_OVERWEIGHT", message = ex.Message });
             }
             catch (InvalidOperationException ex)
             {

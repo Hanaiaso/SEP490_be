@@ -9,6 +9,7 @@ using VietTien.API.DTOs.Delivery;
 using VietTien.API.DTOs.Marketing;
 using VietTien.API.DTOs.Order;
 using VietTien.API.DTOs.Warehouse;
+using VietTien.API.Exceptions;
 using VietTien.API.Services.Interfaces;
 using VietTien.Tests.TestHelpers;
 using Xunit;
@@ -66,6 +67,18 @@ namespace VietTien.Tests.Controllers
             (await _sut.ScheduleDelivery(new ScheduleDeliveryRequestDto())).StatusOf().Should().Be(400);
             _service.Verify(s => s.ScheduleDeliveryAsync(It.IsAny<Guid>(), It.IsAny<ScheduleDeliveryRequestDto>()),
                 Times.Never);
+        }
+
+        [Fact]
+        public async Task ScheduleDelivery_WhenOverweight_Returns409WithCode()
+        {
+            _service.Setup(s => s.ScheduleDeliveryAsync(It.IsAny<Guid>(), It.IsAny<ScheduleDeliveryRequestDto>()))
+                .ThrowsAsync(new VehicleOverweightException("Xe 1 chỉ chở tối đa 100kg"));
+
+            var result = await _sut.ScheduleDelivery(new ScheduleDeliveryRequestDto());
+
+            result.StatusOf().Should().Be(409, "vượt tải trọng phải là 409 để FE phân biệt với lỗi dữ liệu chung");
+            (result as ObjectResult)!.Value.Should().BeEquivalentTo(new { code = "VEHICLE_OVERWEIGHT", message = "Xe 1 chỉ chở tối đa 100kg" });
         }
 
         [Fact]
@@ -296,6 +309,18 @@ namespace VietTien.Tests.Controllers
                 .ThrowsAsync(new Exception("loi"));
 
             (await _sut.SchedulePickup(Guid.NewGuid(), new SchedulePickupRequestDto())).StatusOf().Should().Be(400);
+        }
+
+        [Fact]
+        public async Task SchedulePickup_WhenOverweight_Returns409WithCode()
+        {
+            _service.Setup(s => s.SchedulePickupAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<SchedulePickupRequestDto>()))
+                .ThrowsAsync(new VehicleOverweightException("Xe 1 chỉ chở tối đa 100kg"));
+
+            var result = await _sut.SchedulePickup(Guid.NewGuid(), new SchedulePickupRequestDto());
+
+            result.StatusOf().Should().Be(409, "vượt tải trọng phải là 409 để FE phân biệt với lỗi dữ liệu chung");
+            (result as ObjectResult)!.Value.Should().BeEquivalentTo(new { code = "VEHICLE_OVERWEIGHT", message = "Xe 1 chỉ chở tối đa 100kg" });
         }
 
         [Fact]
