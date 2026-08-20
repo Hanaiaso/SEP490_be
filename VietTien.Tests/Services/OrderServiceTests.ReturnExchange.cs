@@ -1,6 +1,7 @@
 using FluentAssertions;
 using VietTien.API.DTOs.Delivery;
 using VietTien.API.DTOs.Order;
+using VietTien.API.Exceptions;
 using VietTien.API.Models;
 using VietTien.Tests.TestHelpers;
 using Xunit;
@@ -219,6 +220,7 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task L1_ORD_57_PendingPickups_OnlyApprovedAndNotYetPickedUp()
         {
+            SeedFleet();
             // (1) chờ duyệt
             var (pendingOrder, p1) = SeedDeliveredOrder(deliveredQty: 5);
             await _sut.CreateReturnExchangeRequestAsync(pendingOrder.Id, _customer.Id, ReturnDto(p1.Id, 1));
@@ -241,6 +243,7 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task L1_ORD_58_SchedulePickup_StoresDateShiftAndVehicle()
         {
+            SeedFleet();
             var (requestId, _) = await SeedApprovedRequestAsync();
             var pickupDate = DateTime.UtcNow.AddDays(2).Date;
 
@@ -260,6 +263,7 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task L1_ORD_59_ConfirmPickup_DoesNotIncreaseAvailableStock()
         {
+            SeedFleet();
             var (requestId, product) = await SeedApprovedRequestAsync(returnQty: 2);
             var inventory = TestData.SeedInventory(_db, product.Id, 10);
             await _sut.SchedulePickupAsync(requestId, _salesStaff.Id,
@@ -285,6 +289,63 @@ namespace VietTien.Tests.Services
             await act.Should().ThrowAsync<InvalidOperationException>();
             _db.ChangeTracker.Clear();
             _db.Inventories.Single(i => i.Id == inventory.Id).OnHandQuantity.Should().Be(10);
+        }
+
+        // ── Trọng lượng xe cho thu hồi hàng trả về kiểm định ─────────────────
+
+        // L1-ORD-61 | EP-Invalid | Xe không tồn tại/inactive -> từ chối điều xe
+        [Fact]
+        public async Task L1_ORD_61_SchedulePickup_InactiveOrMissingVehicle_Rejected()
+        {
+            var (requestId, _) = await SeedApprovedRequestAsync();
+
+            var act = () => _sut.SchedulePickupAsync(requestId, _salesStaff.Id,
+                new SchedulePickupRequestDto { VehicleId = 9, Shift = "Sáng", PickupDate = DateTime.UtcNow.AddDays(1) });
+
+            await act.Should().ThrowAsync<Exception>().WithMessage("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
+        }
+
+        // L1-ORD-62 | EP-Invalid | Yêu cầu thu hồi vượt tải trọng xe -> VehicleOverweightException
+        [Fact]
+        public async Task L1_ORD_62_SchedulePickup_OverCapacity_Rejected()
+        {
+            _db.Vehicles.Add(new Vehicle { VehicleNumber = 1, LicensePlate = "29C-001", IsActive = true, Capacity = 50m });
+            _db.SaveChanges();
+            var (requestId, product) = await SeedApprovedRequestAsync(returnQty: 2);
+            // SeedApprovedRequestAsync() gọi LatestRequest() nội bộ -> ChangeTracker.Clear() -> `product`
+            // đã bị detach, phải query lại bản tracked mới rồi mới sửa để SaveChanges không no-op.
+            _db.Products.Single(p => p.Id == product.Id).WeightKg = 30m; // 2 x 30kg = 60kg > 50kg
+            _db.SaveChanges();
+
+            var act = () => _sut.SchedulePickupAsync(requestId, _salesStaff.Id,
+                new SchedulePickupRequestDto { VehicleId = 1, Shift = "Sáng", PickupDate = DateTime.UtcNow.AddDays(1) });
+
+            await act.Should().ThrowAsync<VehicleOverweightException>();
+            _db.ReturnExchangeRequests.Single(r => r.Id == requestId).PickupStatus.Should().Be(PickupStatus.NotScheduled);
+        }
+
+        // L1-ORD-63 | EP-Invalid | Vượt tải CỘNG DỒN qua 2 yêu cầu cùng xe/ca/ngày
+        [Fact]
+        public async Task L1_ORD_63_SchedulePickup_CumulativeAcrossRequests_Rejected()
+        {
+            _db.Vehicles.Add(new Vehicle { VehicleNumber = 1, LicensePlate = "29C-001", IsActive = true, Capacity = 50m });
+            _db.SaveChanges();
+            var pickupDate = DateTime.UtcNow.AddDays(1);
+
+            var (firstId, firstProduct) = await SeedApprovedRequestAsync(returnQty: 1);
+            _db.Products.Single(p => p.Id == firstProduct.Id).WeightKg = 30m; // fits alone
+            _db.SaveChanges();
+            await _sut.SchedulePickupAsync(firstId, _salesStaff.Id,
+                new SchedulePickupRequestDto { VehicleId = 1, Shift = "Sáng", PickupDate = pickupDate });
+
+            var (secondId, secondProduct) = await SeedApprovedRequestAsync(returnQty: 1);
+            _db.Products.Single(p => p.Id == secondProduct.Id).WeightKg = 30m; // 30kg + 30kg = 60kg > 50kg
+            _db.SaveChanges();
+            var act = () => _sut.SchedulePickupAsync(secondId, _salesStaff.Id,
+                new SchedulePickupRequestDto { VehicleId = 1, Shift = "Sáng", PickupDate = pickupDate });
+
+            await act.Should().ThrowAsync<VehicleOverweightException>();
+            _db.ReturnExchangeRequests.Single(r => r.Id == secondId).PickupStatus.Should().Be(PickupStatus.NotScheduled);
         }
     }
 }

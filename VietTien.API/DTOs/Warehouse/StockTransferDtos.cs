@@ -28,6 +28,7 @@ namespace VietTien.API.DTOs.Warehouse
         public int? DeliveryVehicleId { get; set; }
         public string? DeliveryShift { get; set; }
         public DateTime? ScheduledDeliveryDate { get; set; }
+        public decimal TotalWeightKg { get; set; }
         public List<StockTransferItemDto> Items { get; set; } = new();
 
         // Chỉ có giá trị ngay tại thời điểm DispatchAsync vừa tạo phiếu xuất kho (mục 12) — không nạp lại ở các lần GET sau.
@@ -45,6 +46,7 @@ namespace VietTien.API.DTOs.Warehouse
         public string ItemType { get; set; } = "Product";
         public int Quantity { get; set; }
         public int? ReceivedQuantity { get; set; }
+        public decimal? WeightKg { get; set; }
     }
 
     public class CreateStockTransferDto : IValidatableObject

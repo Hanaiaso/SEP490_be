@@ -1397,6 +1397,91 @@ namespace VietTien.Tests.Services
             }
         }
 
+        // ── Trọng lượng xe cho điều chuyển nội bộ (StockTransfer) ───────────────
+
+        private StockTransfer SeedTransportRequestedTransfer(decimal? productWeightKg, int quantity)
+        {
+            var (source, _) = TestData.Warehouse();
+            var (dest, _) = TestData.Warehouse();
+            _db.Warehouses.AddRange(source, dest);
+            var product = TestData.SeedProduct(_db, p => p.WeightKg = productWeightKg);
+
+            var transfer = new StockTransfer
+            {
+                Code = $"TR-{Guid.NewGuid():N}"[..12],
+                SourceWarehouseId = source.Id,
+                DestinationWarehouseId = dest.Id,
+                CreatedByUserId = _salesStaff.Id,
+                Status = StockTransferStatus.TransportRequested,
+            };
+            transfer.Items.Add(new StockTransferItem { ProductId = product.Id, Quantity = quantity });
+            _db.StockTransfers.Add(transfer);
+            _db.SaveChanges();
+            return transfer;
+        }
+
+        // L1-ORD-62 | EP-Invalid | StockTransfer vượt tải trọng xe -> VehicleOverweightException, không mutate
+        [Fact]
+        public async Task L1_ORD_62_ScheduleDelivery_StockTransfer_OverCapacity_Rejected()
+        {
+            _db.Vehicles.Add(new Vehicle { VehicleNumber = 1, LicensePlate = "29C-001", IsActive = true, Capacity = 100m });
+            _db.SaveChanges();
+            var transfer = SeedTransportRequestedTransfer(productWeightKg: 60m, quantity: 2); // 120kg > 100kg
+
+            var act = () => _sut.ScheduleDeliveryAsync(_salesStaff.Id, new ScheduleDeliveryRequestDto
+            {
+                OrderIds = new List<Guid> { transfer.Id },
+                VehicleId = 1,
+                Shift = "Sáng",
+                DeliveryDate = DateTime.UtcNow.Date.AddDays(1)
+            });
+
+            await act.Should().ThrowAsync<VehicleOverweightException>();
+            _db.StockTransfers.Single(t => t.Id == transfer.Id).Status.Should().Be(StockTransferStatus.TransportRequested);
+        }
+
+        // L1-ORD-63 | EP-Valid | StockTransfer trong tải trọng -> xếp xe thành công
+        [Fact]
+        public async Task L1_ORD_63_ScheduleDelivery_StockTransfer_WithinCapacity_Succeeds()
+        {
+            _db.Vehicles.Add(new Vehicle { VehicleNumber = 1, LicensePlate = "29C-001", IsActive = true, Capacity = 100m });
+            _db.SaveChanges();
+            var transfer = SeedTransportRequestedTransfer(productWeightKg: 30m, quantity: 2); // 60kg <= 100kg
+
+            var result = await _sut.ScheduleDeliveryAsync(_salesStaff.Id, new ScheduleDeliveryRequestDto
+            {
+                OrderIds = new List<Guid> { transfer.Id },
+                VehicleId = 1,
+                Shift = "Sáng",
+                DeliveryDate = DateTime.UtcNow.Date.AddDays(1)
+            });
+
+            result.OrdersScheduled.Should().Be(1);
+            result.TotalWeightKg.Should().Be(60m);
+            _db.StockTransfers.Single(t => t.Id == transfer.Id).Status.Should().Be(StockTransferStatus.TransportArranged);
+        }
+
+        // L1-ORD-64 | EP-Invalid | Vượt tải CỘNG DỒN khi gộp nhiều StockTransfer trong CÙNG 1 lần gọi
+        // (2 lần gọi riêng trên cùng xe/ca/ngày sẽ bị chặn bởi ScheduleConflictException trước khi tới
+        // bước kiểm tra tải trọng — đúng thiết kế sẵn có của UC-34 — nên cộng dồn chỉ áp dụng trong 1 payload).
+        [Fact]
+        public async Task L1_ORD_64_ScheduleDelivery_MultipleTransfersInOneCall_CumulativeCapacity_Rejected()
+        {
+            _db.Vehicles.Add(new Vehicle { VehicleNumber = 1, LicensePlate = "29C-001", IsActive = true, Capacity = 100m });
+            _db.SaveChanges();
+            var tomorrow = DateTime.UtcNow.Date.AddDays(1);
+
+            var first = SeedTransportRequestedTransfer(productWeightKg: 60m, quantity: 1);  // 60kg
+            var second = SeedTransportRequestedTransfer(productWeightKg: 60m, quantity: 1); // + 60kg = 120kg > 100kg
+
+            var act = () => _sut.ScheduleDeliveryAsync(_salesStaff.Id, new ScheduleDeliveryRequestDto
+            { OrderIds = new List<Guid> { first.Id, second.Id }, VehicleId = 1, Shift = "Sáng", DeliveryDate = tomorrow });
+
+            await act.Should().ThrowAsync<VehicleOverweightException>();
+            _db.StockTransfers.Single(t => t.Id == first.Id).Status.Should().Be(StockTransferStatus.TransportRequested);
+            _db.StockTransfers.Single(t => t.Id == second.Id).Status.Should().Be(StockTransferStatus.TransportRequested);
+        }
+
         //  ▶ Block: RecordDeliveryResultAsync()
 
         // L1-ORD-42 | State-Valid | COD thu đủ tiền -> Paid + Completed + Delivered, không phát sinh công nợ

@@ -7,6 +7,7 @@ using VietTien.API.DTOs.SePay;
 using VietTien.API.Exceptions;
 using VietTien.API.Models;
 using VietTien.API.Repositories.Interfaces;
+using VietTien.API.Services.Helpers;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Services.Implementations
@@ -2259,8 +2260,8 @@ namespace VietTien.API.Services.Implementations
             if (dto.OrderIds == null || !dto.OrderIds.Any())
                 throw new Exception("Danh sách đơn hàng không được rỗng.");
 
-            var vehicleActive = await _context.Vehicles.AnyAsync(v => v.VehicleNumber == dto.VehicleId && v.IsActive);
-            if (!vehicleActive)
+            var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.VehicleNumber == dto.VehicleId && v.IsActive);
+            if (vehicle == null)
                 throw new Exception("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
 
             var validShifts = new[] { "Sáng", "Trưa", "Chiều" };
@@ -2354,13 +2355,51 @@ namespace VietTien.API.Services.Implementations
                 .Where(o => dto.OrderIds.Contains(o.Id))
                 .ToListAsync();
 
-            int scheduled = 0;
-            foreach (var order in orders)
-            {
-                // Chỉ lập lịch cho đơn đã HandedOver hoặc Ready
-                if (order.DeliveryStatus != DeliveryStatus.NotScheduled && order.DeliveryStatus != DeliveryStatus.Rescheduled)
-                    continue;
+            var eligibleOrders = orders
+                .Where(o => o.DeliveryStatus == DeliveryStatus.NotScheduled || o.DeliveryStatus == DeliveryStatus.Rescheduled)
+                .ToList();
 
+            // ─── Xử lý StockTransfer (điều chuyển nội bộ) trong cùng payload ──
+            var matchedOrderIds = orders.Select(o => o.Id).ToHashSet();
+            var remainingIds = dto.OrderIds.Where(id => !matchedOrderIds.Contains(id)).ToList();
+
+            var eligibleTransfers = remainingIds.Any()
+                ? await _context.StockTransfers
+                    .Include(st => st.Items).ThenInclude(i => i.Product)
+                    .Where(st => remainingIds.Contains(st.Id) && st.Status == StockTransferStatus.TransportRequested)
+                    .ToListAsync()
+                : new List<StockTransfer>();
+
+            // Trọng lượng xe (BR mới): xe dùng chung cho cả Order lẫn StockTransfer nên phải cộng dồn
+            // cả 2 loại trên cùng xe+ca+ngày, giống hệt luồng DeliveryTrip (VehicleCapacityGuard).
+            // Nguyên vật liệu (MaterialId) chưa có trường trọng lượng -> tính 0kg (đánh đổi đã chốt).
+            static decimal TransferWeight(StockTransfer st) => st.Items.Sum(i => (i.Product?.WeightKg ?? 0) * i.Quantity);
+
+            var addingWeight = eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0) + eligibleTransfers.Sum(TransferWeight);
+
+            var currentOrdersWeight = await _context.Orders
+                .Where(o => o.DeliveryVehicleId == dto.VehicleId && o.DeliveryShift == dto.Shift
+                         && o.ScheduledDeliveryDate.HasValue && o.ScheduledDeliveryDate.Value.Date == targetDate.Date
+                         && (o.DeliveryStatus == DeliveryStatus.InDelivery || o.DeliveryStatus == DeliveryStatus.Scheduled)
+                         && !dto.OrderIds.Contains(o.Id))
+                .SumAsync(o => o.TotalPackedWeightKg ?? 0);
+
+            var currentTransfers = await _context.StockTransfers
+                .Include(st => st.Items).ThenInclude(i => i.Product)
+                .Where(st => st.DeliveryVehicleId == dto.VehicleId && st.DeliveryShift == dto.Shift
+                          && st.ScheduledDeliveryDate.HasValue && st.ScheduledDeliveryDate.Value.Date == targetDate.Date
+                          && st.Status == StockTransferStatus.TransportArranged
+                          && !dto.OrderIds.Contains(st.Id))
+                .ToListAsync();
+
+            var currentWeight = currentOrdersWeight + currentTransfers.Sum(TransferWeight);
+            var addingCodes = eligibleOrders.Select(o => o.OrderCode).Concat(eligibleTransfers.Select(st => st.Code)).ToList();
+
+            VehicleCapacityGuard.EnsureWithinCapacity(vehicle, currentWeight, addingWeight, addingCodes);
+
+            int scheduled = 0;
+            foreach (var order in eligibleOrders)
+            {
                 order.DeliveryVehicleId = dto.VehicleId;
                 order.DeliveryShift = dto.Shift;
                 order.ScheduledDeliveryDate = targetDate;
@@ -2368,25 +2407,13 @@ namespace VietTien.API.Services.Implementations
                 scheduled++;
             }
 
-            // ─── Xử lý StockTransfer (điều chuyển nội bộ) trong cùng payload ──
-            var matchedOrderIds = orders.Select(o => o.Id).ToHashSet();
-            var remainingIds = dto.OrderIds.Where(id => !matchedOrderIds.Contains(id)).ToList();
-
-            if (remainingIds.Any())
+            foreach (var st in eligibleTransfers)
             {
-                var stockTransfers = await _context.StockTransfers
-                    .Where(st => remainingIds.Contains(st.Id)
-                              && st.Status == StockTransferStatus.TransportRequested)
-                    .ToListAsync();
-
-                foreach (var st in stockTransfers)
-                {
-                    st.DeliveryVehicleId = dto.VehicleId;
-                    st.DeliveryShift = dto.Shift;
-                    st.ScheduledDeliveryDate = targetDate;
-                    st.Status = StockTransferStatus.TransportArranged;
-                    scheduled++;
-                }
+                st.DeliveryVehicleId = dto.VehicleId;
+                st.DeliveryShift = dto.Shift;
+                st.ScheduledDeliveryDate = targetDate;
+                st.Status = StockTransferStatus.TransportArranged;
+                scheduled++;
             }
 
             await _context.SaveChangesAsync();
@@ -2397,7 +2424,9 @@ namespace VietTien.API.Services.Implementations
                 Shift = dto.Shift,
                 DeliveryDate = targetDate,
                 OrdersScheduled = scheduled,
-                Message = $"Đã lập lịch {scheduled} đơn hàng cho xe {dto.VehicleId} ca {dto.Shift} ngày {targetDate:dd/MM/yyyy}."
+                Message = $"Đã lập lịch {scheduled} đơn hàng cho xe {dto.VehicleId} ca {dto.Shift} ngày {targetDate:dd/MM/yyyy}.",
+                TotalWeightKg = addingWeight,
+                VehicleCapacityKg = vehicle.Capacity
             };
         }
 
@@ -2469,23 +2498,55 @@ namespace VietTien.API.Services.Implementations
                     date = conflict.RequestedDate;
                 }
 
-                var orders = await _context.Orders.Where(o => orderIds.Contains(o.Id)).ToListAsync();
-                foreach (var order in orders)
-                {
-                    if (order.DeliveryStatus != DeliveryStatus.NotScheduled && order.DeliveryStatus != DeliveryStatus.Rescheduled)
-                        continue;
+                var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.VehicleNumber == vehicleId && v.IsActive);
+                if (vehicle == null)
+                    throw new Exception("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
 
+                var orders = await _context.Orders.Where(o => orderIds.Contains(o.Id)).ToListAsync();
+                var eligibleOrders = orders
+                    .Where(o => o.DeliveryStatus == DeliveryStatus.NotScheduled || o.DeliveryStatus == DeliveryStatus.Rescheduled)
+                    .ToList();
+
+                // Áp lại lịch cho cả StockTransfer trong lô xung đột (không chỉ Order), tránh bị kẹt
+                // vĩnh viễn ở TransportRequested vì RequestTransportAsync chỉ nhận trạng thái Draft.
+                var stockTransfersInConflict = await _context.StockTransfers
+                    .Include(st => st.Items).ThenInclude(i => i.Product)
+                    .Where(st => orderIds.Contains(st.Id) && st.Status == StockTransferStatus.TransportRequested)
+                    .ToListAsync();
+
+                // Cùng luật chặn vượt tải với ScheduleDeliveryAsync — Override/Reassign vẫn phải tôn
+                // trọng giới hạn vật lý của xe, dù manager đã chấp nhận bỏ qua xung đột LỊCH.
+                static decimal TransferWeight(StockTransfer st) => st.Items.Sum(i => (i.Product?.WeightKg ?? 0) * i.Quantity);
+                var addingWeight = eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0) + stockTransfersInConflict.Sum(TransferWeight);
+
+                var currentOrdersWeight = await _context.Orders
+                    .Where(o => o.DeliveryVehicleId == vehicleId && o.DeliveryShift == shift
+                             && o.ScheduledDeliveryDate.HasValue && o.ScheduledDeliveryDate.Value.Date == date
+                             && (o.DeliveryStatus == DeliveryStatus.InDelivery || o.DeliveryStatus == DeliveryStatus.Scheduled)
+                             && !orderIds.Contains(o.Id))
+                    .SumAsync(o => o.TotalPackedWeightKg ?? 0);
+
+                var currentTransfers = await _context.StockTransfers
+                    .Include(st => st.Items).ThenInclude(i => i.Product)
+                    .Where(st => st.DeliveryVehicleId == vehicleId && st.DeliveryShift == shift
+                              && st.ScheduledDeliveryDate.HasValue && st.ScheduledDeliveryDate.Value.Date == date
+                              && st.Status == StockTransferStatus.TransportArranged
+                              && !orderIds.Contains(st.Id))
+                    .ToListAsync();
+
+                var currentWeight = currentOrdersWeight + currentTransfers.Sum(TransferWeight);
+                var addingCodes = eligibleOrders.Select(o => o.OrderCode).Concat(stockTransfersInConflict.Select(st => st.Code)).ToList();
+
+                VehicleCapacityGuard.EnsureWithinCapacity(vehicle, currentWeight, addingWeight, addingCodes);
+
+                foreach (var order in eligibleOrders)
+                {
                     order.DeliveryVehicleId = vehicleId;
                     order.DeliveryShift = shift;
                     order.ScheduledDeliveryDate = date;
                     order.DeliveryStatus = DeliveryStatus.Scheduled;
                 }
 
-                // Áp lại lịch cho cả StockTransfer trong lô xung đột (không chỉ Order), tránh bị kẹt
-                // vĩnh viễn ở TransportRequested vì RequestTransportAsync chỉ nhận trạng thái Draft.
-                var stockTransfersInConflict = await _context.StockTransfers
-                    .Where(st => orderIds.Contains(st.Id) && st.Status == StockTransferStatus.TransportRequested)
-                    .ToListAsync();
                 foreach (var st in stockTransfersInConflict)
                 {
                     st.DeliveryVehicleId = vehicleId;
@@ -2608,7 +2669,7 @@ namespace VietTien.API.Services.Implementations
                 .AsNoTracking()
                 .Include(st => st.SourceWarehouse)
                 .Include(st => st.DestinationWarehouse)
-                .Include(st => st.Items)
+                .Include(st => st.Items).ThenInclude(i => i.Product)
                 .Where(st => st.Status == StockTransferStatus.TransportRequested
                           || st.Status == StockTransferStatus.TransportArranged)
                 .OrderByDescending(st => st.CreatedAt)
@@ -2636,7 +2697,8 @@ namespace VietTien.API.Services.Implementations
                     ScheduledDeliveryDate = st.ScheduledDeliveryDate,
                     FailedDeliveryCount = 0,
                     IsBlocked = false,
-                    ItemCount = st.Items?.Sum(i => i.Quantity) ?? 0
+                    ItemCount = st.Items?.Sum(i => i.Quantity) ?? 0,
+                    TotalPackedWeightKg = st.Items?.Sum(i => (i.Product?.WeightKg ?? 0) * i.Quantity)
                 });
             }
 
@@ -3335,12 +3397,14 @@ namespace VietTien.API.Services.Implementations
                     PickupShift = r.PickupShift,
                     ScheduledPickupDate = r.ScheduledPickupDate,
                     ReturnProductNames = r.ReturnItems.Select(ri => ri.Product.Name).ToList(),
+                    TotalWeightKg = r.ReturnItems.Sum(ri => (ri.Product.WeightKg ?? 0) * ri.Quantity),
                     Items = r.ReturnItems.Select(ri => new PendingPickupItemDto
                     {
                         ProductId = ri.ProductId,
                         ProductName = ri.Product.Name,
                         Quantity = ri.Quantity,
-                        Reason = r.Reason ?? "Lỗi chất lượng"
+                        Reason = r.Reason ?? "Lỗi chất lượng",
+                        WeightKg = ri.Product.WeightKg
                     }).ToList()
                 };
             }).ToList();
@@ -3348,11 +3412,34 @@ namespace VietTien.API.Services.Implementations
 
         public async Task SchedulePickupAsync(Guid requestId, Guid userId, SchedulePickupRequestDto dto)
         {
-            var req = await _context.ReturnExchangeRequests.FindAsync(requestId);
+            var req = await _context.ReturnExchangeRequests
+                .Include(r => r.ReturnItems).ThenInclude(ri => ri.Product)
+                .FirstOrDefaultAsync(r => r.Id == requestId);
             if (req == null) throw new KeyNotFoundException("Không tìm thấy yêu cầu đổi/trả.");
 
             if (req.Status != ReturnExchangeStatus.Approved)
                 throw new InvalidOperationException("Chỉ có thể điều xe cho yêu cầu đã được duyệt.");
+
+            var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.VehicleNumber == dto.VehicleId && v.IsActive);
+            if (vehicle == null)
+                throw new Exception("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
+
+            // Cùng luật chặn vượt tải với ScheduleDeliveryAsync/DeliveryTrip — không có bước đóng gói
+            // riêng cho hàng thu hồi nên tính trực tiếp từ Product.WeightKg × Quantity (đã chốt với
+            // người dùng). ReturnExchangeRequestItem.ProductId luôn có giá trị (không có nhánh Material).
+            var addingWeight = req.ReturnItems.Sum(ri => (ri.Product?.WeightKg ?? 0) * ri.Quantity);
+
+            var otherScheduled = await _context.ReturnExchangeRequests
+                .Include(r => r.ReturnItems).ThenInclude(ri => ri.Product)
+                .Where(r => r.Id != requestId
+                         && r.PickupVehicleId == dto.VehicleId && r.PickupShift == dto.Shift
+                         && r.ScheduledPickupDate.HasValue && r.ScheduledPickupDate.Value.Date == dto.PickupDate.Date
+                         && r.PickupStatus == PickupStatus.Scheduled)
+                .ToListAsync();
+            var currentWeight = otherScheduled.Sum(r => r.ReturnItems.Sum(ri => (ri.Product?.WeightKg ?? 0) * ri.Quantity));
+
+            var requestCode = req.Id.ToString().Substring(0, 8).ToUpper();
+            VehicleCapacityGuard.EnsureWithinCapacity(vehicle, currentWeight, addingWeight, new List<string> { requestCode });
 
             req.PickupVehicleId = dto.VehicleId;
             req.PickupShift = dto.Shift;

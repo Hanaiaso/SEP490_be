@@ -27,6 +27,8 @@ namespace VietTien.API.DTOs.Delivery
         public DateTime? DeliveryDate { get; set; }
         public int OrdersScheduled { get; set; }
         public string Message { get; set; } = string.Empty;
+        public decimal TotalWeightKg { get; set; }
+        public decimal? VehicleCapacityKg { get; set; }
     }
 
     // ─── UC-34: XUNG ĐỘT LỊCH XE/CA ─────────────────────────────────────────
@@ -282,6 +284,7 @@ namespace VietTien.API.DTOs.Delivery
         public string? PickupShift { get; set; }
         public DateTime? ScheduledPickupDate { get; set; }
         public List<string> ReturnProductNames { get; set; } = new();
+        public decimal TotalWeightKg { get; set; }
         public List<PendingPickupItemDto> Items { get; set; } = new();
     }
 
@@ -291,6 +294,7 @@ namespace VietTien.API.DTOs.Delivery
         public string ProductName { get; set; } = string.Empty;
         public int Quantity { get; set; }
         public string Reason { get; set; } = string.Empty;
+        public decimal? WeightKg { get; set; }
     }
 
     // ─── P2-6: Sales Manager xử lý đơn bị khóa & công nợ COD (UC-35) ──────────

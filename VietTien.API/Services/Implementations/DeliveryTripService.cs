@@ -3,6 +3,7 @@ using VietTien.API.Data;
 using VietTien.API.DTOs.Delivery;
 using VietTien.API.Exceptions;
 using VietTien.API.Models;
+using VietTien.API.Services.Helpers;
 using VietTien.API.Services.Interfaces;
 
 namespace VietTien.API.Services.Implementations
@@ -63,22 +64,6 @@ namespace VietTien.API.Services.Implementations
             return trip ?? throw new KeyNotFoundException("Không tìm thấy chuyến giao hàng.");
         }
 
-        // Chặn cứng (đã chốt với người dùng): không cho gán thêm đơn vào chuyến nếu tổng trọng lượng
-        // vượt Vehicle.Capacity. Đơn chưa có TotalPackedWeightKg (chưa đóng gói xong) tính là 0kg —
-        // không chặn, chỉ đơn giản chưa đóng góp vào tổng (đúng tinh thần "an toàn, không suy diễn").
-        private static void EnsureWithinCapacity(Vehicle vehicle, decimal currentWeightKg, decimal addingWeightKg, List<string> addingOrderCodes)
-        {
-            if (vehicle.Capacity == null) return;
-
-            var newTotal = currentWeightKg + addingWeightKg;
-            if (newTotal > vehicle.Capacity.Value)
-            {
-                throw new VehicleOverweightException(
-                    $"Xe {vehicle.VehicleNumber} chỉ chở tối đa {vehicle.Capacity.Value:N0}kg, hiện đã có {currentWeightKg:N0}kg. " +
-                    $"Thêm đơn {string.Join(", ", addingOrderCodes)} ({addingWeightKg:N0}kg) sẽ vượt tải trọng. Vui lòng chọn xe/chuyến khác cho (các) đơn này.");
-            }
-        }
-
         public async Task<DeliveryTripResponseDto> CreateTripAsync(Guid createdByUserId, CreateDeliveryTripRequestDto dto)
         {
             var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.Id == dto.VehicleId);
@@ -107,7 +92,7 @@ namespace VietTien.API.Services.Implementations
                 .Where(o => o.DeliveryStatus == DeliveryStatus.NotScheduled || o.DeliveryStatus == DeliveryStatus.Rescheduled)
                 .ToList();
 
-            EnsureWithinCapacity(vehicle, 0m, eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0), eligibleOrders.Select(o => o.OrderCode).ToList());
+            VehicleCapacityGuard.EnsureWithinCapacity(vehicle, 0m, eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0), eligibleOrders.Select(o => o.OrderCode).ToList());
 
             var trip = new DeliveryTrip
             {
@@ -170,7 +155,7 @@ namespace VietTien.API.Services.Implementations
                 .ToList();
 
             var currentWeight = trip.Orders.Sum(o => o.TotalPackedWeightKg ?? 0);
-            EnsureWithinCapacity(trip.Vehicle, currentWeight, eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0), eligibleOrders.Select(o => o.OrderCode).ToList());
+            VehicleCapacityGuard.EnsureWithinCapacity(trip.Vehicle, currentWeight, eligibleOrders.Sum(o => o.TotalPackedWeightKg ?? 0), eligibleOrders.Select(o => o.OrderCode).ToList());
 
             foreach (var order in eligibleOrders)
             {

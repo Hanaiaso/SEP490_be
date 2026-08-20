@@ -682,20 +682,23 @@ namespace VietTien.API.Services.Implementations
                 ReceiveNote = st.ReceiveNote,
                 ProofImageUrl = st.ProofImageUrl,
                 NotificationEmail = st.NotificationEmail,
-                Items = st.Items.Select(i => new StockTransferItemDto 
-                { 
+                Items = st.Items.Select(i => new StockTransferItemDto
+                {
                     Id = i.Id,
                     StockTransferId = i.StockTransferId,
-                    ProductId = i.ProductId, 
+                    ProductId = i.ProductId,
                     MaterialId = i.MaterialId,
                     ItemName = i.Product?.Name ?? i.Material?.Name ?? "N/A",
                     ItemType = i.MaterialId != null ? "Material" : "Product",
                     Quantity = i.Quantity,
-                    ReceivedQuantity = i.ReceivedQuantity
+                    ReceivedQuantity = i.ReceivedQuantity,
+                    WeightKg = i.Product?.WeightKg
                 }).ToList(),
                 DeliveryVehicleId = st.DeliveryVehicleId,
                 DeliveryShift = st.DeliveryShift,
-                ScheduledDeliveryDate = st.ScheduledDeliveryDate
+                ScheduledDeliveryDate = st.ScheduledDeliveryDate,
+                // Nguyên vật liệu (MaterialId) chưa có trường trọng lượng -> tính 0kg (đánh đổi đã chốt).
+                TotalWeightKg = st.Items.Sum(i => (i.Product?.WeightKg ?? 0) * i.Quantity)
             };
         }
     }
