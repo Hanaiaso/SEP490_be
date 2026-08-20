@@ -172,7 +172,8 @@ namespace VietTien.API.Services.Implementations
         public async Task<StockTransferDto> UpdateAsync(Guid id, UpdateStockTransferDto dto)
         {
             var transfer = await _context.StockTransfers
-                .Include(st => st.Items)
+                .Include(st => st.Items).ThenInclude(i => i.Product)
+                .Include(st => st.Items).ThenInclude(i => i.Material)
                 .Include(st => st.SourceWarehouse)
                 .Include(st => st.DestinationWarehouse)
                 .Include(st => st.CreatedByUser)
@@ -223,7 +224,8 @@ namespace VietTien.API.Services.Implementations
             try
             {
                 var transfer = await _context.StockTransfers
-                    .Include(st => st.Items)
+                    .Include(st => st.Items).ThenInclude(i => i.Product)
+                    .Include(st => st.Items).ThenInclude(i => i.Material)
                     .Include(st => st.SourceWarehouse)
                     .Include(st => st.DestinationWarehouse)
                     .Include(st => st.CreatedByUser)
@@ -383,7 +385,8 @@ namespace VietTien.API.Services.Implementations
             try
             {
                 var transfer = await _context.StockTransfers
-                    .Include(st => st.Items)
+                    .Include(st => st.Items).ThenInclude(i => i.Product)
+                    .Include(st => st.Items).ThenInclude(i => i.Material)
                     .Include(st => st.SourceWarehouse)
                     .Include(st => st.DestinationWarehouse)
                     .Include(st => st.CreatedByUser)
@@ -552,7 +555,8 @@ namespace VietTien.API.Services.Implementations
             try
             {
                 var transfer = await _context.StockTransfers
-                    .Include(st => st.Items)
+                    .Include(st => st.Items).ThenInclude(i => i.Product)
+                    .Include(st => st.Items).ThenInclude(i => i.Material)
                     .Include(st => st.SourceWarehouse)
                     .Include(st => st.DestinationWarehouse)
                     .Include(st => st.CreatedByUser)
