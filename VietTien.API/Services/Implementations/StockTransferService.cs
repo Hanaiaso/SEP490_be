@@ -127,6 +127,26 @@ namespace VietTien.API.Services.Implementations
                 transfer.DestinationWarehouse = destinationWarehouse;
                 transfer.CreatedByUser = await _context.Users.FindAsync(createdByUserId) ?? new User();
 
+                // Items được tạo mới ở trên nên Product/Material navigation chưa có (không phải load từ
+                // DB) -> MapToDto sẽ ra "N/A"/weight null. Nạp bù để response tạo mới cũng đúng như GET.
+                var productIds = transfer.Items.Where(i => i.ProductId != null).Select(i => i.ProductId!.Value).Distinct().ToList();
+                var materialIds = transfer.Items.Where(i => i.MaterialId != null).Select(i => i.MaterialId!.Value).Distinct().ToList();
+
+                var products = productIds.Count > 0
+                    ? await _context.Products.Where(p => productIds.Contains(p.Id)).ToListAsync()
+                    : new List<Product>();
+                var materials = materialIds.Count > 0
+                    ? await _context.Materials.Where(m => materialIds.Contains(m.Id)).ToListAsync()
+                    : new List<Material>();
+
+                foreach (var item in transfer.Items)
+                {
+                    if (item.ProductId != null)
+                        item.Product = products.FirstOrDefault(p => p.Id == item.ProductId);
+                    else if (item.MaterialId != null)
+                        item.Material = materials.FirstOrDefault(m => m.Id == item.MaterialId);
+                }
+
                 // Gửi email thông báo nếu có — PHẢI await (không fire-and-forget) và làm sau khi đã
                 // commit: EmailService đọc cấu hình SMTP qua ISystemConfigService, dùng chung
                 // ApplicationDbContext theo scope request với service này. Nếu không await, task gửi
