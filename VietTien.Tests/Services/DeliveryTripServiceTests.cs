@@ -133,6 +133,43 @@ namespace VietTien.Tests.Services
             result.PlannedArrivalAt.Should().Be(arrival);
         }
 
+        // DEL-03b | EP-Valid | Bắt đầu bốc hàng có giờ dự kiến -> báo KHÁCH HÀNG (không phải nhân viên)
+        [Fact]
+        public async Task DEL_03b_StartLoading_NotifiesCustomerOfPlannedDeliveryTime()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var order = SeedPackedOrder(300m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Sáng", TripDate = DateTime.UtcNow.Date, Status = DeliveryTripStatus.Scheduled };
+            trip.Orders.Add(order);
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+
+            var arrival = DateTime.UtcNow.AddHours(4);
+            await _sut.StartLoadingAsync(trip.Id, new StartLoadingRequestDto { PlannedArrivalAt = arrival });
+
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_52_DeliveryTimeNotice, _profile.UserId,
+                It.IsAny<string>(), It.IsAny<string>(), order.Id, "Order"), Times.Once);
+        }
+
+        // DEL-03c | EP-Invalid | Bắt đầu bốc hàng KHÔNG kèm giờ dự kiến nào -> không báo khách (chưa có gì để báo)
+        [Fact]
+        public async Task DEL_03c_StartLoading_WithoutPlannedTime_DoesNotNotifyCustomer()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var order = SeedPackedOrder(300m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Sáng", TripDate = DateTime.UtcNow.Date, Status = DeliveryTripStatus.Scheduled };
+            trip.Orders.Add(order);
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+
+            await _sut.StartLoadingAsync(trip.Id, new StartLoadingRequestDto());
+
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_52_DeliveryTimeNotice, It.IsAny<Guid>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<string>()), Times.Never);
+        }
+
         // DEL-04 | EP-Invalid | Thêm đơn khi chuyến chưa ở Loading -> từ chối
         [Fact]
         public async Task DEL_04_AddOrders_TripNotLoading_Rejected()
@@ -185,6 +222,29 @@ namespace VietTien.Tests.Services
             updated.DeliveryVehicleId.Should().Be(vehicle.VehicleNumber);
             updated.DeliveryShift.Should().Be("Trưa");
             updated.ScheduledDeliveryDate.Should().Be(trip.TripDate);
+        }
+
+        // DEL-05c | EP-Valid | Chuyến đã có giờ dự kiến từ trước (StartLoadingAsync) -> thêm đơn mới
+        // vào cũng phải báo ngay giờ đó cho khách của đơn VỪA thêm, không chỉ đơn có mặt lúc StartLoading.
+        [Fact]
+        public async Task DEL_05c_AddOrders_WhenTripAlreadyHasPlannedTime_NotifiesNewCustomer()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var arrival = DateTime.UtcNow.AddHours(4);
+            var trip = new DeliveryTrip
+            {
+                VehicleId = vehicle.Id, Shift = "Trưa", TripDate = DateTime.UtcNow.Date.AddDays(2),
+                Status = DeliveryTripStatus.Loading, PlannedArrivalAt = arrival
+            };
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+            var order = SeedPackedOrder(200m);
+
+            await _sut.AddOrdersToTripAsync(trip.Id, new AddOrdersToTripRequestDto { OrderIds = new List<Guid> { order.Id } });
+
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_52_DeliveryTimeNotice, _profile.UserId,
+                It.IsAny<string>(), It.IsAny<string>(), order.Id, "Order"), Times.Once);
         }
 
         // DEL-06 | State-Valid | Rút đơn khỏi chuyến đang Loading -> đơn trở lại NotScheduled, không còn gắn chuyến

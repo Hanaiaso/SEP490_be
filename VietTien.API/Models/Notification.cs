@@ -90,6 +90,10 @@ namespace VietTien.API.Models
         SYS_50_ExcessStockAlert,
 
         // Mặt hàng không có giao dịch xuất kho trong X ngày (chậm luân chuyển) — SlowMovingStockAlertJob.
-        SYS_51_SlowMovingStockAlert
+        SYS_51_SlowMovingStockAlert,
+
+        // Sau khi Sale xác định giờ xuất phát/đến dự kiến của chuyến xe (StartLoadingAsync/
+        // AddOrdersToTripAsync) — báo cho KHÁCH HÀNG (không phải nhân viên) biết giờ nhận hàng dự kiến.
+        SYS_52_DeliveryTimeNotice
     }
 }

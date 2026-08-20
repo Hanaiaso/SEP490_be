@@ -59,9 +59,39 @@ namespace VietTien.API.Services.Implementations
         {
             var trip = await _context.DeliveryTrips
                 .Include(t => t.Vehicle)
-                .Include(t => t.Orders)
+                .Include(t => t.Orders).ThenInclude(o => o.CustomerProfile)
                 .FirstOrDefaultAsync(t => t.Id == tripId);
             return trip ?? throw new KeyNotFoundException("Không tìm thấy chuyến giao hàng.");
+        }
+
+        // Báo KHÁCH HÀNG (không phải nhân viên) giờ nhận hàng dự kiến ngay khi Sale xác định được —
+        // lỗi gửi thông báo cho 1 khách không được chặn các khách còn lại (best-effort, cô lập theo đơn).
+        private async Task NotifyCustomersOfDeliveryTimeAsync(IEnumerable<Order> orders, DateTime? plannedArrivalAt, DateTime? plannedDepartureAt)
+        {
+            if (plannedArrivalAt == null && plannedDepartureAt == null) return;
+
+            var timeText = plannedArrivalAt.HasValue
+                ? $"khoảng {plannedArrivalAt.Value:HH:mm} ngày {plannedArrivalAt.Value:dd/MM/yyyy}"
+                : $"sau khi xuất phát lúc {plannedDepartureAt!.Value:HH:mm} ngày {plannedDepartureAt.Value:dd/MM/yyyy}";
+
+            foreach (var order in orders)
+            {
+                if (order.CustomerProfile == null) continue;
+                try
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_52_DeliveryTimeNotice,
+                        order.CustomerProfile.UserId,
+                        "Dự kiến giờ nhận hàng",
+                        $"Đơn hàng {order.OrderCode} dự kiến giao đến bạn {timeText}.",
+                        order.Id,
+                        "Order");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DeliveryTripService] Lỗi gửi thông báo giờ nhận hàng cho đơn {order.Id}: {ex.Message}");
+                }
+            }
         }
 
         public async Task<DeliveryTripResponseDto> CreateTripAsync(Guid createdByUserId, CreateDeliveryTripRequestDto dto)
@@ -136,6 +166,9 @@ namespace VietTien.API.Services.Implementations
             if (dto.PlannedArrivalAt.HasValue) trip.PlannedArrivalAt = dto.PlannedArrivalAt;
 
             await _context.SaveChangesAsync();
+
+            await NotifyCustomersOfDeliveryTimeAsync(trip.Orders, trip.PlannedArrivalAt, trip.PlannedDepartureAt);
+
             return ToDto(trip);
         }
 
@@ -147,6 +180,7 @@ namespace VietTien.API.Services.Implementations
                 throw new InvalidOperationException("Chỉ có thể thêm đơn khi chuyến đang ở trạng thái Bốc hàng (Loading).");
 
             var candidateOrders = await _context.Orders
+                .Include(o => o.CustomerProfile)
                 .Where(o => dto.OrderIds.Contains(o.Id))
                 .ToListAsync();
 
@@ -167,6 +201,10 @@ namespace VietTien.API.Services.Implementations
             }
 
             await _context.SaveChangesAsync();
+
+            // Chuyến đã ở Loading nên có thể đã có giờ dự kiến từ StartLoadingAsync trước đó — báo
+            // ngay cho khách của các đơn VỪA thêm (đơn cũ trong chuyến đã được báo từ trước rồi).
+            await NotifyCustomersOfDeliveryTimeAsync(eligibleOrders, trip.PlannedArrivalAt, trip.PlannedDepartureAt);
 
             // BUGFIX: KHÔNG nối thủ công eligibleOrders vào trip.Orders — EF Core tự động fixup
             // navigation collection ngay khi order.DeliveryTripId được set ở trên (cùng DbContext),
