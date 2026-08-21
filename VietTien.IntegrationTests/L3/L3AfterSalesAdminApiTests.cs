@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -305,20 +305,23 @@ namespace VietTien.IntegrationTests.L3
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == placed.GetProperty("orderId").GetGuid()));
 
             order.CreditApplied.Should().Be(0m, "khách B không có credit nên không được trừ credit của ai");
-            order.FinalPayment.Should().Be(200_000m);
+            order.FinalPayment.Should().Be(WithVat(200_000m), "VAT 10% bắt buộc do server tự cộng");
             (await QueryAsync(db => db.CustomerProfiles.SingleAsync(p => p.Id == profileA.Id)))
                 .AvailableCredit.Should().Be(500_000m, "credit của khách A không được đụng tới");
         }
 
         /// AS-04 | BVA | FT-08 BV-03; NAC-03
         /// Dùng credit tối đa bằng số dư: credit áp không bao giờ vượt số dư và số dư không âm.
+        /// Ngưỡng so sánh là SỐ PHẢI TRẢ (đã gồm VAT 10% bắt buộc), không phải thành tiền trước thuế.
         [Theory]
-        [InlineData(50_000, 200_000, 50_000)]    // credit < tổng đơn -> dùng hết credit
-        [InlineData(200_000, 200_000, 200_000)]  // credit == tổng đơn -> trả hết bằng credit
-        [InlineData(500_000, 200_000, 200_000)]  // credit > tổng đơn -> chỉ dùng đúng phần cần
+        [InlineData(50_000, 200_000)]    // credit < số phải trả -> dùng hết credit
+        [InlineData(220_000, 200_000)]   // credit == số phải trả -> trả hết bằng credit
+        [InlineData(500_000, 200_000)]   // credit > số phải trả -> chỉ dùng đúng phần cần
         public async Task L3_AS_04_CreditApplied_NeverExceedsBalanceOrOrderTotal(
-            decimal credit, decimal orderTotal, decimal expectedApplied)
+            decimal credit, decimal orderTotal)
         {
+            var payable = WithVat(orderTotal);
+            var expectedApplied = Math.Min(credit, payable);
             var (client, user) = await CreateClientAsAsync(SystemRole.Customer);
             var profile = await EnsureProfileAsync(user.Id);
             await SeedAddressAsync(profile.Id);
@@ -335,7 +338,7 @@ namespace VietTien.IntegrationTests.L3
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == placed.GetProperty("orderId").GetGuid()));
 
             order.CreditApplied.Should().Be(expectedApplied);
-            order.FinalPayment.Should().Be(orderTotal - expectedApplied);
+            order.FinalPayment.Should().Be(payable - expectedApplied);
             (await QueryAsync(db => db.CustomerProfiles.SingleAsync(p => p.Id == profile.Id)))
                 .AvailableCredit.Should().BeGreaterThanOrEqualTo(0m, "số dư credit không bao giờ được âm");
         }
@@ -383,7 +386,7 @@ namespace VietTien.IntegrationTests.L3
 
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId));
             order.CreditApplied.Should().Be(150_000m);
-            order.FinalPayment.Should().Be(50_000m);
+            order.FinalPayment.Should().Be(WithVat(200_000m) - 150_000m, "credit trừ vào số phải trả đã gồm VAT");
 
             var ledger = await QueryAsync(db => db.CreditTransactions
                 .Where(t => t.OrderId == orderId).ToListAsync());

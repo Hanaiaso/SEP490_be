@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -98,10 +98,12 @@ namespace VietTien.IntegrationTests
                     CustomerName = $"Khach quay {phone}",
                     PhoneNumber = phone,
                     Address = "Tai quay",
+                    // VAT 10% nay là BẮT BUỘC và do server tự tính (OrderService.cs:803) —
+                    // FinalPayment phải là (TotalAmount - DiscountAmount) + VAT, nếu không request bị 400.
                     TotalAmount = LastUnits * 100_000m,
                     DiscountAmount = 0m,
-                    VatAmount = 0m,
-                    FinalPayment = LastUnits * 100_000m,
+                    VatAmount = LastUnits * 10_000m,
+                    FinalPayment = LastUnits * 110_000m,
                     PaymentMethod = PaymentMethod.Cash,
                     Items = new List<DirectOrderItemDto>
                     {
@@ -189,6 +191,12 @@ namespace VietTien.IntegrationTests
 
                 await SeedAsync(async db =>
                 {
+                    // GoodsIssueService.PostGoodsIssueAsync đi qua WarehouseAccessGuard: WarehouseStaff
+                    // chưa được gán kho sẽ bị 403 (chống IDOR kho) -> gán đúng kho nguồn để case này
+                    // kiểm được tranh chấp tồn kho chứ không dừng ở cổng phân quyền.
+                    var staffUser = await db.Users.FirstAsync(u => u.Id == warehouseStaff.Id);
+                    staffUser.AssignedWarehouseId = sourceWarehouseId;
+
                     var destinationWarehouse = new Warehouse
                     {
                         Id = Guid.NewGuid(),

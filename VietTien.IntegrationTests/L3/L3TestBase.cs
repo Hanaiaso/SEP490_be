@@ -1,4 +1,6 @@
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
+using System.Net.Http.Json;
+using FluentAssertions;
 using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
@@ -332,6 +334,33 @@ namespace VietTien.IntegrationTests.L3
         /// Đặt lại <c>Cart.UpdatedAt</c> SAU khi đã thêm dòng giỏ — cần vì CartService tự làm mới
         /// UpdatedAt mỗi lần ghi. Dùng cho BVA tuổi snapshot (ORD-02/ORD-03).
         /// </summary>
+        /// <summary>
+        /// VAT 10% là BẮT BUỘC trên mọi đơn kể từ nhánh "VAT bắt buộc, hóa đơn đỏ" (OrderService.cs:213,
+        /// 282, 803) — server tự tính, không tin số client gửi. Số tiền phải trả cuối cùng của một đơn
+        /// vì thế luôn là (thành tiền - chiết khấu) + VAT. Dùng helper này thay vì hard-code để test
+        /// nói đúng ý định nghiệp vụ chứ không phải một con số.
+        /// </summary>
+        protected const decimal VatRate = 0.10m;
+
+        /// <summary>Tổng phải trả sau khi cộng VAT 10% bắt buộc (làm tròn giống OrderService).</summary>
+        protected static decimal WithVat(decimal netAmount) =>
+            netAmount + Math.Round(netAmount * VatRate, 0, MidpointRounding.AwayFromZero);
+
+        /// <summary>
+        /// Giao báo giá cho một Sales Staff. Nhánh "Báo giá ≥100tr: Sales Manager phân công thủ công"
+        /// đã BỎ việc Sale tự nhận (POST /api/Quotation/{id}/pickup nay luôn ném lỗi, QuotationService.cs:140)
+        /// — mọi báo giá đều ≥ 100tr nên phải qua POST /api/Quotation/{id}/assign của Sales Manager.
+        /// </summary>
+        protected async Task AssignQuotationToSalesAsync(Guid quotationId, Guid? staffId = null)
+        {
+            var manager = await ClientForSeededAsync(L3Seed.SalesManagerId);
+            var res = await manager.PostAsJsonAsync($"/api/Quotation/{quotationId}/assign",
+                new { StaffId = staffId ?? L3Seed.SalesStaffId });
+            res.IsSuccessStatusCode.Should().BeTrue(
+                "Sales Manager phải phân công được báo giá cho nhân viên; body: {0}",
+                await res.Content.ReadAsStringAsync());
+        }
+
         protected async Task SetCartAgeAsync(Guid cartId, TimeSpan age)
         {
             await SeedAsync(async db =>

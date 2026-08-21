@@ -80,7 +80,7 @@ namespace VietTien.IntegrationTests.L3
                 .PaymentStatus.Should().Be(PaymentStatus.Pending, "B4: chưa trả tiền thì chưa Paid");
 
             // B5: webhook hợp lệ -> Paid + Confirmed + sinh PickTask.
-            (await anonymous.SendAsync(SePayWebhook(orderCode, 200_000m, "REF-FLOW-01")))
+            (await anonymous.SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-FLOW-01")))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
 
             var afterWebhook = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId));
@@ -118,8 +118,7 @@ namespace VietTien.IntegrationTests.L3
 
             // B2: Sales nhận.
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            (await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { }))
-                .IsSuccessStatusCode.Should().BeTrue();
+            await AssignQuotationToSalesAsync(quotationId);
             (await QueryAsync(db => db.Quotations.SingleAsync(q => q.Id == quotationId)))
                 .SalesStaffId.Should().Be(L3Seed.SalesStaffId, "B2: phải gán Sales phụ trách");
 
@@ -257,10 +256,17 @@ namespace VietTien.IntegrationTests.L3
             (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
                 .DeliveryStatus.Should().Be(DeliveryStatus.Scheduled, "B1: đơn đã được xếp lịch");
 
-            // B2: bắt đầu chuyến — BR-034 đòi mọi đơn trong chuyến đã bàn giao xong.
+            // B2a: bốc hàng — Scheduled -> Loading. Nhánh "trang quản lý chuyến xe" đã tách bước này
+            // ra khỏi /start (DeliveryTripService.cs:242), phải gọi trước khi xuất phát.
+            var loading = await sales.PostAsJsonAsync($"/api/delivery/trips/{tripId}/start-loading",
+                new { PlannedDepartureAt = DateTime.UtcNow.AddHours(1), PlannedArrivalAt = DateTime.UtcNow.AddHours(3) });
+            loading.StatusCode.Should().Be(HttpStatusCode.OK,
+                "B2a: bắt đầu bốc hàng phải thành công; body: {0}", await loading.Content.ReadAsStringAsync());
+
+            // B2b: bắt đầu chuyến — BR-034 đòi mọi đơn trong chuyến đã bàn giao xong.
             (await sales.PostAsJsonAsync($"/api/delivery/trips/{tripId}/start", new { }))
                 .StatusCode.Should().Be(HttpStatusCode.Conflict,
-                    "B2: chưa bàn giao thì không được xuất phát");
+                    "B2b: chưa bàn giao thì không được xuất phát");
 
             await SeedAsync(db =>
             {
@@ -277,9 +283,9 @@ namespace VietTien.IntegrationTests.L3
 
             var start = await sales.PostAsJsonAsync($"/api/delivery/trips/{tripId}/start", new { });
             start.StatusCode.Should().Be(HttpStatusCode.OK,
-                "B2: đã bàn giao thì xuất phát được; body: {0}", await start.Content.ReadAsStringAsync());
+                "B2b: đã bàn giao thì xuất phát được; body: {0}", await start.Content.ReadAsStringAsync());
             (await QueryAsync(db => db.DeliveryTrips.SingleAsync(t => t.Id == tripId)))
-                .Status.Should().Be(DeliveryTripStatus.InDelivery, "B2: chuyến đang giao");
+                .Status.Should().Be(DeliveryTripStatus.InDelivery, "B2b: chuyến đang giao");
 
             // B3: ghi nhận POD đầy đủ -> đơn DELIVERED.
             var attempt = await sales.PostAsJsonAsync("/api/delivery/attempts", new
@@ -308,7 +314,8 @@ namespace VietTien.IntegrationTests.L3
             var debt = await QueryAsync(db => db.CustomerDebts
                 .SingleOrDefaultAsync(d => d.OrderId == orderId && d.Status == DebtStatus.InDebt));
             debt.Should().NotBeNull("B4: phần còn thiếu phải tạo công nợ");
-            debt!.DebtAmount.Should().Be(40_000m, "công nợ = tổng đơn 100.000 trừ 60.000 đã thu");
+            debt!.DebtAmount.Should().Be(WithVat(100_000m) - 60_000m,
+                "công nợ = số phải trả (100.000 + VAT 10%) trừ 60.000 đã thu");
         }
 
         /// FLOW-05 | Workflow | FT-08 AC-01; AC-02; AC-03; BR-017; BR-041
@@ -329,7 +336,7 @@ namespace VietTien.IntegrationTests.L3
             var orderCode = placed.GetProperty("orderCode").GetString()!;
 
             // B1: thanh toán thật qua webhook.
-            (await AnonymousClient().SendAsync(SePayWebhook(orderCode, 200_000m, "REF-FLOW-05")))
+            (await AnonymousClient().SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-FLOW-05")))
                 .StatusCode.Should().Be(HttpStatusCode.OK);
             (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
                 .PaymentStatus.Should().Be(PaymentStatus.Paid, "B1: đơn đã thanh toán");

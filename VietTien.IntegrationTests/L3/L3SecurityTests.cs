@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using FluentAssertions;
@@ -378,7 +378,7 @@ namespace VietTien.IntegrationTests.L3
 
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == placed.GetProperty("orderId").GetGuid()));
             order.TotalAmount.Should().Be(3_000_000m, "server phải tự tính từ giỏ");
-            order.FinalPayment.Should().Be(3_000_000m);
+            order.FinalPayment.Should().Be(WithVat(3_000_000m), "VAT 10% bắt buộc do server tự cộng");
             order.DiscountAmount.Should().Be(0m);
         }
 

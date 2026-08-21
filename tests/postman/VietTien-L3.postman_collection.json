@@ -28,12 +28,27 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"customer.test@viettien.com\",\n  \"password\": \"123456\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            }
           }
         },
         {
@@ -54,12 +69,27 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"admin.test@viettien.com\",\n  \"password\": \"123456\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            }
           }
         },
         {
@@ -80,12 +110,27 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"salesstaff.test@viettien.com\",\n  \"password\": \"123456\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+            "url": {
+              "raw": "{{baseUrl}}/api/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
+            }
           }
         }
       ]
@@ -105,8 +150,17 @@
               "pm.test('Có header X-Frame-Options (chống clickjacking)', function () {",
               "    pm.expect(pm.response.headers.has('X-Frame-Options')).to.be.true;",
               "});",
-              "pm.test('Có header Strict-Transport-Security (HSTS)', function () {",
-              "    pm.expect(pm.response.headers.has('Strict-Transport-Security')).to.be.true;",
+              "pm.test('HSTS: co tren HTTPS, dung chuan la KHONG gui tren HTTP thuan', function () {",
+              "    // RFC 6797 §7.2: user agent PHAI bo qua Strict-Transport-Security nhan qua HTTP thuan, nen",
+              "    // SecurityHeadersMiddleware chi gan header nay khi Request.IsHttps. Chay local qua",
+              "    // http://localhost:5080 thi khong co header la ĐUNG; chay tren staging https:// thi phai co.",
+              "    var https = pm.request.url.protocol === 'https';",
+              "    var has = pm.response.headers.has('Strict-Transport-Security');",
+              "    if (https) {",
+              "        pm.expect(has, 'thieu HSTS tren ket noi HTTPS').to.be.true;",
+              "    } else {",
+              "        pm.expect(has, 'khong duoc gui HSTS tren HTTP thuan').to.be.false;",
+              "    }",
               "});",
               "pm.test('Không lộ banner phiên bản máy chủ', function () {",
               "    var server = pm.response.headers.get('Server') || '';",
@@ -120,7 +174,16 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": { "raw": "{{baseUrl}}/api/products", "host": ["{{baseUrl}}"], "path": ["api", "products"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/products",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "products"
+          ]
+        }
       }
     },
     {
@@ -152,9 +215,19 @@
         "header": [],
         "url": {
           "raw": "{{baseUrl}}/api/products?search=' OR 1=1--",
-          "host": ["{{baseUrl}}"],
-          "path": ["api", "products"],
-          "query": [{ "key": "search", "value": "' OR 1=1--" }]
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "products"
+          ],
+          "query": [
+            {
+              "key": "search",
+              "value": "' OR 1=1--"
+            }
+          ]
         }
       }
     },
@@ -179,7 +252,17 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": { "raw": "{{baseUrl}}/api/orders/my-history", "host": ["{{baseUrl}}"], "path": ["api", "orders", "my-history"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/orders/my-history",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "orders",
+            "my-history"
+          ]
+        }
       }
     },
     {
@@ -205,7 +288,17 @@
             "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhdHRhY2tlciIsInJvbGUiOiJBZG1pbiIsImV4cCI6NDEwMjQ0NDgwMH0.ZmFrZS1zaWduYXR1cmUtbm90LXNpZ25lZC1ieS10aGUtc2VydmVy"
           }
         ],
-        "url": { "raw": "{{baseUrl}}/api/admin/users", "host": ["{{baseUrl}}"], "path": ["api", "admin", "users"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/admin/users",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "admin",
+            "users"
+          ]
+        }
       }
     },
     {
@@ -228,12 +321,27 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"gateway\": \"TPBank\",\n  \"accountNumber\": \"0000000000\",\n  \"transferAmount\": 200000,\n  \"transferContent\": \"VT-FAKE-ORDER\",\n  \"content\": \"VT-FAKE-ORDER\",\n  \"referenceCode\": \"REF-NEWMAN-FORGED\"\n}"
         },
-        "url": { "raw": "{{baseUrl}}/api/webhooks/sepay-callback", "host": ["{{baseUrl}}"], "path": ["api", "webhooks", "sepay-callback"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/webhooks/sepay-callback",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "webhooks",
+            "sepay-callback"
+          ]
+        }
       }
     },
     {
@@ -260,12 +368,27 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"email\": \"customer.test@viettien.com\",\n  \"password\": \"123456\"\n}"
         },
-        "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
+        }
       }
     },
     {
@@ -288,12 +411,27 @@
       ],
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"email\": \"customer.test@viettien.com\",\n  \"password\": \"SaiMatKhau!\"\n}"
         },
-        "url": { "raw": "{{baseUrl}}/api/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "auth", "login"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/auth/login",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "auth",
+            "login"
+          ]
+        }
       }
     },
     {
@@ -314,8 +452,23 @@
       ],
       "request": {
         "method": "GET",
-        "header": [{ "key": "Authorization", "value": "Bearer {{salesToken}}" }],
-        "url": { "raw": "{{baseUrl}}/api/dashboards/sales-manager", "host": ["{{baseUrl}}"], "path": ["api", "dashboards", "sales-manager"] }
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{salesToken}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/dashboards/sales-manager",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "dashboards",
+            "sales-manager"
+          ]
+        }
       }
     },
     {
@@ -334,14 +487,30 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Authorization", "value": "Bearer {{customerToken}}" },
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Authorization",
+            "value": "Bearer {{customerToken}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"fullName\": \"Leo thang quyen\",\n  \"email\": \"escalate@viettien.test\",\n  \"phoneNumber\": \"0900000001\",\n  \"password\": \"Passw0rd!\",\n  \"role\": \"Admin\"\n}"
         },
-        "url": { "raw": "{{baseUrl}}/api/admin/users", "host": ["{{baseUrl}}"], "path": ["api", "admin", "users"] }
+        "url": {
+          "raw": "{{baseUrl}}/api/admin/users",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "admin",
+            "users"
+          ]
+        }
       }
     },
     {
@@ -387,13 +556,32 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": { "raw": "{{baseUrl}}/swagger/v1/swagger.json", "host": ["{{baseUrl}}"], "path": ["swagger", "v1", "swagger.json"] }
+        "url": {
+          "raw": "{{baseUrl}}/swagger/v1/swagger.json",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "swagger",
+            "v1",
+            "swagger.json"
+          ]
+        }
       }
     }
   ],
   "variable": [
-    { "key": "customerToken", "value": "" },
-    { "key": "adminToken", "value": "" },
-    { "key": "salesToken", "value": "" }
+    {
+      "key": "customerToken",
+      "value": ""
+    },
+    {
+      "key": "adminToken",
+      "value": ""
+    },
+    {
+      "key": "salesToken",
+      "value": ""
+    }
   ]
 }

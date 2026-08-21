@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -138,6 +138,25 @@ namespace VietTien.IntegrationTests
 
             (await manager.PostAsJsonAsync($"/api/delivery/pickups/{requestId}/schedule",
                 new { VehicleId = 1, Shift = "Sáng", PickupDate = DateTime.UtcNow.AddDays(1) })).EnsureSuccessStatusCode();
+
+            // Bước "Tiếp nhận xe hoàn" ở kho: ConfirmPickupAsync nay CHỈ cộng OnHand và trông chờ
+            // QuarantineQuantity đã được cộng trước đó bởi POST /api/warehouse-management/quarantine/receive
+            // (OrderService.cs:3464). Bỏ bước này thì hàng thu hồi rơi thẳng vào tồn khả dụng.
+            var (warehouseClient, warehouseStaff) = await CreateClientAsAsync(SystemRole.WarehouseStaff);
+            await SeedAsync(async db =>
+            {
+                var defaultWarehouseId = await db.Warehouses.Where(w => w.Code == "WH-DEFAULT")
+                    .Select(w => w.Id).FirstAsync();
+                var staffUser = await db.Users.FirstAsync(u => u.Id == warehouseStaff.Id);
+                staffUser.AssignedWarehouseId = defaultWarehouseId;
+            });
+
+            var quarantine = await warehouseClient.PostAsJsonAsync("/api/warehouse-management/quarantine/receive",
+                new { OrderId = orderId, ProductId = c.ProductId, Quantity = 2, Reason = "Hang loi khach tra" });
+            quarantine.StatusCode.Should().Be(HttpStatusCode.OK,
+                "kho phải nhập được hàng thu hồi vào khu cách ly; body: {0}",
+                await quarantine.Content.ReadAsStringAsync());
+
             (await manager.PostAsync($"/api/delivery/pickups/{requestId}/confirm", null)).EnsureSuccessStatusCode();
 
             // (b) hàng thu hồi vào khu cách ly -> khả dụng KHÔNG tăng

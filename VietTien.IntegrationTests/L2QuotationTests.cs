@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
@@ -10,7 +10,7 @@ namespace VietTien.IntegrationTests
 {
     /// <summary>
     /// Sheet L2-Quotation — chuỗi đàm phán báo giá trên DB thật.
-    /// Route thật: /api/Quotation (chữ Q hoa, số ít) — pickup · versions · manager-decision
+    /// Route thật: /api/Quotation (chữ Q hoa, số ít) — assign · versions · manager-decision
     /// · ceo-decision · customer-decision · messages.
     /// ⚠ Workbook ghi bước 3 là "M1 approve"; route thật là `manager-decision` (R8).
     /// </summary>
@@ -18,6 +18,21 @@ namespace VietTien.IntegrationTests
     public class L2QuotationTests : SqlServerTestBase
     {
         public L2QuotationTests(SqlServerFixture factory) : base(factory) { }
+
+        /// <summary>
+        /// Giao báo giá cho Sales Staff. Nhánh "Báo giá ≥100tr: Sales Manager phân công thủ công"
+        /// đã bỏ việc Sale tự nhận — POST /api/Quotation/{id}/pickup nay luôn ném lỗi
+        /// (QuotationService.cs:140) và mọi báo giá đều ≥ 100tr, nên phải đi qua
+        /// POST /api/Quotation/{id}/assign của Sales Manager.
+        /// </summary>
+        private async Task AssignToSalesAsync(Guid quotationId, Guid salesStaffId)
+        {
+            var (manager, _) = await CreateClientAsAsync(SystemRole.SalesManager);
+            var res = await manager.PostAsJsonAsync($"/api/Quotation/{quotationId}/assign",
+                new AssignQuotationRequest { StaffId = salesStaffId });
+            res.StatusCode.Should().Be(HttpStatusCode.OK,
+                "Sales Manager phải phân công được báo giá; body: {0}", await res.Content.ReadAsStringAsync());
+        }
 
         private sealed record QuoFixture(HttpClient Customer, Guid CustomerUserId, Guid ProfileId, Guid ProductId, Guid CartId);
 
@@ -86,7 +101,7 @@ namespace VietTien.IntegrationTests
         // ── L2-QUO-01 ──────────────────────────────────────────────────────────────────────
 
         // GIVEN  Khách U1 có giỏ 120.000.000; đã seed sales S1, manager M1, CEO C1
-        // WHEN   from-cart → S1 pickup + tạo version → M1 duyệt → C1 duyệt → U1 chấp nhận
+        // WHEN   from-cart → M1 phân công S1 + S1 tạo version → M1 duyệt → C1 duyệt → U1 chấp nhận
         // THEN   Trạng thái đi đúng chuỗi 4.4.3 và dừng ở CustomerAccepted; có thông báo ở mỗi chặng
         [Fact]
         [Trait("TestID", "L2-QUO-01")]
@@ -102,9 +117,8 @@ namespace VietTien.IntegrationTests
 
             var quotationId = await CreateFromCartAsync(f);
 
-            // 2) Sales nhận việc
-            var pickup = await sales.PostAsync($"/api/Quotation/{quotationId}/pickup", null);
-            pickup.StatusCode.Should().Be(HttpStatusCode.OK, "body: {0}", await pickup.Content.ReadAsStringAsync());
+            // 2) Sales Manager phân công cho Sales (thay cho bước Sale tự nhận trước đây)
+            await AssignToSalesAsync(quotationId, salesUser.Id);
 
             // 3) Sales tạo phương án giá -> chuyển sang chờ Manager
             var version = await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/versions",
@@ -169,7 +183,7 @@ namespace VietTien.IntegrationTests
             var f = await SeedCustomerWithCartAsync(120_000_000m, assignedSalesStaffId: salesUser.Id);
 
             var quotationId = await CreateFromCartAsync(f);
-            (await sales.PostAsync($"/api/Quotation/{quotationId}/pickup", null)).EnsureSuccessStatusCode();
+            await AssignToSalesAsync(quotationId, salesUser.Id);
             (await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/versions",
                 new CreateQuotationVersionRequest
                 {
@@ -218,7 +232,7 @@ namespace VietTien.IntegrationTests
             var f = await SeedCustomerWithCartAsync(120_000_000m, assignedSalesStaffId: salesUser.Id);
 
             var quotationId = await CreateFromCartAsync(f);
-            (await sales.PostAsync($"/api/Quotation/{quotationId}/pickup", null)).EnsureSuccessStatusCode();
+            await AssignToSalesAsync(quotationId, salesUser.Id);
 
             // 5 vòng: mỗi vòng Sales đề xuất -> Manager duyệt -> CEO duyệt -> khách từ chối
             for (var round = 1; round <= 5; round++)
@@ -339,7 +353,7 @@ namespace VietTien.IntegrationTests
             var f = await SeedCustomerWithCartAsync(120_000_000m, assignedSalesStaffId: salesUser.Id);
 
             var quotationId = await CreateFromCartAsync(f);
-            (await sales.PostAsync($"/api/Quotation/{quotationId}/pickup", null)).EnsureSuccessStatusCode();
+            await AssignToSalesAsync(quotationId, salesUser.Id);
 
             const string text = "Ben em de xuat giam 5% cho don nay.";
             var send = await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/messages",
@@ -377,7 +391,7 @@ namespace VietTien.IntegrationTests
             var f = await SeedCustomerWithCartAsync(120_000_000m, assignedSalesStaffId: salesUser.Id);
 
             var quotationId = await CreateFromCartAsync(f);
-            (await sales.PostAsync($"/api/Quotation/{quotationId}/pickup", null)).EnsureSuccessStatusCode();
+            await AssignToSalesAsync(quotationId, salesUser.Id);
 
             const string secret = "Gia noi bo 95 trieu - khong duoc lo ra ngoai.";
             (await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/messages",

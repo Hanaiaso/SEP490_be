@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -47,7 +47,10 @@ namespace VietTien.Tests.Services
                 WarehouseId = _warehouse.Id,
                 Status = status,
             };
-            po.Items.Add(new PurchaseOrderItem { ExpectedQuantity = 10, UnitPrice = 1000m, Unit = "Cái" });
+            // GH-10: IssueAsync chặn PO còn dòng "N/A" (ProductId lẫn MaterialId đều null), nên dòng
+            // hàng mẫu phải trỏ tới một sản phẩm thật — đúng tiền điều kiện "PO Draft có >= 1 line".
+            var seedProduct = TestData.SeedProduct(_db);
+            po.Items.Add(new PurchaseOrderItem { ProductId = seedProduct.Id, ExpectedQuantity = 10, UnitPrice = 1000m, Unit = "Cái" });
             _db.PurchaseOrders.Add(po);
             _db.SaveChanges();
             return po;

@@ -119,20 +119,29 @@ namespace VietTien.IntegrationTests.L3
         [Fact]
         public async Task L3_FUL_04_HandoverDualConfirm_EachSideOnlyOwnEndpoint()
         {
-            var handoverId = Guid.NewGuid();
+            // Workbook ghi 2 endpoint /api/handover-records/{id}/warehouse-confirm và /sales-confirm;
+            // code đã GỘP về 1 endpoint POST /api/warehouse/orders/{orderId}/handover, phân biệt hai
+            // phía bằng TRƯỜNG CHỮ KÝ trong body (WarehouseService.cs:864 — BR-034).
+            var orderId = Guid.NewGuid();
             var warehouse = await ClientForSeededAsync(L3Seed.WarehouseStaffId);
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
 
             // Nhân viên kho KHÔNG được ký thay phía Sales.
-            (await warehouse.PostAsJsonAsync($"/api/handover-records/{handoverId}/sales-confirm", new { }))
+            (await warehouse.PostAsJsonAsync($"/api/warehouse/orders/{orderId}/handover",
+                    new { SalesSignature = "https://cdn/sig-sales.png" }))
                 .StatusCode.Should().Be(HttpStatusCode.Forbidden, "kho không được xác nhận thay Sales");
 
             // Và ngược lại.
-            (await sales.PostAsJsonAsync($"/api/handover-records/{handoverId}/warehouse-confirm", new { }))
+            (await sales.PostAsJsonAsync($"/api/warehouse/orders/{orderId}/handover",
+                    new { WarehouseSignature = "https://cdn/sig-wh.png" }))
                 .StatusCode.Should().Be(HttpStatusCode.Forbidden, "Sales không được xác nhận thay kho");
 
-            // Mỗi bên gọi đúng endpoint của mình thì phải lọt qua cổng phân quyền.
-            (await warehouse.PostAsJsonAsync($"/api/handover-records/{handoverId}/warehouse-confirm", new { }))
+            // Mỗi bên ký đúng phần của mình thì phải lọt qua cổng phân quyền.
+            (await warehouse.PostAsJsonAsync($"/api/warehouse/orders/{orderId}/handover",
+                    new { WarehouseSignature = "https://cdn/sig-wh.png" }))
+                .StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+            (await sales.PostAsJsonAsync($"/api/warehouse/orders/{orderId}/handover",
+                    new { SalesSignature = "https://cdn/sig-sales.png" }))
                 .StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
         }
 
@@ -521,14 +530,36 @@ namespace VietTien.IntegrationTests.L3
         [Fact]
         public async Task L3_DEL_08_DualConfirmEndpoints_ExistAndSeparatelyAuthorized()
         {
-            var handoverId = Guid.NewGuid();
+            // Endpoint đã gộp: POST /api/warehouse/orders/{orderId}/handover (xem L3-FUL-04).
+            var orderId = await SeedDeliverableOrderAsync();
+            await SeedAsync(async db =>
+            {
+                var order = await db.Orders.SingleAsync(o => o.Id == orderId);
+                order.FulfillmentStatus = FulfillmentStatus.Consolidated; // đã tập kết, sẵn sàng bàn giao
+            });
+
             var warehouse = await ClientForSeededAsync(L3Seed.WarehouseStaffId);
+            var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
 
-            var res = await warehouse.PostAsJsonAsync(
-                $"/api/handover-records/{handoverId}/warehouse-confirm", new { });
+            var first = await warehouse.PostAsJsonAsync($"/api/warehouse/orders/{orderId}/handover",
+                new { WarehouseSignature = "https://cdn/sig-wh.png" });
+            first.StatusCode.Should().Be(HttpStatusCode.OK,
+                "kho ký trước; body: {0}", await first.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(first)).GetProperty("isConfirmed").GetBoolean()
+                .Should().BeFalse("mới có 1 chữ ký thì chưa đủ xác nhận kép");
 
-            res.StatusCode.Should().NotBe(HttpStatusCode.NotFound, "endpoint xác nhận phía kho phải tồn tại");
-            res.StatusCode.Should().NotBe(HttpStatusCode.Forbidden, "đúng vai trò thì phải qua cổng phân quyền");
+            var second = await sales.PostAsJsonAsync($"/api/warehouse/orders/{orderId}/handover",
+                new { SalesSignature = "https://cdn/sig-sales.png" });
+            second.StatusCode.Should().Be(HttpStatusCode.OK,
+                "Sales ký sau; body: {0}", await second.Content.ReadAsStringAsync());
+            (await ReadJsonAsync(second)).GetProperty("isConfirmed").GetBoolean()
+                .Should().BeTrue("đủ 2 chữ ký thì biên bản mới được xác nhận");
+
+            var handover = await QueryAsync(db => db.HandoverRecords.SingleAsync(h => h.OrderId == orderId));
+            handover.Status.Should().Be(HandoverStatus.Confirmed);
+            handover.WarehouseStaffId.Should().Be(L3Seed.WarehouseStaffId, "phải ghi danh tính phía kho");
+            handover.SalesStaffId.Should().Be(L3Seed.SalesStaffId, "phải ghi danh tính phía Sales");
+            handover.HandoverTime.Should().NotBeNull("phải ghi mốc thời gian bàn giao");
         }
 
         /// DEL-09 | Input-Domain-Error | FT-07 NAC-05; NFR-SEC03

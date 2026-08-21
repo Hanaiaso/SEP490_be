@@ -98,7 +98,7 @@ Mỗi test dưới đây có comment `🔴 DEFECT CANDIDATE` hoặc `🔴 SPEC G
 | `L1-REG-01` | `AdjustInventoryAsync` không kiểm tra nhân viên có thuộc kho của bản ghi tồn → **IDOR kho** | FT-05 NAC-05 |
 | `L1-REG-06` | `RequestCancelOrderAsync` chỉ xét `OrderStatus`; đơn đang giao (`Processing` + `DeliveryStatus.InDelivery`) **vẫn huỷ được** | SRS 4.4.1 |
 | `L1-REG-07` | `GenerateSePayQrAsync` không kiểm tra `PaymentStatus` → đơn đã Paid vẫn sinh QR mới, khách có thể **chuyển khoản lần 2** | FT-03 NAC-02, BR-016 |
-| `L1-MKT-04` | `PublishNowAsync` không có state guard → bài **Draft** vẫn đăng thẳng lên Facebook | BR-046, 4.4.4 |
+| ~~`L1-MKT-04`~~ | ĐÃ FIX (21/08/2026): `PublishNowAsync` được gộp vào `MakeDecisionAsync(Action = "ApproveNow")`, và method này chặn cứng `Status != Submitted` (MarketingPostService.cs:202) → bài Draft không đăng thẳng được nữa. Test `L1_MKT_04_PublishNow_OnDraftPost_IsBlocked` xác nhận | BR-046, 4.4.4 |
 | `L1-MKT-12` | `HandleMakeWebhookCallbackAsync` không kiểm tra trạng thái nguồn → Draft nhảy thẳng sang Success | BR-049 |
 | `L1-ADM-05` | `ChangeRoleAsync` không kiểm tra `CustomerProfile.AssignedSalesStaffId` → hạ vai trò Sales làm khách **mất người phụ trách trong im lặng** | FT-04 NAC-03 |
 | `L1-ADM-07` | `SetActiveStatusAsync` không đếm Sales còn hoạt động → khoá người cuối cùng thì **không còn ai nhận khách mới** | FT-04 NAC-03 |
@@ -162,7 +162,7 @@ vẫn `return (true, "Mã OTP mới đã được gửi...")`. Người dùng đ
 | Case | Lý do |
 |---|---|
 | `L1-VEH-05` | `VehicleService` không hề biết tới lịch chuyến (không có quan hệ với Order/DeliverySchedule) |
-| `L1-JOB-03` | `JobRunService` **không có cơ chế retry** — nó chỉ bọc đúng 1 lần chạy. Retry là chuyện riêng của từng job (đã phủ ở `L1-WHL-07`) |
+| `L1-JOB-03` | `JobRunService` **không có cơ chế retry** — nó chỉ bọc đúng 1 lần chạy. Retry là chuyện riêng của từng job. 21/08/2026: đã có test mang đúng ID này ở `JobRunServiceTests.L1_JOB_03_RetryCeiling_StopsAtConfiguredMaxAttempts`, chạy `SePayWebhookRetryJob` thật qua `RunTrackedAsync` để phủ ngưỡng `WebhookLogService.MaxAttempts` (đối chứng `L1-WHL-07`, `L1-SJOB-09`) |
 | `L1-FCMP-04` | Không tồn tại khái niệm `isPriceExpired` / banner cảnh báo giá trong toàn bộ FE |
 | `L1-FCMP-06` | Màn QR SePay **không có đếm ngược 15 phút**. Biến `countdown` ở `Checkout.jsx:379` là đếm 5 giây tự về trang chủ SAU khi thanh toán thành công |
 

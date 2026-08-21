@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Marketing;
@@ -137,6 +137,34 @@ namespace VietTien.Tests.Services
         }
 
         // ── Block: Đăng bài & callback ──────────────────────────────────────
+
+        // L1-MKT-04 | State-Invalid | "Đăng ngay" trên bài Draft -> chặn; KHÔNG gọi Make.com; vẫn là Draft
+        // Sheet doc ghi PublishNowAsync(); code hiện gộp vào MakeDecisionAsync(Action = "ApproveNow").
+        [Fact]
+        public async Task L1_MKT_04_PublishNow_OnDraftPost_IsBlocked()
+        {
+            var post = SeedPost(MarketingPostStatus.Draft);
+
+            var act = () => _sut.MakeDecisionAsync(post.Id,
+                new MarketingPostDecisionDto { Action = "ApproveNow" }, _salesManager.Id);
+
+            await act.Should().ThrowAsync<Exception>("bài chưa qua duyệt không được đăng thẳng lên Facebook");
+            _makeWebhook.Verify(m => m.TriggerPostToMakeAsync(It.IsAny<MarketingPost>()), Times.Never);
+            Reload(post.Id).Status.Should().Be(MarketingPostStatus.Draft);
+        }
+
+        // L1-MKT-08 | EP-Valid | "Đăng ngay" -> gọi Make.com đúng 1 lần, chuyển Posting (6), không chờ đồng bộ
+        [Fact]
+        public async Task L1_MKT_08_PublishNow_TriggersWebhookOnceAndMovesToPosting()
+        {
+            var post = SeedPost(MarketingPostStatus.Submitted);
+
+            var dto = await _sut.MakeDecisionAsync(post.Id,
+                new MarketingPostDecisionDto { Action = "ApproveNow" }, _salesManager.Id);
+
+            dto.Status.Should().Be(nameof(MarketingPostStatus.Posting));
+            _makeWebhook.Verify(m => m.TriggerPostToMakeAsync(It.Is<MarketingPost>(x => x.Id == post.Id)), Times.Once);
+        }
 
         // L1-MKT-09 | EP-Valid | Callback thành công -> Status = Success (7), lưu id bài ngoài + thời điểm đăng
         [Fact]

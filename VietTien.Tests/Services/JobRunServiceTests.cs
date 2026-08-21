@@ -1,10 +1,11 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Moq;
 using VietTien.API.Data;
 using VietTien.API.DTOs.Admin;
 using VietTien.API.Models;
 using VietTien.API.Services.Implementations;
+using VietTien.API.Services.ScheduledJobs;
 using VietTien.API.Services.Interfaces;
 using VietTien.Tests.TestHelpers;
 using Xunit;
@@ -12,7 +13,7 @@ using Xunit;
 namespace VietTien.Tests.Services
 {
     /// <summary>
-    /// Sheet: JobRunService — L1-JOB-01, 02, 04, 05, 06, 07. EF InMemory + mock ILogger.
+    /// Sheet: JobRunService — L1-JOB-01..07. EF InMemory + mock ILogger.
     /// ⚠ L1-JOB-03 (BVA số lần thử lại 0/max-1/max/max+1) BỊ BLOCKED ở tầng L1: JobRunService
     ///    KHÔNG có cơ chế retry — nó chỉ bọc đúng 1 lần chạy. Retry là chuyện riêng của từng job
     ///    (vd WebhookLogService.MaxAttempts, đã phủ bởi L1-WHL-07). Xem DOC_MISMATCHES.md.
@@ -92,6 +93,33 @@ namespace VietTien.Tests.Services
             _db.JobRuns.Single().ErrorMessage.Should().NotBeNullOrWhiteSpace("và cả trong lịch sử chạy job");
         }
 
+        // L1-JOB-03 | BVA | Ngưỡng số lần thử lại theo cấu hình: dưới ngưỡng còn được thử tiếp,
+        // chạm/vượt ngưỡng thì dừng hẳn (bản ghi Abandoned) — KHÔNG thử lại vô hạn.
+        // ⚠ Bản thân JobRunService KHÔNG retry (mỗi lần gọi = đúng 1 lượt chạy, xem DOC_MISMATCHES.md);
+        //   ngưỡng retry thuộc về từng job — ở đây là SePayWebhookRetryJob + WebhookLogService.MaxAttempts.
+        //   Test chạy job THẬT qua RunTrackedAsync để phủ đúng ý định của case trong doc.
+        [Theory]
+        [InlineData(3, true)]   // 3 < 5 -> còn được thử lại
+        [InlineData(4, true)]   // 4 = Max-1 -> vẫn còn lượt cuối
+        [InlineData(5, false)]  // 5 = MaxAttempts -> dừng vĩnh viễn
+        [InlineData(6, false)]  // 6 > MaxAttempts -> đã cạn lượt từ trước
+        public async Task L1_JOB_03_RetryCeiling_StopsAtConfiguredMaxAttempts(int attemptCount, bool expectRetry)
+        {
+            WebhookLogService.MaxAttempts.Should().Be(5, "ngưỡng retry là cấu hình của job, không phải của JobRunService");
+
+            var webhookLogService = new Mock<IWebhookLogService>();
+            webhookLogService.Setup(w => w.RetryAsync(It.IsAny<Guid>())).ReturnsAsync(new WebhookLogDto());
+            var log = TestData.WebhookLog(w => { w.Status = WebhookLogStatus.Failed; w.AttemptCount = attemptCount; });
+            _db.WebhookLogs.Add(log);
+            _db.SaveChanges();
+
+            var job = new SePayWebhookRetryJob(_db, webhookLogService.Object);
+            var dto = await _sut.RunTrackedAsync(job, JobTriggerType.Scheduled, actorUserId: null);
+
+            dto.Status.Should().Be(nameof(JobRunStatus.Success));
+            webhookLogService.Verify(w => w.RetryAsync(log.Id), expectRetry ? Times.Once() : Times.Never());
+            _db.JobRuns.Should().ContainSingle("1 lần gọi RunTrackedAsync = đúng 1 lượt chạy, không tự thử lại");
+        }
         // ── Block: GetLastRunAsync() / SearchAsync() / GetHealthSummaryAsync() ──
 
         // L1-JOB-05 | EP-Valid | GetLastRun trả đúng lần chạy gần nhất theo thời điểm bắt đầu
