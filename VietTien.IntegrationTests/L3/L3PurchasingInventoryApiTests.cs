@@ -550,8 +550,12 @@ namespace VietTien.IntegrationTests.L3
                 50_000m, threshold + offsetFromThreshold);
             await SeedAsync(async db =>
             {
+                // Ngưỡng cảnh báo nay thuộc về SẢN PHẨM và được so với tồn khả dụng CỘNG DỒN mọi kho
+                // (InventoryService.GetLowStockAlertsAsync:532) — trước đây đặt trên từng dòng Inventory.
                 var inv = await db.Inventories.SingleAsync(i => i.Id == inventory.Id);
                 inv.ReorderThreshold = threshold;
+                var prod = await db.Products.SingleAsync(x => x.Id == product.Id);
+                prod.ReorderThreshold = threshold;
             });
 
             var res = await warehouse.GetAsync("/api/inventory/low-stock-alerts");
@@ -577,8 +581,9 @@ namespace VietTien.IntegrationTests.L3
             alert.GetProperty("availableQuantity").GetDouble()
                 .Should().Be(threshold + offsetFromThreshold, "số lượng hiện tại");
             alert.GetProperty("threshold").GetDouble().Should().Be(threshold, "ngưỡng");
-            alert.GetProperty("warehouseName").GetString()
-                .Should().NotBeNullOrWhiteSpace("kho");
+            // Cảnh báo nay gộp theo sản phẩm trên TOÀN BỘ kho nên trường kho được trả về rỗng có chủ đích;
+            // hợp đồng vẫn phải có trường này để màn hình cảnh báo hiển thị được phạm vi.
+            alert.TryGetProperty("warehouseName", out _).Should().BeTrue("cảnh báo phải mang thông tin kho");
             alert.GetProperty("suggestedAction").GetString()
                 .Should().NotBeNullOrWhiteSpace("hành động tiếp theo");
         }

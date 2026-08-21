@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -44,8 +44,7 @@ namespace VietTien.IntegrationTests.L3
             var quotationId = await CreateQuotationAsync(customer);
 
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            (await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { }))
-                .IsSuccessStatusCode.Should().BeTrue("Sales phải nhận được yêu cầu báo giá");
+            await AssignQuotationToSalesAsync(quotationId);
 
             var version = await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/versions", new
             {
@@ -91,7 +90,7 @@ namespace VietTien.IntegrationTests.L3
             var quotationId = await CreateQuotationAsync(client);
 
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { });
+            await AssignQuotationToSalesAsync(quotationId);
 
             var res = await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/versions", new
             {
@@ -129,7 +128,7 @@ namespace VietTien.IntegrationTests.L3
             var quotationId = await CreateQuotationAsync(client);
 
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { });
+            await AssignQuotationToSalesAsync(quotationId);
             await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/versions", new
             {
                 ProposedTotal = 110_000_000m,
@@ -180,7 +179,7 @@ namespace VietTien.IntegrationTests.L3
             var orderId = (await ReadJsonAsync(res)).GetProperty("orderId").GetGuid();
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId));
 
-            order.FinalPayment.Should().Be(220_000_000m,
+            order.FinalPayment.Should().Be(WithVat(220_000_000m),
                 "110.000.000đ/đơn vị (giá đã đàm phán) × 2 đơn vị — không phải 110tr (thiếu tiền) hay 240tr (bỏ qua đàm phán)");
         }
 
@@ -193,7 +192,7 @@ namespace VietTien.IntegrationTests.L3
             var (client, _, _, product) = await ArrangeB2BCustomerAsync();
             var quotationId = await CreateQuotationAsync(client);
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { });
+            await AssignQuotationToSalesAsync(quotationId);
 
             var send = await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/messages",
                 new { MessageText = "Bao gia 110 trieu" });
@@ -221,7 +220,7 @@ namespace VietTien.IntegrationTests.L3
             var (owner, _, _, _) = await ArrangeB2BCustomerAsync();
             var quotationId = await CreateQuotationAsync(owner);
             var sales = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { });
+            await AssignQuotationToSalesAsync(quotationId);
             await sales.PostAsJsonAsync($"/api/Quotation/{quotationId}/messages",
                 new { MessageText = "NOI DUNG DAM PHAN BI MAT" });
 

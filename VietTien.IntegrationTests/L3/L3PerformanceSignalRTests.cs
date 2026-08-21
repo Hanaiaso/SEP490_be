@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -56,8 +56,7 @@ namespace VietTien.IntegrationTests.L3
             var quotationId = (await ReadJsonAsync(created)).GetProperty("id").GetGuid();
 
             var salesClient = await ClientForSeededAsync(L3Seed.SalesStaffId);
-            (await salesClient.PostAsJsonAsync($"/api/Quotation/{quotationId}/pickup", new { }))
-                .IsSuccessStatusCode.Should().BeTrue("Sales phải nhận được báo giá thì mới gửi/nhận tin");
+            await AssignQuotationToSalesAsync(quotationId);
 
             var customerToken = TokenFor(customerUser.Id);
             var salesToken = TokenFor(L3Seed.SalesStaffId);

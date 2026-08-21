@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -180,7 +180,7 @@ namespace VietTien.IntegrationTests.L3
 
             var order = await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId));
             order.TotalAmount.Should().Be(200_000m, "server phải tự tính từ giỏ, KHÔNG lấy giá client gửi");
-            order.FinalPayment.Should().Be(200_000m);
+            order.FinalPayment.Should().Be(WithVat(200_000m), "VAT 10% bắt buộc do server tự cộng");
             order.DiscountAmount.Should().Be(0m, "giỏ 200.000đ chưa chạm bậc chiết khấu 10 triệu");
         }
 
@@ -272,7 +272,7 @@ namespace VietTien.IntegrationTests.L3
             var orderId = placed.GetProperty("orderId").GetGuid();
             var orderCode = placed.GetProperty("orderCode").GetString()!;
 
-            var res = await AnonymousClient().SendAsync(SePayWebhook(orderCode, 200_000m, "REF-PAY-01"));
+            var res = await AnonymousClient().SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-PAY-01"));
 
             res.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -294,7 +294,7 @@ namespace VietTien.IntegrationTests.L3
             var orderCode = placed.GetProperty("orderCode").GetString()!;
 
             var res = await AnonymousClient()
-                .SendAsync(SePayWebhook(orderCode, 200_000m, "REF-PAY-02", token: "token-gia-mao"));
+                .SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-PAY-02", token: "token-gia-mao"));
 
             res.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
             (await QueryAsync(db => db.Orders.SingleAsync(o => o.Id == orderId)))
@@ -317,7 +317,7 @@ namespace VietTien.IntegrationTests.L3
             var orderCode = placed.GetProperty("orderCode").GetString()!;
 
             var res = await AnonymousClient()
-                .SendAsync(SePayWebhook(orderCode, 200_000m + delta, $"REF-PAY-03-{delta}"));
+                .SendAsync(SePayWebhook(orderCode, WithVat(200_000m) + delta, $"REF-PAY-03-{delta}"));
 
             res.StatusCode.Should().Be(HttpStatusCode.OK,
                 "code luôn ack 200 rồi ghi PaymentException; workbook ghi 400 — xem DEF-L3-002");
@@ -348,8 +348,8 @@ namespace VietTien.IntegrationTests.L3
             var orderId = placed.GetProperty("orderId").GetGuid();
             var orderCode = placed.GetProperty("orderCode").GetString()!;
 
-            var first = await AnonymousClient().SendAsync(SePayWebhook(orderCode, 200_000m, "REF-IDEMPOTENT"));
-            var second = await AnonymousClient().SendAsync(SePayWebhook(orderCode, 200_000m, "REF-IDEMPOTENT"));
+            var first = await AnonymousClient().SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-IDEMPOTENT"));
+            var second = await AnonymousClient().SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-IDEMPOTENT"));
 
             first.StatusCode.Should().Be(HttpStatusCode.OK);
             second.StatusCode.Should().Be(HttpStatusCode.OK, "lần 2 vẫn ack 200, trả kết quả gốc");
@@ -379,7 +379,7 @@ namespace VietTien.IntegrationTests.L3
                 inv.ReservedQuantity = 0;
             });
 
-            var res = await AnonymousClient().SendAsync(SePayWebhook(orderCode, 200_000m, "REF-PAY-05"));
+            var res = await AnonymousClient().SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-PAY-05"));
 
             res.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -454,7 +454,7 @@ namespace VietTien.IntegrationTests.L3
             var orderId = placed.GetProperty("orderId").GetGuid();
             var orderCode = placed.GetProperty("orderCode").GetString()!;
 
-            await AnonymousClient().SendAsync(SePayWebhook(orderCode, 200_000m, "REF-PAY-09"));
+            await AnonymousClient().SendAsync(SePayWebhook(orderCode, WithVat(200_000m), "REF-PAY-09"));
 
             var manager = await ClientForSeededAsync(L3Seed.SalesManagerId);
             await manager.PostAsJsonAsync($"/api/orders/{orderId}/manual-confirm",

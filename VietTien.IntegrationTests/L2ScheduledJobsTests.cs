@@ -1,4 +1,4 @@
-using FluentAssertions;
+﻿using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using VietTien.API.Data;
@@ -60,6 +60,14 @@ namespace VietTien.IntegrationTests
                 inv.InTransitQuantity = 0;
                 inv.ReorderThreshold = reorderThreshold;
                 pid = inv.ProductId!.Value; iid = inv.Id;
+
+                // LowStockAlertJob nay lấy ngưỡng từ SẢN PHẨM (Product.ReorderThreshold) và so với tồn
+                // khả dụng cộng dồn mọi kho — không còn đọc Inventory.ReorderThreshold. Cũng phải xoá
+                // LastAlertSentDate để cooldown 24h của lần chạy trước không nuốt mất cảnh báo.
+                var prod = await db.Products.FirstAsync(p => p.Id == pid);
+                prod.ReorderThreshold = reorderThreshold;
+                prod.ExcessThreshold = null;
+                prod.LastAlertSentDate = null;
 
                 foreach (var o in await db.Inventories.Where(i => i.ProductId == pid && i.Id != inv.Id).ToListAsync())
                 {
@@ -418,13 +426,14 @@ namespace VietTien.IntegrationTests
         {
             await ResetAsync();
             const int threshold = 20;
-            var (_, inventoryId) = await SetInventoryAsync(
+            var (productId, _) = await SetInventoryAsync(
                 onHand: threshold + offset, reserved: 0, reorderThreshold: threshold);
 
             await Factory.RunJobAsync<LowStockAlertJob>();
 
+            // Cảnh báo nay gắn vào SẢN PHẨM (ReferenceType = "Product"), không còn gắn vào từng dòng tồn.
             var alerts = await QueryAsync(db => db.Notifications.AsNoTracking()
-                .Where(n => n.ReferenceId == inventoryId && n.Type == NotificationType.SYS_20_LowStockAlert)
+                .Where(n => n.ReferenceId == productId && n.Type == NotificationType.SYS_20_LowStockAlert)
                 .ToListAsync());
 
             if (!expectAlert)
@@ -434,7 +443,7 @@ namespace VietTien.IntegrationTests
             else
             {
                 alerts.Should().NotBeEmpty();
-                alerts.Select(a => a.ReferenceType).Should().AllBe("Inventory");
+                alerts.Select(a => a.ReferenceType).Should().AllBe("Product");
                 alerts.Should().OnlyContain(a => a.Body.Contains(threshold.ToString()),
                     "nội dung cảnh báo phải nêu ngưỡng để người nhận biết hành động tiếp theo");
             }
@@ -450,16 +459,16 @@ namespace VietTien.IntegrationTests
         public async Task L2_SJOB_09_LowStockAlertIsNotDuplicated()
         {
             await ResetAsync();
-            var (_, inventoryId) = await SetInventoryAsync(onHand: 5, reorderThreshold: 20);
+            var (productId, _) = await SetInventoryAsync(onHand: 5, reorderThreshold: 20);
 
             await Factory.RunJobAsync<LowStockAlertJob>();
             var first = await QueryAsync(db => db.Notifications.CountAsync(n =>
-                n.ReferenceId == inventoryId && n.Type == NotificationType.SYS_20_LowStockAlert));
+                n.ReferenceId == productId && n.Type == NotificationType.SYS_20_LowStockAlert));
             first.Should().BeGreaterThan(0);
 
             await Factory.RunJobAsync<LowStockAlertJob>();
             (await QueryAsync(db => db.Notifications.CountAsync(n =>
-                n.ReferenceId == inventoryId && n.Type == NotificationType.SYS_20_LowStockAlert)))
+                n.ReferenceId == productId && n.Type == NotificationType.SYS_20_LowStockAlert)))
                 .Should().Be(first, "cooldown 24h phải chặn cảnh báo trùng ở chu kỳ kế tiếp");
         }
 
