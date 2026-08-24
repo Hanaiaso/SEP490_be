@@ -19,7 +19,9 @@ namespace VietTien.API.Repositories.Implementations
             int pageSize,
             Guid? categoryId = null,
             string? searchKeyword = null,
-            string? sortBy = null)
+            string? sortBy = null,
+            decimal? minPrice = null,
+            decimal? maxPrice = null)
         {
             var query = _context.Products
                 .Include(p => p.Category)
@@ -39,21 +41,23 @@ namespace VietTien.API.Repositories.Implementations
                     p.Sku.ToLower().Contains(keyword));
             }
 
+            if (minPrice.HasValue)
+                query = query.Where(p => p.StandardListedPrice >= minPrice.Value);
+
+            if (maxPrice.HasValue)
+                query = query.Where(p => p.StandardListedPrice <= maxPrice.Value);
+
             var totalCount = await query.CountAsync();
 
-            if (sortBy == "sales")
+            query = sortBy switch
             {
-                query = query.OrderByDescending(p => p.OrderItems.Sum(oi => oi.Quantity));
-            }
-            else if (sortBy == "newest")
-            {
+                "sales" => query.OrderByDescending(p => p.OrderItems.Sum(oi => oi.Quantity)),
                 // Fallback to sorting by Id descending if CreatedAt is not available
-                query = query.OrderByDescending(p => p.Id);
-            }
-            else
-            {
-                query = query.OrderBy(p => p.Name);
-            }
+                "newest" => query.OrderByDescending(p => p.Id),
+                "price-low" => query.OrderBy(p => p.StandardListedPrice),
+                "price-high" => query.OrderByDescending(p => p.StandardListedPrice),
+                _ => query.OrderBy(p => p.Name)
+            };
 
             var items = await query
                 .Skip((page - 1) * pageSize)

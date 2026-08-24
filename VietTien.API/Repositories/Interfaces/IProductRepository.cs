@@ -4,13 +4,15 @@ namespace VietTien.API.Repositories.Interfaces
 {
     public interface IProductRepository
     {
-        /// <summary>Lấy danh sách sản phẩm (có phân trang, lọc theo danh mục, tìm kiếm)</summary>
+        /// <summary>Lấy danh sách sản phẩm (có phân trang, lọc theo danh mục, khoảng giá, tìm kiếm)</summary>
         Task<(IEnumerable<Product> Items, int TotalCount)> GetAllAsync(
             int page,
             int pageSize,
             Guid? categoryId = null,
             string? searchKeyword = null,
-            string? sortBy = null);
+            string? sortBy = null,
+            decimal? minPrice = null,
+            decimal? maxPrice = null);
 
         /// <summary>Lấy chi tiết 1 sản phẩm theo ID (bao gồm Inventory và Category)</summary>
         Task<Product?> GetByIdAsync(Guid id);

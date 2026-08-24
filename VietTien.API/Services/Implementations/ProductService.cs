@@ -35,14 +35,22 @@ namespace VietTien.API.Services.Implementations
             int pageSize = 12,
             Guid? categoryId = null,
             string? searchKeyword = null,
-            string? sortBy = null)
+            string? sortBy = null,
+            decimal? minPrice = null,
+            decimal? maxPrice = null)
         {
             // Đảm bảo giá trị hợp lệ
             page = page < 1 ? 1 : page;
             pageSize = pageSize < 1 ? 12 : (pageSize > 100 ? 100 : pageSize);
 
+            // Giá âm không có ý nghĩa -> bỏ qua; min > max -> hoán đổi cho hợp lệ
+            if (minPrice is < 0) minPrice = null;
+            if (maxPrice is < 0) maxPrice = null;
+            if (minPrice.HasValue && maxPrice.HasValue && minPrice > maxPrice)
+                (minPrice, maxPrice) = (maxPrice, minPrice);
+
             var (items, totalCount) = await _unitOfWork.Products.GetAllAsync(
-                page, pageSize, categoryId, searchKeyword, sortBy);
+                page, pageSize, categoryId, searchKeyword, sortBy, minPrice, maxPrice);
 
             var dtos = items.Select(p => new ProductSummaryDto
             {
