@@ -38,11 +38,14 @@ namespace VietTien.API.Controllers
             return categories.FirstOrDefault(c => c.Id == id);
         }
 
-        /// <summary>Lấy danh sách sản phẩm (có phân trang, lọc danh mục, tìm kiếm)</summary>
+        /// <summary>Lấy danh sách sản phẩm (có phân trang, lọc danh mục, khoảng giá, tìm kiếm)</summary>
         /// <param name="page">Trang hiện tại (mặc định: 1)</param>
         /// <param name="pageSize">Số sản phẩm mỗi trang (mặc định: 12, tối đa: 100)</param>
         /// <param name="categoryId">Lọc theo danh mục (tùy chọn)</param>
         /// <param name="search">Từ khóa tìm kiếm theo tên hoặc SKU (tùy chọn)</param>
+        /// <param name="sortBy">Sắp xếp: "price-low", "price-high", "sales", "newest" (mặc định: theo tên A-Z)</param>
+        /// <param name="minPrice">Giá tối thiểu (tùy chọn)</param>
+        /// <param name="maxPrice">Giá tối đa (tùy chọn)</param>
         [HttpGet]
         [ProducesResponseType(typeof(ProductPagedResultDto), StatusCodes.Status200OK)]
         public async Task<IActionResult> GetProducts(
@@ -50,9 +53,11 @@ namespace VietTien.API.Controllers
             [FromQuery] int pageSize = 12,
             [FromQuery] Guid? categoryId = null,
             [FromQuery] string? search = null,
-            [FromQuery] string? sortBy = null)
+            [FromQuery] string? sortBy = null,
+            [FromQuery] decimal? minPrice = null,
+            [FromQuery] decimal? maxPrice = null)
         {
-            var result = await _productService.GetProductsAsync(page, pageSize, categoryId, search, sortBy);
+            var result = await _productService.GetProductsAsync(page, pageSize, categoryId, search, sortBy, minPrice, maxPrice);
             return Ok(result);
         }
 

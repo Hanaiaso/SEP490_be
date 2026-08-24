@@ -12,7 +12,9 @@ namespace VietTien.API.Services.Interfaces
             int pageSize = 12,
             Guid? categoryId = null,
             string? searchKeyword = null,
-            string? sortBy = null);
+            string? sortBy = null,
+            decimal? minPrice = null,
+            decimal? maxPrice = null);
 
         /// <summary>
         /// Lấy chi tiết 1 sản phẩm theo ID.
