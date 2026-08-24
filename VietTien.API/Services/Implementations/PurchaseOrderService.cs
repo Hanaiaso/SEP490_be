@@ -22,6 +22,19 @@ namespace VietTien.API.Services.Implementations
             _ocrService = ocrService;
         }
 
+        // Chặn PO có 2 dòng trở lên cùng trỏ tới 1 sản phẩm/nguyên liệu — dễ gây nhầm lẫn khi đối
+        // chiếu nhận hàng (Goods Receipt) sau này vì mỗi dòng có ReceivedQuantity/UnitPrice riêng.
+        private static void EnsureNoDuplicateItems(List<CreatePurchaseOrderItemRequest> items)
+        {
+            var seen = new HashSet<Guid>();
+            foreach (var item in items)
+            {
+                var key = item.ProductId ?? item.MaterialId ?? Guid.Empty;
+                if (key != Guid.Empty && !seen.Add(key))
+                    throw new Exception("PO có mặt hàng bị chọn trùng ở nhiều dòng. Vui lòng gộp lại thành 1 dòng.");
+            }
+        }
+
         // So khớp gần đúng theo tên (không hoa-thường, chứa lẫn nhau 2 chiều) — dữ liệu OCR từ hóa đơn giấy
         // hiếm khi khớp tuyệt đối với tên trong catalogue hệ thống.
         private static T? FuzzyMatchByName<T>(IEnumerable<T> candidates, string? name, Func<T, string> nameSelector) where T : class
@@ -57,6 +70,9 @@ namespace VietTien.API.Services.Implementations
                 }
             }
 
+            if (request.ExpectedDeliveryDate.HasValue && request.ExpectedDeliveryDate.Value.Date < DateTime.UtcNow.Date)
+                throw new Exception("Ngày giao dự kiến không được ở trong quá khứ.");
+
             if (request.Items == null || !request.Items.Any())
                 throw new Exception("Vui lòng chọn ít nhất 1 sản phẩm hoặc nguyên liệu để tạo PO.");
 
@@ -81,6 +97,7 @@ namespace VietTien.API.Services.Implementations
                         throw new Exception($"Nguyên liệu với ID '{item.MaterialId}' không tồn tại trong hệ thống.");
                 }
             }
+            EnsureNoDuplicateItems(request.Items);
 
             var code = $"PO-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString().Substring(0, 4).ToUpper()}";
             
@@ -275,6 +292,10 @@ namespace VietTien.API.Services.Implementations
             
             if (po.Status != PurchaseOrderStatus.Draft)
                 throw new InvalidOperationException("Can only update Draft Purchase Orders");
+
+            if (request.ExpectedDeliveryDate.HasValue && request.ExpectedDeliveryDate.Value.Date < DateTime.UtcNow.Date)
+                throw new Exception("Ngày giao dự kiến không được ở trong quá khứ.");
+            EnsureNoDuplicateItems(request.Items);
 
             po.SupplierId = request.SupplierId;
             po.WarehouseId = request.WarehouseId;
