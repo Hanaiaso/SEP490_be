@@ -102,6 +102,24 @@ namespace VietTien.API.Services.Implementations
 
             var tripDate = dto.TripDate.Date;
 
+            // Kiểm tra ngày và ca giao hàng hết hạn (cùng quy tắc với ScheduleDeliveryAsync - OrderService.cs)
+            var localNow = DateTime.UtcNow.AddHours(7); // Giả định múi giờ GMT+7 Việt Nam
+            var localToday = localNow.Date;
+
+            if (tripDate < localToday)
+                throw new InvalidOperationException("Không thể lên lịch giao hàng cho ngày trong quá khứ.");
+
+            if (tripDate == localToday)
+            {
+                var currentHour = localNow.Hour;
+                if (dto.Shift == "Sáng" && currentHour >= 10)
+                    throw new InvalidOperationException("Đã quá 10:00 AM, không thể thêm chuyến giao cho Ca sáng ngày hôm nay.");
+                if (dto.Shift == "Trưa" && currentHour >= 14)
+                    throw new InvalidOperationException("Đã quá 14:00 (2:00 PM), không thể thêm chuyến giao cho Ca trưa ngày hôm nay.");
+                if (dto.Shift == "Chiều" && currentHour >= 22)
+                    throw new InvalidOperationException("Đã quá 22:00 (10:00 PM), không thể thêm chuyến giao cho Ca chiều ngày hôm nay.");
+            }
+
             var hasConflict = await _context.DeliveryTrips.AnyAsync(t =>
                 t.VehicleId == dto.VehicleId
                 && t.Shift == dto.Shift
