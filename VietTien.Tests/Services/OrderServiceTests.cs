@@ -1767,6 +1767,48 @@ namespace VietTien.Tests.Services
             _db.PaymentReallocations.Count().Should().Be(2); // ReallocatedToOrder + RefundedToCredit
         }
 
+        // L1-ORD-46b | State-Valid | Duyệt hủy đơn PAID đã Allocated (kho đã tạo PickTask) -> phải giải
+        // phóng tồn kho đang giữ VÀ hủy PickTask đang dở, không chỉ đổi OrderStatus.
+        // BUGFIX: trước đây chỉ đổi OrderStatus -> CancelledReallocated, không đụng tới
+        // AllocatedQuantity/ReservedQuantity (tồn kho bị giữ chết vĩnh viễn) lẫn PickTask (kho vẫn thấy
+        // đơn đã hủy+thay thế như đơn cần xử lý bình thường) — khác với ProcessCancelRequestAsync (luồng
+        // hủy thường) vốn đã làm đúng cả hai việc này.
+        [Fact]
+        public async Task L1_ORD_46b_ApproveCancelPaid_ReleasesInventoryAndCancelsPickTask()
+        {
+            var (warehouse, location) = TestData.Warehouse();
+            var product = TestData.SeedProduct(_db);
+            var inventory = TestData.Inventory(product.Id, location.Id, 100, inv =>
+            {
+                inv.AllocatedQuantity = 5;
+            });
+            _db.Inventories.Add(inventory);
+            var order = SeedOrder(o =>
+            {
+                o.OrderStatus = OrderStatus.CancelRequested;
+                o.PaymentStatus = PaymentStatus.Paid;
+                o.FinalPayment = 5_000_000m;
+                o.FulfillmentStatus = FulfillmentStatus.Allocated;
+            });
+            _db.OrderItems.Add(TestData.OrderItem(order.Id, product.Id, 5));
+            var pickTask = new PickTask { OrderId = order.Id, WarehouseId = warehouse.Id, Status = PickTaskStatus.Picking };
+            _db.PickTasks.Add(pickTask);
+            _db.SaveChanges();
+
+            await _sut.ApproveCancelAndCreateReplacementAsync(order.Id, _salesStaff.Id,
+                new CreateReplacementOrderDto
+                {
+                    OriginalOrderId = order.Id,
+                    Items = new List<ReplacementOrderItemDto> { new() { ProductId = product.Id, Quantity = 1, Price = 3_000_000m } }
+                });
+
+            var original = _db.Orders.Single(o => o.Id == order.Id);
+            original.OrderStatus.Should().Be(OrderStatus.CancelledReallocated);
+            original.FulfillmentStatus.Should().Be(FulfillmentStatus.Unallocated);
+            _db.Inventories.Single(i => i.Id == inventory.Id).AllocatedQuantity.Should().Be(0); // giải phóng hết
+            _db.PickTasks.Single(pt => pt.Id == pickTask.Id).Status.Should().Be(PickTaskStatus.Cancelled);
+        }
+
         // L1-ORD-47 | role gate (chỉ Manager được duyệt) nằm ở controller [Authorize], service không
         // nhận thông tin role để kiểm tra ở unit level -> đã chuyển sang L3:
         // VietTien.IntegrationTests/RoleGateTests.cs (L1_ORD_47_ApproveCancelReplacement_NonManagerRole_Forbidden).

@@ -479,6 +479,19 @@ namespace VietTien.API.Services.Implementations
             }
 
             po.Status = PurchaseOrderStatus.Cancelled;
+
+            // BUGFIX: hủy PO trong khi kho đang có sẵn 1 Goods Receipt Draft dở dang cho chính PO đó
+            // (PO còn SentToWarehouse, chưa PartiallyReceived nên không bị chặn ở guard trên) trước đây
+            // để lại Draft đó nguyên trạng — kho không biết PO đã hủy, Post sau này (nếu không bị chặn
+            // riêng) sẽ âm thầm cộng tồn thật và ghi đè po.Status trở lại. Hủy luôn Draft theo PO.
+            var draftReceipts = await _context.GoodsReceipts
+                .Where(r => r.PurchaseOrderId == po.Id && r.Status == GoodsReceiptStatus.Draft)
+                .ToListAsync();
+            foreach (var draft in draftReceipts)
+            {
+                draft.Status = GoodsReceiptStatus.Cancelled;
+            }
+
             await _context.SaveChangesAsync();
             return await GetByIdAsync(po.Id);
         }

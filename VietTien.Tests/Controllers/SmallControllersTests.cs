@@ -160,11 +160,11 @@ namespace VietTien.Tests.Controllers
         public async Task GetProducts_PassesAllFiltersThroughToService()
         {
             var categoryId = Guid.NewGuid();
-            _service.Setup(s => s.GetProductsAsync(2, 24, categoryId, "mang boc", "price"))
+            _service.Setup(s => s.GetProductsAsync(2, 24, categoryId, "mang boc", "price", null, null))
                 .ReturnsAsync(new ProductPagedResultDto());
 
             (await _sut.GetProducts(2, 24, categoryId, "mang boc", "price")).StatusOf().Should().Be(200);
-            _service.Verify(s => s.GetProductsAsync(2, 24, categoryId, "mang boc", "price"), Times.Once,
+            _service.Verify(s => s.GetProductsAsync(2, 24, categoryId, "mang boc", "price", null, null), Times.Once,
                 "mọi tham số lọc/phân trang phải xuống service, không được nuốt mất");
         }
 

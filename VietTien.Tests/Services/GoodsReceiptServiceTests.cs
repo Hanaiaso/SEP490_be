@@ -121,6 +121,32 @@ namespace VietTien.Tests.Services
             _db.Inventories.Single(i => i.ProductId == _p1.Id).OnHandQuantity.Should().Be(60); // không cộng đôi
         }
 
+        // L1-GR-04b | State-Invalid | PO bị hủy trong lúc phiếu nhập vẫn còn Draft (PO ở SentToWarehouse
+        // nên PurchaseOrderService.CancelAsync không chặn) -> Post phải chặn, KHÔNG được cộng tồn kho
+        // hoặc ghi đè po.Status từ Cancelled trở lại PartiallyReceived/FullyReceived.
+        // BUGFIX: trước đây PostReceiptAsync không kiểm tra po.Status nên vẫn Post bình thường.
+        [Fact]
+        public async Task L1_GR_04b_PostReceipt_ParentPoCancelled_Rejected()
+        {
+            var po = SeedPo(PurchaseOrderStatus.SentToWarehouse, expectedQty: 50);
+            var poItem = po.Items.First();
+            _db.Inventories.Add(TestData.Inventory(_p1.Id, _location.Id, 10));
+            _db.SaveChanges();
+            var receipt = await _sut.CreateFromPOAsync(po.Id, _whStaff.Id, new CreateGoodsReceiptRequest
+            {
+                Items = new List<CreateGoodsReceiptItemRequest> { new() { PurchaseOrderItemId = poItem.Id, AcceptedQuantity = 50 } }
+            });
+            po.Status = PurchaseOrderStatus.Cancelled; // CEO hủy PO trong lúc receipt vẫn Draft
+            _db.SaveChanges();
+
+            var act = () => _sut.PostReceiptAsync(receipt.Id, _whStaff.Id);
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            _db.Inventories.Single(i => i.ProductId == _p1.Id).OnHandQuantity.Should().Be(10); // không cộng tồn
+            _db.PurchaseOrders.Single(p => p.Id == po.Id).Status.Should().Be(PurchaseOrderStatus.Cancelled); // không bị ghi đè
+            _db.GoodsReceipts.Single(r => r.Id == receipt.Id).Status.Should().Be(GoodsReceiptStatus.Draft); // không bị Post
+        }
+
         // L1-GR-04x | State-Valid | Sửa số lượng phiếu còn Draft -> lưu thật, Post sau đó ghi sổ theo số ĐÃ SỬA
         // BUGFIX: trước đây màn hình sửa chi tiết phiếu nhập chỉ đổi state React cục bộ, không có API nào
         // để lưu -> mọi chỉnh sửa biến mất khi tải lại trang, Post luôn ghi theo số liệu lúc TẠO phiếu.

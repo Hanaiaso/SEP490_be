@@ -622,12 +622,12 @@ namespace VietTien.Tests.Controllers
         public async Task GetProducts_UsesDefaultPagingWhenNoArgumentsGiven()
         {
             _service.Setup(s => s.GetProductsAsync(It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
-                    It.IsAny<string?>(), It.IsAny<string?>()))
+                    It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<decimal?>(), It.IsAny<decimal?>()))
                 .ReturnsAsync(new ProductPagedResultDto());
 
             (await _sut.GetProducts()).StatusOf().Should().Be(200);
 
-            _service.Verify(s => s.GetProductsAsync(1, 12, null, null, null), Times.Once,
+            _service.Verify(s => s.GetProductsAsync(1, 12, null, null, null, null, null), Times.Once,
                 "mặc định là trang 1, 12 sản phẩm, không lọc — hợp đồng với FE trang chủ");
         }
     }

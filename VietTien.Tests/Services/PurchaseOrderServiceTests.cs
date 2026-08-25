@@ -146,6 +146,24 @@ namespace VietTien.Tests.Services
             await issueAfter.Should().ThrowAsync<Exception>(); // không thể Issue PO đã hủy
         }
 
+        // L1-PO-06b | State-Valid | Cancel PO SentToWarehouse đang có Goods Receipt Draft dở dang ->
+        // Draft đó phải bị hủy theo, không được để nguyên trạng chờ Post sau.
+        // BUGFIX: trước đây chỉ đổi po.Status, Draft receipt vẫn nằm nguyên -> kho không biết PO đã
+        // hủy, Post sau đó (nếu PostReceiptAsync không tự chặn) sẽ cộng tồn thật và ghi đè lại po.Status.
+        [Fact]
+        public async Task L1_PO_06b_Cancel_SentToWarehouseWithDraftReceipt_CancelsDraftToo()
+        {
+            var po = SeedPo(PurchaseOrderStatus.SentToWarehouse);
+            var draftReceipt = new GoodsReceipt { PurchaseOrderId = po.Id, ReceivedByUserId = _ceo.Id, Code = "GR-TEST-01", Status = GoodsReceiptStatus.Draft };
+            _db.GoodsReceipts.Add(draftReceipt);
+            _db.SaveChanges();
+
+            var dto = await _sut.CancelAsync(po.Id, _ceo.Id);
+
+            dto.Status.Should().Be("Cancelled");
+            _db.GoodsReceipts.Single(r => r.Id == draftReceipt.Id).Status.Should().Be(GoodsReceiptStatus.Cancelled);
+        }
+
         // L1-PO-07 | Guard-FALSE | Close PO đang DiscrepancyReview (còn sai lệch chưa xử lý) -> reject, giữ nguyên trạng thái
         [Fact]
         public async Task L1_PO_07_Close_WithUnresolvedDiscrepancy_Blocked()

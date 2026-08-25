@@ -172,10 +172,18 @@ namespace VietTien.API.Services.Implementations
                 throw new Exception("Bắt buộc phải đính kèm tệp minh chứng (ảnh/biên bản) khi có hàng Hỏng hoặc Sai loại.");
             }
 
-            receipt.Status = GoodsReceiptStatus.Posted;
-
             var po = await _context.PurchaseOrders.Include(p => p.Items).FirstOrDefaultAsync(p => p.Id == receipt.PurchaseOrderId);
             if (po == null) throw new KeyNotFoundException("Purchase Order not found");
+
+            // BUGFIX: PurchaseOrderService.CancelAsync chỉ chặn hủy khi PO đã PartiallyReceived/
+            // FullyReceived/Closed, KHÔNG chặn khi còn SentToWarehouse — nghĩa là 1 PO có thể bị CEO
+            // hủy trong lúc kho đang có sẵn 1 Goods Receipt Draft dở dang cho chính PO đó. Nếu không
+            // chặn ở đây, Post sau đó vẫn cộng tồn kho thật VÀ ghi đè po.Status từ Cancelled trở lại
+            // PartiallyReceived/FullyReceived bên dưới — âm thầm hủy-của-việc-hủy ngoài ý muốn CEO.
+            if (po.Status == PurchaseOrderStatus.Cancelled)
+                throw new InvalidOperationException("Đơn đặt hàng (PO) của phiếu nhập này đã bị hủy — không thể ghi nhận nhập kho.");
+
+            receipt.Status = GoodsReceiptStatus.Posted;
 
             // Lấy trước vị trí lưu kho mặc định và chặn cứng nếu không có, tránh trường hợp
             // Posted nhưng tồn kho không được cộng do defaultLocation == null bị bỏ qua âm thầm.

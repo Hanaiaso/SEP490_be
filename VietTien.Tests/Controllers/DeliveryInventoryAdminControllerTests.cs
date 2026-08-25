@@ -413,14 +413,14 @@ namespace VietTien.Tests.Controllers
         public async Task GetWarehouseInventory_ClampsPagingToSafeRange()
         {
             _service.Setup(s => s.GetInventoryByWarehouseAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(),
-                    It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>()))
+                    It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ReturnsAsync(new PaginatedList<InventoryItemDto> { PageNumber = 1, PageSize = 10 });
             var warehouseId = Guid.NewGuid();
 
             (await _sut.GetWarehouseInventory(warehouseId, null, null, null, null, null, pageNumber: 0, pageSize: 5000))
                 .StatusOf().Should().Be(200);
 
-            _service.Verify(s => s.GetInventoryByWarehouseAsync(warehouseId, null, null, null, null, null, 1, 100),
+            _service.Verify(s => s.GetInventoryByWarehouseAsync(warehouseId, null, null, null, null, null, null, 1, 100),
                 Times.Once, "pageNumber < 1 kẹp về 1, pageSize > 100 kẹp về 100");
         }
 
@@ -428,12 +428,12 @@ namespace VietTien.Tests.Controllers
         public async Task GetWarehouseInventory_WhenPageSizeNonPositive_FallsBackTo10()
         {
             _service.Setup(s => s.GetInventoryByWarehouseAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(),
-                    It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>()))
+                    It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ReturnsAsync(new PaginatedList<InventoryItemDto> { PageNumber = 2, PageSize = 10 });
 
             await _sut.GetWarehouseInventory(Guid.NewGuid(), "mang", 5, 50, null, null, pageNumber: 2, pageSize: 0);
 
-            _service.Verify(s => s.GetInventoryByWarehouseAsync(It.IsAny<Guid>(), "mang", 5, 50, null, null, 2, 10),
+            _service.Verify(s => s.GetInventoryByWarehouseAsync(It.IsAny<Guid>(), "mang", 5, 50, null, null, null, 2, 10),
                 Times.Once);
         }
 
@@ -441,7 +441,7 @@ namespace VietTien.Tests.Controllers
         public async Task GetWarehouseInventory_WhenServiceThrows_Returns400()
         {
             _service.Setup(s => s.GetInventoryByWarehouseAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(),
-                    It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>()))
+                    It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<int>(), It.IsAny<int>()))
                 .ThrowsAsync(new Exception("loi"));
 
             (await _sut.GetWarehouseInventory(Guid.NewGuid(), null, null, null, null, null)).StatusOf().Should().Be(400);

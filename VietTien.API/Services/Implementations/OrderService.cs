@@ -3632,8 +3632,30 @@ namespace VietTien.API.Services.Implementations
                 };
                 await _context.PaymentReallocations.AddAsync(reallocation);
 
+                // BUGFIX: trước đây chỉ đổi OrderStatus, không giải phóng Reserved/Allocated của đơn
+                // gốc (khác với ProcessCancelRequestAsync - luồng hủy thường - đã làm đúng việc này) ->
+                // tồn kho bị giữ chết vĩnh viễn, không cách nào khôi phục ngoài can thiệp DB thủ công.
+                // Cũng phải đóng PickTask đang dở (nếu có) như ProcessCancelRequestAsync, nếu không kho
+                // vẫn thấy đơn đã hủy+thay thế như đơn cần xử lý bình thường.
+                var orderItemQuantities = originalOrder.OrderItems.Select(oi => (oi.ProductId, oi.Quantity)).ToList();
+                if (originalOrder.FulfillmentStatus == FulfillmentStatus.Allocated)
+                    await _inventoryReservationService.ReleaseAllocatedAsync(orderItemQuantities);
+                else
+                    await _inventoryReservationService.ReleaseReservedAsync(orderItemQuantities);
+
+                var activePickTasks = await _context.PickTasks
+                    .Where(pt => pt.OrderId == originalOrder.Id
+                        && pt.Status != PickTaskStatus.Completed
+                        && pt.Status != PickTaskStatus.Cancelled)
+                    .ToListAsync();
+                foreach (var pickTask in activePickTasks)
+                {
+                    pickTask.Status = PickTaskStatus.Cancelled;
+                }
+
                 // 6. Cập nhật đơn gốc → CancelledReallocated
                 originalOrder.OrderStatus = OrderStatus.CancelledReallocated;
+                originalOrder.FulfillmentStatus = FulfillmentStatus.Unallocated;
                 originalOrder.ReplacementOrderId = replacementOrder.Id;
 
                 // 7. Nạp Credit vào ví (nếu còn thừa)

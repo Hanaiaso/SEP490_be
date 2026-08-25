@@ -41,7 +41,7 @@ namespace VietTien.Tests.Services
                 TestData.Inventory(other.Id, loc2.Id, 30)); // 'bag' nhưng ở kho W2
             _db.SaveChanges();
 
-            var result = await _sut.GetInventoryByWarehouseAsync(w1.Id, "bag", null, null, null, null, 1, 20);
+            var result = await _sut.GetInventoryByWarehouseAsync(w1.Id, "bag", null, null, null, null, null, 1, 20);
 
             result.TotalCount.Should().Be(1);
             result.Items.Single().ProductId.Should().Be(bag.Id);
