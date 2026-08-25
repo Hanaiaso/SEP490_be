@@ -484,6 +484,7 @@ namespace VietTien.API.Services.Implementations
                 WarehouseName = pt.Warehouse?.Name ?? "Unknown",
                 WarehouseCode = pt.Warehouse?.Code ?? "UNKNOWN",
                 Status = pt.Status.ToString(),
+                CreatedAt = pt.CreatedAt,
                 Items = pt.Items.Select(pti => new WarehouseOrderItemDto
                 {
                     ProductId = pti.ProductId,
