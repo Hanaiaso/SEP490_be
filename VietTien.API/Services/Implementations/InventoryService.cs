@@ -29,7 +29,7 @@ namespace VietTien.API.Services.Implementations
             _warehouseAccessGuard = warehouseAccessGuard;
         }
 
-        public async Task<PaginatedList<InventoryItemDto>> GetInventoryByWarehouseAsync(Guid warehouseId, string? search, int? minQty, int? maxQty, DateTime? fromDate, DateTime? toDate, int pageNumber, int pageSize)
+        public async Task<PaginatedList<InventoryItemDto>> GetInventoryByWarehouseAsync(Guid warehouseId, string? search, int? minQty, int? maxQty, DateTime? fromDate, DateTime? toDate, string? itemType, int pageNumber, int pageSize)
         {
             var query = _context.Inventories
                 .Include(i => i.Product)
@@ -66,6 +66,13 @@ namespace VietTien.API.Services.Implementations
                 // Include the whole day of toDate
                 var nextDay = toDate.Value.Date.AddDays(1);
                 query = query.Where(i => i.LastUpdatedAt < nextDay);
+            }
+
+            if (!string.IsNullOrWhiteSpace(itemType))
+            {
+                query = itemType == "Material"
+                    ? query.Where(i => i.MaterialId != null)
+                    : query.Where(i => i.ProductId != null);
             }
 
             var totalCount = await query.CountAsync();

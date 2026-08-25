@@ -146,6 +146,7 @@ namespace VietTien.API.Controllers
             [FromQuery] int? maxQty,
             [FromQuery] DateTime? fromDate,
             [FromQuery] DateTime? toDate,
+            [FromQuery] string? itemType = null,
             [FromQuery] int pageNumber = 1,
             [FromQuery] int pageSize = 10)
         {
@@ -154,7 +155,7 @@ namespace VietTien.API.Controllers
                 pageNumber = pageNumber < 1 ? 1 : pageNumber;
                 pageSize = pageSize < 1 ? 10 : (pageSize > 100 ? 100 : pageSize);
 
-                var result = await _inventoryService.GetInventoryByWarehouseAsync(warehouseId, search, minQty, maxQty, fromDate, toDate, pageNumber, pageSize);
+                var result = await _inventoryService.GetInventoryByWarehouseAsync(warehouseId, search, minQty, maxQty, fromDate, toDate, itemType, pageNumber, pageSize);
                 return Ok(result);
             }
             catch (Exception ex)

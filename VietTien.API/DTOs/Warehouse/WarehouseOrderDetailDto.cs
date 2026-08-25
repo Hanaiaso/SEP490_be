@@ -26,6 +26,7 @@ namespace VietTien.API.DTOs.Warehouse
         public string WarehouseName { get; set; } = string.Empty;
         public string WarehouseCode { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
+        public DateTime CreatedAt { get; set; }
         public List<WarehouseOrderItemDto> Items { get; set; } = new List<WarehouseOrderItemDto>();
     }
 
