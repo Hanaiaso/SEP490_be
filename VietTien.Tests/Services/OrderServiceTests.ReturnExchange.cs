@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Moq;
 using VietTien.API.DTOs.Delivery;
 using VietTien.API.DTOs.Order;
 using VietTien.API.Exceptions;
@@ -146,6 +147,27 @@ namespace VietTien.Tests.Services
             request.Status.Should().Be(ReturnExchangeStatus.Approved);
             request.ProcessedByUserId.Should().Be(_salesStaff.Id);
             _db.Orders.Single(o => o.Id == order.Id).OrderStatus.Should().Be(OrderStatus.Returned);
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_55_ReturnExchangeRequestResult, _customer.Id,
+                It.IsAny<string>(), It.IsAny<string>(), requestId, "ReturnExchangeRequest"), Times.Once);
+        }
+
+        // L1-ORD-52b | Notify | Từ chối yêu cầu đổi/trả -> báo khách hàng kèm lý do (ManagerNote)
+        [Fact]
+        public async Task L1_ORD_52b_RejectRequest_NotifiesCustomerWithReason()
+        {
+            var (order, product) = SeedDeliveredOrder(deliveredQty: 5);
+            await _sut.CreateReturnExchangeRequestAsync(order.Id, _customer.Id, ReturnDto(product.Id, 2));
+            var requestId = LatestRequest().Id;
+
+            await _sut.ProcessReturnExchangeRequestAsync(requestId, _salesStaff.Id,
+                new ProcessReturnExchangeRequestDto { IsApproved = false, ManagerNote = "Hàng không lỗi" });
+
+            _db.ChangeTracker.Clear();
+            _db.ReturnExchangeRequests.Single(r => r.Id == requestId).Status.Should().Be(ReturnExchangeStatus.Rejected);
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_55_ReturnExchangeRequestResult, _customer.Id,
+                It.IsAny<string>(), It.Is<string>(b => b.Contains("Hàng không lỗi")), requestId, "ReturnExchangeRequest"), Times.Once);
         }
 
         // L1-ORD-54 | State-Invalid | Duyệt lại yêu cầu đã ở trạng thái kết thúc -> conflict
@@ -256,6 +278,26 @@ namespace VietTien.Tests.Services
             request.PickupVehicleId.Should().Be(3);
             request.PickupShift.Should().Be("Chiều");
             request.ScheduledPickupDate.Should().Be(pickupDate);
+        }
+
+        // L1-ORD-58b | Notify | Lên lịch thu hồi -> báo KHÁCH HÀNG (ngày/ca xe đến lấy) và báo cả
+        // team KHO (WarehouseStaff) để chuẩn bị tiếp nhận hàng thu hồi.
+        [Fact]
+        public async Task L1_ORD_58b_SchedulePickup_NotifiesCustomerAndWarehouseRole()
+        {
+            SeedFleet();
+            var (requestId, _) = await SeedApprovedRequestAsync();
+            var pickupDate = DateTime.UtcNow.AddDays(2).Date;
+
+            await _sut.SchedulePickupAsync(requestId, _salesStaff.Id,
+                new SchedulePickupRequestDto { VehicleId = 3, Shift = "Chiều", PickupDate = pickupDate });
+
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_56_PickupScheduled, _customer.Id,
+                It.IsAny<string>(), It.IsAny<string>(), requestId, "ReturnExchangeRequest"), Times.Once);
+            _noti.Verify(n => n.CreateRoleNotificationAsync(
+                NotificationType.SYS_57_PickupTaskForWarehouse, SystemRole.WarehouseStaff,
+                It.IsAny<string>(), It.IsAny<string>(), requestId, "ReturnExchangeRequest"), Times.Once);
         }
 
         // L1-ORD-59 | EP-Valid | Xác nhận đã thu hồi -> hàng KHÔNG được cộng vào tồn bán được

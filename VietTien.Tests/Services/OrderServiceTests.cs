@@ -1111,6 +1111,45 @@ namespace VietTien.Tests.Services
                 .WithMessage("Chỉ đơn hàng đã giao thành công mới được yêu cầu hóa đơn VAT.");
         }
 
+        // L1-ORD-30b | Notify | Yêu cầu VAT trên đơn có Sale phụ trách (SalesStaffId) -> báo đúng Sale đó
+        [Fact]
+        public async Task L1_ORD_30b_RequestVat_WithAssignedSalesStaff_NotifiesSalesStaff()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.OrderStatus = OrderStatus.Completed;
+                o.SalesStaffId = _salesStaff.Id;
+            });
+            _db.ChangeTracker.Clear();
+
+            await _sut.RequestVatInvoiceAsync(_customer.Id, order.Id);
+
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_53_VatInvoiceRequested, _salesStaff.Id,
+                It.IsAny<string>(), It.IsAny<string>(), order.Id, "Order"), Times.Once);
+            _noti.Verify(n => n.CreateRoleNotificationAsync(
+                It.IsAny<NotificationType>(), It.IsAny<SystemRole>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<string?>()), Times.Never);
+        }
+
+        // L1-ORD-30c | Notify | Yêu cầu VAT trên đơn CHƯA có Sale phụ trách -> báo cả team Sales Manager
+        [Fact]
+        public async Task L1_ORD_30c_RequestVat_WithoutAssignedSalesStaff_NotifiesSalesManagerRole()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.OrderStatus = OrderStatus.Completed;
+                o.SalesStaffId = null;
+            });
+            _db.ChangeTracker.Clear();
+
+            await _sut.RequestVatInvoiceAsync(_customer.Id, order.Id);
+
+            _noti.Verify(n => n.CreateRoleNotificationAsync(
+                NotificationType.SYS_53_VatInvoiceRequested, SystemRole.SalesManager,
+                It.IsAny<string>(), It.IsAny<string>(), order.Id, "Order"), Times.Once);
+        }
+
         //  ▶ Block: GetOrderHistoryAsync() / GetOrderDetailForCustomerAsync()
 
         // L1-ORD-31 | EP-Invalid | Khách xem chi tiết đơn của khách khác -> not-found, không lộ dữ liệu
@@ -1145,8 +1184,8 @@ namespace VietTien.Tests.Services
 
         //  ▶ Block: RejectOrderAsync() / RequestCancelOrderAsync() / ProcessCancelRequestAsync()
 
-        // L1-ORD-33 | State-Valid | Sales từ chối đơn 'Chờ xác nhận' -> đơn đóng (Cancelled)
-        // (Ghi chú: code hiện KHÔNG lưu lý do từ chối và không gửi notification — lệch spec.)
+        // L1-ORD-33 | State-Valid | Sales từ chối đơn 'Chờ xác nhận' -> đơn đóng (Cancelled), lưu lý do +
+        // báo khách hàng biết lý do từ chối.
         [Fact]
         public async Task L1_ORD_33_RejectOrder_PendingConfirmation_Cancelled()
         {
@@ -1154,7 +1193,12 @@ namespace VietTien.Tests.Services
 
             await _sut.RejectOrderAsync(order.Id, _salesStaff.Id, "hết hàng");
 
-            _db.Orders.Single(o => o.Id == order.Id).OrderStatus.Should().Be(OrderStatus.Cancelled);
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.OrderStatus.Should().Be(OrderStatus.Cancelled);
+            updated.CancelReason.Should().Be("hết hàng");
+            _noti.Verify(n => n.CreateNotificationAsync(
+                NotificationType.SYS_54_OrderRejected, _customer.Id,
+                It.IsAny<string>(), It.Is<string>(b => b.Contains("hết hàng")), order.Id, "Order"), Times.Once);
         }
 
         // L1-ORD-34 | EP-Invalid | Từ chối không kèm lý do -> chặn, trạng thái không đổi.

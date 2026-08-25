@@ -94,6 +94,22 @@ namespace VietTien.API.Models
 
         // Sau khi Sale xác định giờ xuất phát/đến dự kiến của chuyến xe (StartLoadingAsync/
         // AddOrdersToTripAsync) — báo cho KHÁCH HÀNG (không phải nhân viên) biết giờ nhận hàng dự kiến.
-        SYS_52_DeliveryTimeNotice
+        SYS_52_DeliveryTimeNotice,
+
+        // Khách yêu cầu xuất hóa đơn VAT (RequestVatInvoiceAsync) — báo Sale phụ trách đơn (hoặc Sales
+        // Manager nếu chưa có Sale phụ trách) cần đi lấy số hóa đơn đỏ thật từ bên thứ 3.
+        SYS_53_VatInvoiceRequested,
+
+        // Đơn COD bị Sale từ chối trước khi xác nhận (RejectOrderAsync) — báo KHÁCH HÀNG biết lý do.
+        SYS_54_OrderRejected,
+
+        // Kết quả duyệt yêu cầu đổi/trả hàng (ProcessReturnExchangeRequestAsync) — báo KHÁCH HÀNG.
+        SYS_55_ReturnExchangeRequestResult,
+
+        // Đã điều xe đi thu hồi hàng đổi/trả (SchedulePickupAsync) — báo KHÁCH HÀNG biết ngày/ca xe đến lấy.
+        SYS_56_PickupScheduled,
+
+        // Cùng sự kiện với SYS_56 nhưng báo KHO (WarehouseStaff) để chuẩn bị tiếp nhận hàng thu hồi.
+        SYS_57_PickupTaskForWarehouse
     }
 }

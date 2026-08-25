@@ -1721,6 +1721,39 @@ namespace VietTien.API.Services.Implementations
 
             await _unitOfWork.Orders.UpdateOrderAsync(order);
             await _unitOfWork.SaveChangesAsync();
+
+            // BUGFIX: trước đây không báo ai — Sale chỉ biết có khách yêu cầu hóa đơn VAT nếu tự soát
+            // từng đơn. Báo đúng Sale phụ trách đơn (snapshot SalesStaffId); nếu chưa có (đơn cũ/chưa
+            // gán) thì báo cả team Sales Manager để không rơi vào khoảng trống không ai xử lý.
+            try
+            {
+                if (order.SalesStaffId.HasValue)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_53_VatInvoiceRequested,
+                        order.SalesStaffId.Value,
+                        "Khách yêu cầu hóa đơn VAT",
+                        $"Đơn hàng {order.OrderCode} vừa được khách yêu cầu xuất hóa đơn VAT (hóa đơn đỏ). Vui lòng lấy số hóa đơn thật và nhập vào hệ thống.",
+                        order.Id,
+                        "Order"
+                    );
+                }
+                else
+                {
+                    await _notificationService.CreateRoleNotificationAsync(
+                        NotificationType.SYS_53_VatInvoiceRequested,
+                        SystemRole.SalesManager,
+                        "Khách yêu cầu hóa đơn VAT",
+                        $"Đơn hàng {order.OrderCode} (chưa có Sale phụ trách) vừa được khách yêu cầu xuất hóa đơn VAT. Vui lòng phân công xử lý.",
+                        order.Id,
+                        "Order"
+                    );
+                }
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending VAT invoice request notification: {notifyEx.Message}");
+            }
         }
 
         public async Task<PagedResultDto<SalesOrderListDto>> GetSalesOrdersAsync(SalesOrderQueryDto query, Guid? salesStaffId = null)
@@ -2094,6 +2127,28 @@ namespace VietTien.API.Services.Implementations
             {
                 await transaction.RollbackAsync();
                 throw;
+            }
+
+            // BUGFIX: trước đây từ chối xong không báo ai — khách không biết vì sao đơn COD của mình
+            // biến mất khỏi trạng thái "Chờ xác nhận" trừ khi tự vào xem chi tiết đơn.
+            try
+            {
+                var profile = await _context.CustomerProfiles.FindAsync(order.CustomerProfileId);
+                if (profile != null)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_54_OrderRejected,
+                        profile.UserId,
+                        "Đơn hàng đã bị từ chối",
+                        $"Đơn hàng {order.OrderCode} đã bị từ chối. Lý do: {reason}",
+                        order.Id,
+                        "Order"
+                    );
+                }
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending order-rejected notification: {notifyEx.Message}");
             }
         }
 
@@ -3236,6 +3291,25 @@ namespace VietTien.API.Services.Implementations
                     request.Status = ReturnExchangeStatus.Rejected;
                     await _context.SaveChangesAsync();
                     await transaction.CommitAsync();
+
+                    // BUGFIX: trước đây từ chối xong không báo khách — khách không biết yêu cầu
+                    // đổi/trả của mình đã bị từ chối trừ khi tự vào kiểm tra lại.
+                    try
+                    {
+                        await _notificationService.CreateNotificationAsync(
+                            NotificationType.SYS_55_ReturnExchangeRequestResult,
+                            request.CustomerProfile.UserId,
+                            "Yêu cầu đổi/trả hàng bị từ chối",
+                            $"Yêu cầu đổi/trả cho đơn hàng {request.Order.OrderCode} đã bị từ chối." + (string.IsNullOrWhiteSpace(dto.ManagerNote) ? "" : $" Lý do: {dto.ManagerNote}"),
+                            request.Id,
+                            "ReturnExchangeRequest"
+                        );
+                    }
+                    catch (Exception notifyEx)
+                    {
+                        Console.WriteLine($"[OrderService] Error sending return-exchange-rejected notification: {notifyEx.Message}");
+                    }
+
                     return;
                 }
 
@@ -3352,6 +3426,30 @@ namespace VietTien.API.Services.Implementations
                 await transaction.RollbackAsync();
                 throw;
             }
+
+            // BUGFIX: trước đây duyệt xong không báo khách — cùng lỗ hổng với nhánh từ chối ở trên.
+            try
+            {
+                var request = await _context.ReturnExchangeRequests
+                    .Include(r => r.CustomerProfile)
+                    .Include(r => r.Order)
+                    .FirstOrDefaultAsync(r => r.Id == requestId);
+                if (request != null)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        NotificationType.SYS_55_ReturnExchangeRequestResult,
+                        request.CustomerProfile.UserId,
+                        "Yêu cầu đổi/trả hàng đã được duyệt",
+                        $"Yêu cầu đổi/trả cho đơn hàng {request.Order.OrderCode} đã được duyệt. Sales sẽ liên hệ sắp xếp thu hồi hàng.",
+                        request.Id,
+                        "ReturnExchangeRequest"
+                    );
+                }
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending return-exchange-approved notification: {notifyEx.Message}");
+            }
         }
 
         // =====================================================================
@@ -3428,6 +3526,8 @@ namespace VietTien.API.Services.Implementations
         {
             var req = await _context.ReturnExchangeRequests
                 .Include(r => r.ReturnItems).ThenInclude(ri => ri.Product)
+                .Include(r => r.CustomerProfile)
+                .Include(r => r.Order)
                 .FirstOrDefaultAsync(r => r.Id == requestId);
             if (req == null) throw new KeyNotFoundException("Không tìm thấy yêu cầu đổi/trả.");
 
@@ -3461,6 +3561,41 @@ namespace VietTien.API.Services.Implementations
             req.PickupStatus = PickupStatus.Scheduled;
 
             await _context.SaveChangesAsync();
+
+            // BUGFIX: trước đây điều xe xong không báo ai — khách không biết ngày xe đến lấy hàng thu
+            // hồi, kho cũng không có cảnh báo trước để chuẩn bị tiếp nhận (chỉ biết khi xe đã tới cửa).
+            var pickupDateText = dto.PickupDate.ToString("dd/MM/yyyy");
+            try
+            {
+                await _notificationService.CreateNotificationAsync(
+                    NotificationType.SYS_56_PickupScheduled,
+                    req.CustomerProfile.UserId,
+                    "Đã lên lịch thu hồi hàng đổi/trả",
+                    $"Yêu cầu đổi/trả cho đơn hàng {req.Order.OrderCode} sẽ được xe đến thu hồi vào {pickupDateText}, ca {dto.Shift}.",
+                    req.Id,
+                    "ReturnExchangeRequest"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending pickup-scheduled customer notification: {notifyEx.Message}");
+            }
+
+            try
+            {
+                await _notificationService.CreateRoleNotificationAsync(
+                    NotificationType.SYS_57_PickupTaskForWarehouse,
+                    SystemRole.WarehouseStaff,
+                    "Sắp có hàng thu hồi cần tiếp nhận",
+                    $"Xe sẽ thu hồi hàng đổi/trả của đơn {req.Order.OrderCode} vào {pickupDateText}, ca {dto.Shift}. Chuẩn bị tiếp nhận vào khu cách ly khi xe về.",
+                    req.Id,
+                    "ReturnExchangeRequest"
+                );
+            }
+            catch (Exception notifyEx)
+            {
+                Console.WriteLine($"[OrderService] Error sending pickup-scheduled warehouse notification: {notifyEx.Message}");
+            }
         }
 
         public async Task ConfirmPickupAsync(Guid requestId, Guid userId)
