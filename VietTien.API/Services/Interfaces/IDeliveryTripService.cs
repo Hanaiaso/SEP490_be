@@ -8,6 +8,7 @@ namespace VietTien.API.Services.Interfaces
         Task<DeliveryTripResponseDto> StartLoadingAsync(Guid tripId, StartLoadingRequestDto dto);
         Task<DeliveryTripResponseDto> AddOrdersToTripAsync(Guid tripId, AddOrdersToTripRequestDto dto);
         Task<DeliveryTripResponseDto> RemoveOrderFromTripAsync(Guid tripId, Guid orderId);
+        Task<DeliveryTripResponseDto> CancelTripAsync(Guid tripId);
         Task<DeliveryTripResponseDto> StartTripAsync(Guid tripId);
         Task<DeliveryTripResponseDto> GetTripByIdAsync(Guid tripId);
         Task<List<DeliveryTripResponseDto>> GetTripsAsync(DateTime? date, string? status);

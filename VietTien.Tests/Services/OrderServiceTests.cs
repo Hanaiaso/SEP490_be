@@ -1256,6 +1256,51 @@ namespace VietTien.Tests.Services
             _db.CreditTransactions.Count().Should().Be(0);
         }
 
+        // L1-ORD-37c | State-Valid | Duyệt hủy khi đơn đã ở Processing (kho đã tạo PickTask, có thể đang
+        // pick dở) -> PickTask đang Pending/Picking phải chuyển Cancelled theo, không còn hiện trong hàng
+        // đợi "Cần xử lý" của kho (BUGFIX: trước đây chỉ đổi OrderStatus/FulfillmentStatus, PickTask giữ
+        // nguyên trạng thái cũ nên kho vẫn thấy đơn đã hủy như đơn cần xử lý bình thường).
+        [Fact]
+        public async Task L1_ORD_37c_ProcessCancel_Approved_CancelsActivePickTasks()
+        {
+            var (warehouse, _) = TestData.Warehouse(w => w.Code = "WH-DEFAULT");
+            _db.Warehouses.Add(warehouse);
+            var order = SeedOrder(o =>
+            {
+                o.OrderStatus = OrderStatus.CancelRequested;
+                o.FulfillmentStatus = FulfillmentStatus.Picking;
+            });
+            var pendingTask = new PickTask { OrderId = order.Id, WarehouseId = warehouse.Id, Status = PickTaskStatus.Pending };
+            var pickingTask = new PickTask { OrderId = order.Id, WarehouseId = warehouse.Id, Status = PickTaskStatus.Picking };
+            _db.PickTasks.AddRange(pendingTask, pickingTask);
+            _db.SaveChanges();
+
+            await _sut.ProcessCancelRequestAsync(order.Id, _salesStaff.Id,
+                new VietTien.API.DTOs.Order.ProcessCancelRequestDto { IsApproved = true, Reason = "OK" });
+
+            _db.Orders.Single(o => o.Id == order.Id).OrderStatus.Should().Be(OrderStatus.Cancelled);
+            _db.PickTasks.Single(pt => pt.Id == pendingTask.Id).Status.Should().Be(PickTaskStatus.Cancelled);
+            _db.PickTasks.Single(pt => pt.Id == pickingTask.Id).Status.Should().Be(PickTaskStatus.Cancelled);
+        }
+
+        // L1-ORD-37d | State-Valid | PickTask đã Completed trước khi duyệt hủy -> giữ nguyên Completed,
+        // không bị ghi đè thành Cancelled (hàng đã lấy xong rồi, chỉ phần CHƯA lấy mới cần hủy theo).
+        [Fact]
+        public async Task L1_ORD_37d_ProcessCancel_Approved_DoesNotTouchCompletedPickTasks()
+        {
+            var (warehouse, _) = TestData.Warehouse(w => w.Code = "WH-DEFAULT");
+            _db.Warehouses.Add(warehouse);
+            var order = SeedOrder(o => o.OrderStatus = OrderStatus.CancelRequested);
+            var completedTask = new PickTask { OrderId = order.Id, WarehouseId = warehouse.Id, Status = PickTaskStatus.Completed, CompletedAt = DateTime.UtcNow };
+            _db.PickTasks.Add(completedTask);
+            _db.SaveChanges();
+
+            await _sut.ProcessCancelRequestAsync(order.Id, _salesStaff.Id,
+                new VietTien.API.DTOs.Order.ProcessCancelRequestDto { IsApproved = true, Reason = "OK" });
+
+            _db.PickTasks.Single(pt => pt.Id == completedTask.Id).Status.Should().Be(PickTaskStatus.Completed);
+        }
+
         //  ▶ Block: ScheduleDeliveryAsync()
 
         /// <summary>Code mới: đội xe đọc từ bảng Vehicles (IsActive) — seed 5 xe hoạt động như spec BR-10.</summary>

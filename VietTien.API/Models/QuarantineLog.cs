@@ -36,6 +36,10 @@ namespace VietTien.API.Models
         public DateTime? DispatchedAt { get; set; }
         public string? DispatchNotes { get; set; }
 
+        // Xử lý từng phần (vd 5 nhập cách ly, chỉ 1 hỏng): log gốc còn lại Quantity của phần CHƯA xử lý
+        // (vẫn Waiting), phần đã xử lý được tách thành 1 log con trỏ về log gốc qua field này.
+        public Guid? ParentQuarantineLogId { get; set; }
+
         // Navigation Properties
         public Order? Order { get; set; }
         public GoodsReceiptItem? GoodsReceiptItem { get; set; }
@@ -44,5 +48,6 @@ namespace VietTien.API.Models
         public Inventory? Inventory { get; set; }
         public User ReceivedByUser { get; set; } = null!;
         public User? DispatchedByUser { get; set; }
+        public QuarantineLog? ParentQuarantineLog { get; set; }
     }
 }

@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 
 namespace VietTien.API.Models
 {
-    public enum PickTaskStatus { Pending, Picking, Completed, Exception }
+    public enum PickTaskStatus { Pending, Picking, Completed, Exception, Cancelled }
 
     public class PickTask
     {

@@ -224,6 +224,11 @@ namespace VietTien.API.DTOs.Delivery
 
         [MaxLength(1000, ErrorMessage = "Ghi chú không được vượt quá 1000 ký tự.")]
         public string? Notes { get; set; }
+
+        /// <summary>Số lượng xử lý trong lần duyệt này. Bỏ trống = xử lý toàn bộ số lượng còn lại của lô (hành vi cũ).
+        /// Nếu nhỏ hơn số lượng còn lại của lô -> duyệt từng phần, phần còn lại vẫn ở trạng thái Chờ xử lý.</summary>
+        [Range(1, int.MaxValue, ErrorMessage = "Số lượng xử lý phải lớn hơn 0.")]
+        public int? Quantity { get; set; }
     }
 
     public class QuarantineListItemDto

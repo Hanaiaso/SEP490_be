@@ -454,6 +454,15 @@ namespace VietTien.API.Controllers
             return Ok(result);
         }
 
+        /// <summary>Hủy cả chuyến (chưa xuất phát) — nhả toàn bộ đơn về NotScheduled để xếp sang chuyến/xe khác.</summary>
+        [HttpPost("trips/{id:guid}/cancel")]
+        [Authorize(Roles = "SalesStaff,SalesManager,Admin")]
+        public async Task<IActionResult> CancelTrip(Guid id)
+        {
+            var result = await _deliveryTripService.CancelTripAsync(id);
+            return Ok(result);
+        }
+
         /// <summary>Xuất phát — yêu cầu chuyến đang Loading và mọi đơn trong chuyến đã có HandoverRecord Confirmed.</summary>
         [HttpPost("trips/{id:guid}/start")]
         [Authorize(Roles = "SalesStaff,SalesManager,Admin")]

@@ -478,6 +478,13 @@ namespace VietTien.API.Data
                 .HasForeignKey(o => o.ReplacementOrderId)
                 .OnDelete(DeleteBehavior.NoAction);
 
+            // Self-referencing QuarantineLog (log con = phần đã xử lý tách ra từ log cha khi duyệt từng phần)
+            modelBuilder.Entity<QuarantineLog>()
+                .HasOne(q => q.ParentQuarantineLog)
+                .WithMany()
+                .HasForeignKey(q => q.ParentQuarantineLogId)
+                .OnDelete(DeleteBehavior.NoAction);
+
             // Quan hệ 1 - n giữa Order và Chi tiết đơn hàng (OrderItem)
             modelBuilder.Entity<OrderItem>()
                 .HasOne(oi => oi.Order)

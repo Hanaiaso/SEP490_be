@@ -179,6 +179,16 @@ namespace VietTien.API.Services.Implementations
             if (trip.Status != DeliveryTripStatus.Scheduled)
                 throw new InvalidOperationException("Chuyến giao không ở trạng thái chờ bốc hàng.");
 
+            // Giờ xuất phát/đến dự kiến nhập tay ở bước bốc hàng — cùng quy tắc grace 5 phút với
+            // StockTransferService.CreateAsync để không chặn nhầm khi nhập đúng "bây giờ".
+            var localNow = DateTime.UtcNow.AddHours(7); // Giả định múi giờ GMT+7 Việt Nam
+            if (dto.PlannedDepartureAt.HasValue && dto.PlannedDepartureAt.Value < localNow.AddMinutes(-5))
+                throw new InvalidOperationException("Giờ xuất phát dự kiến không được ở trong quá khứ.");
+            if (dto.PlannedArrivalAt.HasValue && dto.PlannedArrivalAt.Value < localNow.AddMinutes(-5))
+                throw new InvalidOperationException("Giờ đến dự kiến không được ở trong quá khứ.");
+            if (dto.PlannedDepartureAt.HasValue && dto.PlannedArrivalAt.HasValue && dto.PlannedArrivalAt.Value < dto.PlannedDepartureAt.Value)
+                throw new InvalidOperationException("Giờ đến dự kiến không được trước giờ xuất phát dự kiến.");
+
             trip.Status = DeliveryTripStatus.Loading;
             if (dto.PlannedDepartureAt.HasValue) trip.PlannedDepartureAt = dto.PlannedDepartureAt;
             if (dto.PlannedArrivalAt.HasValue) trip.PlannedArrivalAt = dto.PlannedArrivalAt;
@@ -250,6 +260,31 @@ namespace VietTien.API.Services.Implementations
             await _context.SaveChangesAsync();
 
             trip.Orders = trip.Orders.Where(o => o.Id != orderId).ToList();
+            return ToDto(trip);
+        }
+
+        // Hủy cả chuyến (chưa xuất phát) để xếp các đơn đang gán sang chuyến/xe khác — trước đây
+        // DeliveryTripStatus.Cancelled tồn tại trong enum nhưng không có nghiệp vụ nào gán tới.
+        public async Task<DeliveryTripResponseDto> CancelTripAsync(Guid tripId)
+        {
+            var trip = await LoadTripAsync(tripId);
+
+            if (trip.Status != DeliveryTripStatus.Scheduled && trip.Status != DeliveryTripStatus.Loading)
+                throw new InvalidOperationException("Chỉ có thể hủy chuyến khi đang ở trạng thái Chờ bốc hàng hoặc Bốc hàng — chuyến đã xuất phát không thể hủy.");
+
+            foreach (var order in trip.Orders)
+            {
+                order.DeliveryTripId = null;
+                order.DeliveryStatus = DeliveryStatus.NotScheduled;
+                order.DeliveryVehicleId = null;
+                order.DeliveryShift = null;
+                order.ScheduledDeliveryDate = null;
+            }
+
+            trip.Status = DeliveryTripStatus.Cancelled;
+            trip.Orders = new List<Order>();
+
+            await _context.SaveChangesAsync();
             return ToDto(trip);
         }
 

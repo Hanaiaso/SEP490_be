@@ -410,27 +410,65 @@ namespace VietTien.API.Controllers
                     }
                 }
 
+                if (action != "available" && action != "damaged")
+                    return BadRequest(new { message = "Action không hợp lệ. Dùng 'available' hoặc 'damaged'." });
+
+                // Duyệt từng phần (vd 5 nhập cách ly, chỉ 1 hỏng, 4 còn lại vẫn Chờ xử lý): bỏ trống
+                // dto.Quantity vẫn xử lý toàn bộ như cũ; truyền nhỏ hơn log.Quantity -> tách 1 log con
+                // mang đúng số lượng vừa duyệt, log gốc giảm Quantity và GIỮ NGUYÊN Waiting cho phần còn lại.
+                var qtyToProcess = dto.Quantity ?? log.Quantity;
+                if (qtyToProcess > log.Quantity)
+                    return BadRequest(new { message = $"Số lượng xử lý ({qtyToProcess}) vượt quá số lượng còn lại trong lô cách ly ({log.Quantity})." });
+
+                var isPartial = qtyToProcess < log.Quantity;
+                var newStatus = action == "available" ? QuarantineStatus.ApprovedAvailable : QuarantineStatus.ApprovedDamaged;
+
                 if (action == "available")
                 {
                     // Hàng đạt → giảm QuarantineQuantity (tự động AvailableQuantity tăng)
-                    inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - log.Quantity);
-                    log.Status = QuarantineStatus.ApprovedAvailable;
-                }
-                else if (action == "damaged")
-                {
-                    // Hàng hỏng → chuyển sang DamagedQuantity
-                    inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - log.Quantity);
-                    inventory.DamagedQuantity += log.Quantity;
-                    log.Status = QuarantineStatus.ApprovedDamaged;
+                    inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - qtyToProcess);
                 }
                 else
                 {
-                    return BadRequest(new { message = "Action không hợp lệ. Dùng 'available' hoặc 'damaged'." });
+                    // Hàng hỏng → chuyển sang DamagedQuantity
+                    inventory.QuarantineQuantity = Math.Max(0, inventory.QuarantineQuantity - qtyToProcess);
+                    inventory.DamagedQuantity += qtyToProcess;
                 }
 
-                log.DispatchedByUserId = userId;
-                log.DispatchedAt = DateTime.UtcNow;
-                log.DispatchNotes = dto.Notes;
+                QuarantineLog dispatchedLog;
+                if (isPartial)
+                {
+                    dispatchedLog = new QuarantineLog
+                    {
+                        QuarantineCode = $"{log.QuarantineCode}-{new Random().Next(100, 999)}",
+                        OrderId = log.OrderId,
+                        GoodsReceiptItemId = log.GoodsReceiptItemId,
+                        ProductId = log.ProductId,
+                        MaterialId = log.MaterialId,
+                        InventoryId = log.InventoryId,
+                        Quantity = qtyToProcess,
+                        Reason = log.Reason,
+                        Status = newStatus,
+                        ReceivedByUserId = log.ReceivedByUserId,
+                        CreatedAt = log.CreatedAt,
+                        DispatchedByUserId = userId,
+                        DispatchedAt = DateTime.UtcNow,
+                        DispatchNotes = dto.Notes,
+                        ParentQuarantineLogId = log.Id
+                    };
+                    await _context.QuarantineLogs.AddAsync(dispatchedLog);
+
+                    // Log gốc giữ phần CHƯA xử lý — vẫn Waiting, không đụng tới field Dispatched* của nó.
+                    log.Quantity -= qtyToProcess;
+                }
+                else
+                {
+                    log.Status = newStatus;
+                    log.DispatchedByUserId = userId;
+                    log.DispatchedAt = DateTime.UtcNow;
+                    log.DispatchNotes = dto.Notes;
+                    dispatchedLog = log;
+                }
 
                 try
                 {
@@ -441,23 +479,24 @@ namespace VietTien.API.Controllers
                     return Conflict(new { message = "Dữ liệu tồn kho đã bị thay đổi bởi tác vụ khác. Vui lòng tải lại và thử lại." });
                 }
 
-                var successMsg = action == "available"
-                    ? $"Duyệt thành công: {log.Quantity} đơn vị đã được chuyển về kho khả dụng."
-                    : $"Duyệt thành công: {log.Quantity} đơn vị đã được chuyển vào kho hư hỏng (Damaged).";
+                var successMsg = (action == "available"
+                    ? $"Duyệt thành công: {qtyToProcess} đơn vị đã được chuyển về kho khả dụng."
+                    : $"Duyệt thành công: {qtyToProcess} đơn vị đã được chuyển vào kho hư hỏng (Damaged).")
+                    + (isPartial ? $" Còn {log.Quantity} đơn vị vẫn ở trạng thái Chờ xử lý." : "");
 
                 var dispatchActor = await _context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
                 await _auditLogService.LogAsync(
                     entityName: "QuarantineLog",
-                    entityId: log.Id.ToString(),
-                    action: "DISPATCH",
+                    entityId: dispatchedLog.Id.ToString(),
+                    action: isPartial ? "DISPATCH_PARTIAL" : "DISPATCH",
                     actorUserId: userId,
                     actorEmail: dispatchActor?.Email,
                     actorRole: "WarehouseStaff",
-                    before: new { Status = "Waiting", log.Quantity },
-                    after: new { Status = log.Status.ToString(), log.Quantity },
+                    before: new { Status = "Waiting", Quantity = qtyToProcess, ParentLogId = isPartial ? log.Id.ToString() : null },
+                    after: new { Status = dispatchedLog.Status.ToString(), Quantity = qtyToProcess },
                     reason: dto.Notes);
 
-                return Ok(new { message = successMsg });
+                return Ok(new { message = successMsg, quarantineCode = dispatchedLog.QuarantineCode, remainingQuantity = isPartial ? log.Quantity : 0 });
                 }
             catch (UnauthorizedAccessException)
             {

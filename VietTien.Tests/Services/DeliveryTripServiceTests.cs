@@ -124,8 +124,11 @@ namespace VietTien.Tests.Services
             _db.DeliveryTrips.Add(trip);
             _db.SaveChanges();
 
-            var departure = DateTime.UtcNow.AddHours(1);
-            var arrival = DateTime.UtcNow.AddHours(4);
+            // StartLoadingAsync so gio nhap voi "gio dia phuong" = UtcNow.AddHours(7) (cung quy uoc voi
+            // OrderService.cs) chu khong phai UtcNow thuan tuy, nen phai cong bu +7h o day de test dung
+            // mot moc chac chan con trong tuong lai theo dung quy uoc do.
+            var departure = DateTime.UtcNow.AddHours(7).AddHours(1);
+            var arrival = DateTime.UtcNow.AddHours(7).AddHours(4);
             var result = await _sut.StartLoadingAsync(trip.Id, new StartLoadingRequestDto { PlannedDepartureAt = departure, PlannedArrivalAt = arrival });
 
             result.Status.Should().Be(nameof(DeliveryTripStatus.Loading));
@@ -144,7 +147,7 @@ namespace VietTien.Tests.Services
             _db.DeliveryTrips.Add(trip);
             _db.SaveChanges();
 
-            var arrival = DateTime.UtcNow.AddHours(4);
+            var arrival = DateTime.UtcNow.AddHours(7).AddHours(4);
             await _sut.StartLoadingAsync(trip.Id, new StartLoadingRequestDto { PlannedArrivalAt = arrival });
 
             _noti.Verify(n => n.CreateNotificationAsync(
@@ -272,6 +275,82 @@ namespace VietTien.Tests.Services
             updated.DeliveryVehicleId.Should().BeNull();
             updated.DeliveryShift.Should().BeNull();
             updated.ScheduledDeliveryDate.Should().BeNull();
+        }
+
+        // DEL-06b | EP-Invalid | Bắt đầu bốc hàng với giờ xuất phát/đến dự kiến trong quá khứ -> chặn
+        [Fact]
+        public async Task DEL_06b_StartLoading_PastPlannedTime_Rejected()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Sáng", TripDate = DateTime.UtcNow.Date, Status = DeliveryTripStatus.Scheduled };
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+
+            var pastDeparture = DateTime.UtcNow.AddHours(7).AddHours(-2);
+
+            var act = () => _sut.StartLoadingAsync(trip.Id, new StartLoadingRequestDto { PlannedDepartureAt = pastDeparture });
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            _db.DeliveryTrips.Single(t => t.Id == trip.Id).Status.Should().Be(DeliveryTripStatus.Scheduled);
+        }
+
+        // DEL-06c | EP-Invalid | Giờ đến dự kiến trước giờ xuất phát dự kiến -> chặn
+        [Fact]
+        public async Task DEL_06c_StartLoading_ArrivalBeforeDeparture_Rejected()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Sáng", TripDate = DateTime.UtcNow.Date, Status = DeliveryTripStatus.Scheduled };
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+
+            var departure = DateTime.UtcNow.AddHours(7).AddHours(4);
+            var arrival = DateTime.UtcNow.AddHours(7).AddHours(1);
+
+            var act = () => _sut.StartLoadingAsync(trip.Id, new StartLoadingRequestDto { PlannedDepartureAt = departure, PlannedArrivalAt = arrival });
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+        }
+
+        // DEL-06d | State-Valid | Hủy chuyến đang Chờ bốc hàng -> nhả toàn bộ đơn về NotScheduled, chuyến Cancelled
+        [Fact]
+        public async Task DEL_06d_CancelTrip_FromScheduled_UnassignsOrdersAndCancelsTrip()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var order = SeedPackedOrder(300m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Sáng", TripDate = DateTime.UtcNow.Date, Status = DeliveryTripStatus.Scheduled };
+            trip.Orders.Add(order);
+            order.DeliveryTripId = trip.Id;
+            order.DeliveryStatus = DeliveryStatus.Scheduled;
+            order.DeliveryVehicleId = vehicle.VehicleNumber;
+            order.DeliveryShift = "Sáng";
+            order.ScheduledDeliveryDate = trip.TripDate;
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+
+            var result = await _sut.CancelTripAsync(trip.Id);
+
+            result.Status.Should().Be(nameof(DeliveryTripStatus.Cancelled));
+            _db.DeliveryTrips.Single(t => t.Id == trip.Id).Status.Should().Be(DeliveryTripStatus.Cancelled);
+            var updated = _db.Orders.Single(o => o.Id == order.Id);
+            updated.DeliveryTripId.Should().BeNull();
+            updated.DeliveryStatus.Should().Be(DeliveryStatus.NotScheduled);
+            updated.DeliveryVehicleId.Should().BeNull();
+            updated.DeliveryShift.Should().BeNull();
+            updated.ScheduledDeliveryDate.Should().BeNull();
+        }
+
+        // DEL-06e | EP-Invalid | Hủy chuyến đã InDelivery (đã xuất phát) -> chặn
+        [Fact]
+        public async Task DEL_06e_CancelTrip_AlreadyInDelivery_Rejected()
+        {
+            var vehicle = SeedVehicle(1000m);
+            var trip = new DeliveryTrip { VehicleId = vehicle.Id, Shift = "Sáng", TripDate = DateTime.UtcNow.Date, Status = DeliveryTripStatus.InDelivery };
+            _db.DeliveryTrips.Add(trip);
+            _db.SaveChanges();
+
+            var act = () => _sut.CancelTripAsync(trip.Id);
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
         }
 
         // DEL-07 | EP-Invalid | Xuất phát khi còn đơn chưa có HandoverRecord Confirmed -> chặn

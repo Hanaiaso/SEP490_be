@@ -2190,6 +2190,20 @@ namespace VietTien.API.Services.Implementations
                     order.OrderStatus = OrderStatus.Cancelled;
                     order.FulfillmentStatus = FulfillmentStatus.Unallocated;
 
+                    // BUGFIX: đơn có thể đã ở Processing (kho đã tạo PickTask, có thể đang pick dở) khi
+                    // yêu cầu hủy được duyệt — trước đây chỉ đổi OrderStatus/FulfillmentStatus, PickTask
+                    // vẫn nằm nguyên Pending/Picking nên vẫn hiện trong hàng đợi "Cần xử lý" của kho dù
+                    // đơn đã hủy. Đóng mọi PickTask chưa hoàn tất của đơn này lại.
+                    var activePickTasks = await _context.PickTasks
+                        .Where(pt => pt.OrderId == order.Id
+                            && pt.Status != PickTaskStatus.Completed
+                            && pt.Status != PickTaskStatus.Cancelled)
+                        .ToListAsync();
+                    foreach (var pickTask in activePickTasks)
+                    {
+                        pickTask.Status = PickTaskStatus.Cancelled;
+                    }
+
                     // Hoàn lại tiền (nếu đã thanh toán) và Credit đã dùng
                     decimal amountToRefund = 0m;
                     if (order.PaymentStatus == PaymentStatus.Paid || order.PaymentStatus == PaymentStatus.PartiallyPaid)
