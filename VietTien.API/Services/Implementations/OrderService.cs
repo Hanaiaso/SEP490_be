@@ -2333,9 +2333,13 @@ namespace VietTien.API.Services.Implementations
             if (vehicle == null)
                 throw new Exception("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
 
-            var validShifts = new[] { "Sáng", "Trưa", "Chiều" };
+            // BUGFIX: trước đây validShifts là mảng hardcode 3 chuỗi cố định — Admin đổi tên ca (trang
+            // "Ca làm việc"/WarehouseShiftController) không hề ảnh hưởng gì tới đây, khiến Sale không thể
+            // xếp lịch xe với tên ca mới đã đổi. Đọc trực tiếp từ WarehouseShifts, sắp theo StartTime để
+            // thông báo lỗi liệt kê ca theo đúng thứ tự trong ngày.
+            var validShifts = await _context.WarehouseShifts.OrderBy(s => s.StartTime).Select(s => s.Name).ToListAsync();
             if (!validShifts.Contains(dto.Shift))
-                throw new Exception("Ca giao hàng không hợp lệ. Chọn: Sáng / Trưa / Chiều.");
+                throw new Exception($"Ca giao hàng không hợp lệ. Chọn: {string.Join(" / ", validShifts)}.");
 
             // Kiểm tra ngày và ca giao hàng hết hạn (MGR-06 / BR-DL-02)
             var targetDate = dto.DeliveryDate ?? DateTime.UtcNow.Date;
@@ -3537,6 +3541,13 @@ namespace VietTien.API.Services.Implementations
             var vehicle = await _context.Vehicles.FirstOrDefaultAsync(v => v.VehicleNumber == dto.VehicleId && v.IsActive);
             if (vehicle == null)
                 throw new Exception("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
+
+            // BUGFIX: trước đây chỉ dựa vào RegularExpression cứng trên SchedulePickupRequestDto.Shift —
+            // Admin đổi tên ca không ảnh hưởng gì tới đây. Đọc trực tiếp từ WarehouseShifts (cùng cách
+            // ScheduleDeliveryAsync đang làm) để tên ca hợp lệ luôn khớp với cấu hình Admin hiện tại.
+            var validShifts = await _context.WarehouseShifts.OrderBy(s => s.StartTime).Select(s => s.Name).ToListAsync();
+            if (!validShifts.Contains(dto.Shift))
+                throw new Exception($"Ca thu hồi không hợp lệ. Chọn: {string.Join(" / ", validShifts)}.");
 
             // Cùng luật chặn vượt tải với ScheduleDeliveryAsync/DeliveryTrip — không có bước đóng gói
             // riêng cho hàng thu hồi nên tính trực tiếp từ Product.WeightKg × Quantity (đã chốt với

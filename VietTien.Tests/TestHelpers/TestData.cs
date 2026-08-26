@@ -140,6 +140,20 @@ namespace VietTien.Tests.TestHelpers
             return inv;
         }
 
+        /// <summary>Seed 3 ca làm việc mặc định (Sáng/Trưa/Chiều) — cần thiết từ khi
+        /// ScheduleDeliveryAsync/SchedulePickupAsync/CreateTripAsync đổi sang kiểm tra tên ca hợp lệ
+        /// theo bảng WarehouseShifts thay vì mảng hardcode 3 chuỗi cố định (BUGFIX: Admin đổi tên ca
+        /// không cập nhật cho các luồng xếp lịch xe).</summary>
+        public static void SeedWarehouseShifts(ApplicationDbContext db)
+        {
+            db.WarehouseShifts.AddRange(
+                new WarehouseShift { Name = "Sáng", StartTime = new TimeSpan(6, 0, 0), EndTime = new TimeSpan(14, 0, 0) },
+                new WarehouseShift { Name = "Trưa", StartTime = new TimeSpan(14, 0, 0), EndTime = new TimeSpan(22, 0, 0) },
+                new WarehouseShift { Name = "Chiều", StartTime = new TimeSpan(22, 0, 0), EndTime = new TimeSpan(6, 0, 0) }
+            );
+            db.SaveChanges();
+        }
+
         // =====================================================================
         // Admin / Job / Marketing — bổ sung cho các sheet mới của doc L1 v2.2
         // =====================================================================

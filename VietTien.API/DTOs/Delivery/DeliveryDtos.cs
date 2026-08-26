@@ -9,9 +9,12 @@ namespace VietTien.API.DTOs.Delivery
         [Range(1, int.MaxValue, ErrorMessage = "Mã xe không hợp lệ.")]
         public int VehicleId { get; set; }        // Xe 1-5
 
+        // BUGFIX: trước đây validate cứng bằng RegularExpression("^(Sáng|Trưa|Chiều)$"), nên khi Admin
+        // đổi tên ca (WarehouseShift.Name) ở trang "Ca làm việc" thì Sale không thể xếp lịch xe với tên
+        // ca mới (bị 400 ngay ở model-binding). Chỉ còn [Required] ở đây — service tự kiểm tra tên ca
+        // có tồn tại trong WarehouseShifts hay không (ScheduleDeliveryAsync).
         [Required(ErrorMessage = "Ca giao hàng là bắt buộc.")]
-        [RegularExpression("^(Sáng|Trưa|Chiều)$", ErrorMessage = "Ca giao hàng không hợp lệ. Chọn: Sáng / Trưa / Chiều.")]
-        public string Shift { get; set; } = string.Empty;  // Sáng / Trưa / Chiều
+        public string Shift { get; set; } = string.Empty;
 
         public DateTime? DeliveryDate { get; set; }
 
@@ -267,8 +270,8 @@ namespace VietTien.API.DTOs.Delivery
         [Range(1, int.MaxValue, ErrorMessage = "Mã xe không hợp lệ.")]
         public int VehicleId { get; set; }
 
+        // BUGFIX: bỏ RegularExpression cứng — xem ghi chú tại ScheduleDeliveryRequestDto.Shift.
         [Required(ErrorMessage = "Ca thu hồi là bắt buộc.")]
-        [RegularExpression("^(Sáng|Trưa|Chiều)$", ErrorMessage = "Ca thu hồi không hợp lệ. Chọn: Sáng / Trưa / Chiều.")]
         public string Shift { get; set; } = string.Empty;
 
         [NotInPast(ErrorMessage = "Không thể lên lịch thu hồi cho ngày trong quá khứ.")]
@@ -350,8 +353,8 @@ namespace VietTien.API.DTOs.Delivery
         [Required(ErrorMessage = "Xe giao hàng là bắt buộc.")]
         public Guid VehicleId { get; set; }
 
+        // BUGFIX: bỏ RegularExpression cứng — xem ghi chú tại ScheduleDeliveryRequestDto.Shift.
         [Required(ErrorMessage = "Ca giao hàng là bắt buộc.")]
-        [RegularExpression("^(Sáng|Trưa|Chiều)$", ErrorMessage = "Ca giao hàng không hợp lệ. Chọn: Sáng / Trưa / Chiều.")]
         public string Shift { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Ngày giao hàng là bắt buộc.")]

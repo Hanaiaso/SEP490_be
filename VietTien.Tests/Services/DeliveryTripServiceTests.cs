@@ -29,6 +29,7 @@ namespace VietTien.Tests.Services
             _sut = new DeliveryTripService(_db, _noti.Object);
             (_, _profile) = TestData.SeedCustomer(_db);
             _p1 = TestData.SeedProduct(_db);
+            TestData.SeedWarehouseShifts(_db);
         }
 
         private Vehicle SeedVehicle(decimal? capacityKg)

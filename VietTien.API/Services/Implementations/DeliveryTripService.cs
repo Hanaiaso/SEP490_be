@@ -100,6 +100,13 @@ namespace VietTien.API.Services.Implementations
             if (vehicle == null || !vehicle.IsActive)
                 throw new VehicleNotAvailableException("Mã xe không hợp lệ hoặc xe đã ngừng hoạt động.");
 
+            // BUGFIX: trước đây chỉ dựa vào RegularExpression cứng trên CreateDeliveryTripRequestDto.Shift
+            // ("^(Sáng|Trưa|Chiều)$") — Admin đổi tên ca ở trang "Ca làm việc" không ảnh hưởng gì tới đây,
+            // khiến Sale không thể tạo chuyến với tên ca mới đã đổi. Đọc trực tiếp từ WarehouseShifts.
+            var validShifts = await _context.WarehouseShifts.OrderBy(s => s.StartTime).Select(s => s.Name).ToListAsync();
+            if (!validShifts.Contains(dto.Shift))
+                throw new InvalidOperationException($"Ca giao hàng không hợp lệ. Chọn: {string.Join(" / ", validShifts)}.");
+
             var tripDate = dto.TripDate.Date;
 
             // Kiểm tra ngày và ca giao hàng hết hạn (cùng quy tắc với ScheduleDeliveryAsync - OrderService.cs)

@@ -73,6 +73,7 @@ namespace VietTien.Tests.Services
             (_customer, _profile) = TestData.SeedCustomer(_db, u => u.IsPhoneVerified = true);
             _profile.AssignedSalesStaffId = _salesStaff.Id;
             _db.SaveChanges();
+            TestData.SeedWarehouseShifts(_db);
         }
 
         /// <summary>Seed giỏ hàng có 1 sản phẩm với tổng tiền cho trước, kèm tồn kho đủ lớn (mặc định)
