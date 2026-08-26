@@ -116,6 +116,26 @@ namespace VietTien.API.Services.Implementations
                     .ToListAsync();
 
                 var cartLineList = cartLines.ToList();
+
+                // BUGFIX: giá đàm phán trước đây dịch chuyển NGAY khi ProductPriceUpdateOrder thực thi,
+                // không có cửa sổ khoan 24h như CartItem.PriceLockedAt — dù thông báo SYS_46 gửi khách
+                // hứa hẹn "giá hiện tại của bạn sẽ được giữ nguyên trong 24h" áp dụng chung, không phân
+                // biệt khách đang giữ giá qua giỏ hàng hay qua báo giá đã duyệt. Với sản phẩm vừa có 1
+                // đợt Executed trong 24h gần nhất, dùng lại OldPrice (giá TRƯỚC khi đổi) làm mốc tính tỉ
+                // lệ đàm phán thay vì StandardListedPrice hiện tại — sau 24h mới áp giá mới, đúng cửa sổ
+                // khoan giống CartItem.
+                var cartProductIds = cartLineList.Select(l => l.ProductId).Distinct().ToList();
+                var lockWindowStart = DateTime.UtcNow.AddHours(-24);
+                var recentPriceUpdates = await _context.ProductPriceUpdateOrderItems
+                    .Where(i => cartProductIds.Contains(i.ProductId)
+                        && i.ProductPriceUpdateOrder.Status == ProductPriceUpdateOrderStatus.Executed
+                        && i.ProductPriceUpdateOrder.ExecutedAt >= lockWindowStart)
+                    .Select(i => new { i.ProductId, i.OldPrice, ExecutedAt = i.ProductPriceUpdateOrder.ExecutedAt })
+                    .ToListAsync();
+                var lockedPriceByProduct = recentPriceUpdates
+                    .GroupBy(i => i.ProductId)
+                    .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.ExecutedAt).First().OldPrice);
+
                 foreach (var acceptedVersion in acceptedVersions)
                 {
                     var negotiatedByProduct = acceptedVersion.Items.ToDictionary(i => i.ProductId, i => i);
@@ -127,7 +147,7 @@ namespace VietTien.API.Services.Implementations
 
                     if (allLinesNegotiated)
                     {
-                        var negotiatedUnitPrices = negotiatedByProduct.ToDictionary(kv => kv.Key, kv => EffectiveNegotiatedUnitPrice(kv.Value));
+                        var negotiatedUnitPrices = negotiatedByProduct.ToDictionary(kv => kv.Key, kv => EffectiveNegotiatedUnitPrice(kv.Value, lockedPriceByProduct));
                         var negotiatedTotal = cartLineList.Sum(line => negotiatedUnitPrices[line.ProductId] * line.Quantity);
                         var negotiatedDiscount = Math.Max(0, totalAmount - negotiatedTotal);
                         var negotiatedPercentage = totalAmount > 0 ? negotiatedDiscount / totalAmount : 0m;
@@ -142,18 +162,24 @@ namespace VietTien.API.Services.Implementations
             return (discountAmount, discountPercentage, null);
         }
 
-        // Giá đàm phán HIỆU LỰC dịch chuyển theo đúng % thay đổi của giá niêm yết hiện tại, thay vì
-        // "đứng yên" ở đúng con số đã duyệt lúc đàm phán. OriginalUnitPrice/ProposedUnitPrice giữ
-        // nguyên (không ghi đè) làm lịch sử đúng những gì CEO/Manager đã thực sự duyệt; tỉ lệ giữa 2
-        // số đó (vd 80.000/100.000 = 0.8, tức giảm 20%) được áp lại lên Product.StandardListedPrice
-        // HIỆN TẠI mỗi lần tính tiền — nếu 1 ProductPriceUpdateOrder sau đó đổi giá niêm yết -2%, giá
-        // đàm phán hiệu lực cũng tự động -2% mà không cần chạy cập nhật hàng loạt lúc đợt giá thực thi,
-        // và không dồn sai số làm tròn qua nhiều lần đổi giá liên tiếp (luôn tính lại từ 2 mốc gốc).
-        private static decimal EffectiveNegotiatedUnitPrice(QuotationVersionItem item)
+        // Giá đàm phán HIỆU LỰC dịch chuyển theo đúng % thay đổi của giá niêm yết, thay vì "đứng yên"
+        // ở đúng con số đã duyệt lúc đàm phán. OriginalUnitPrice/ProposedUnitPrice giữ nguyên (không
+        // ghi đè) làm lịch sử đúng những gì CEO/Manager đã thực sự duyệt; tỉ lệ giữa 2 số đó (vd
+        // 80.000/100.000 = 0.8, tức giảm 20%) được áp lại lên giá niêm yết mỗi lần tính tiền — nếu 1
+        // ProductPriceUpdateOrder sau đó đổi giá niêm yết -2%, giá đàm phán hiệu lực cũng tự động -2%
+        // mà không cần chạy cập nhật hàng loạt lúc đợt giá thực thi, và không dồn sai số làm tròn qua
+        // nhiều lần đổi giá liên tiếp (luôn tính lại từ 2 mốc gốc).
+        // recentlyLockedPrices: ProductId -> OldPrice của đợt Executed trong 24h gần nhất (nếu có) —
+        // dùng giá NÀY thay cho StandardListedPrice hiện tại để giá đàm phán hưởng đúng cửa sổ khoan
+        // 24h giống CartItem.PriceLockedAt, thay vì đổi ngay lập tức lúc đợt giá thực thi.
+        private static decimal EffectiveNegotiatedUnitPrice(QuotationVersionItem item, Dictionary<Guid, decimal> recentlyLockedPrices)
         {
             if (item.OriginalUnitPrice <= 0) return item.ProposedUnitPrice;
+            var currentBasePrice = recentlyLockedPrices.TryGetValue(item.ProductId, out var lockedPrice)
+                ? lockedPrice
+                : item.Product.StandardListedPrice;
             var ratio = item.ProposedUnitPrice / item.OriginalUnitPrice;
-            return Math.Round(ratio * item.Product.StandardListedPrice, 0, MidpointRounding.AwayFromZero);
+            return Math.Round(ratio * currentBasePrice, 0, MidpointRounding.AwayFromZero);
         }
 
         // BR-026: đơn ≥ ngưỡng báo giá B2B mà chưa có báo giá được duyệt thì không được đặt thẳng theo
@@ -1218,6 +1244,12 @@ namespace VietTien.API.Services.Implementations
 
             if (order.PaymentStatus == PaymentStatus.Paid)
                 throw new InvalidOperationException("Đơn hàng đã được xác nhận thanh toán trước đó.");
+
+            // BUGFIX: endpoint này chỉ dành cho xác nhận ĐÃ NHẬN TIỀN MẶT tại quầy — trước đây không hề
+            // kiểm tra PaymentMethod, nên có thể gọi để đánh dấu Paid cho cả đơn "Chuyển khoản SePay" mà
+            // KHÔNG có tiền thật nào về, bỏ qua hoàn toàn bước đối soát qua ProcessSePayWebhookAsync.
+            if (order.PaymentMethod != PaymentMethod.Cash)
+                throw new InvalidOperationException("Chỉ áp dụng cho đơn thanh toán tiền mặt tại quầy — đơn SePay phải chờ đối soát qua webhook.");
 
             order.PaymentStatus = PaymentStatus.Paid;
             order.OrderStatus = OrderStatus.Completed; // Delivered upon counter cash payment confirmation

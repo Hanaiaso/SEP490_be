@@ -555,6 +555,128 @@ namespace VietTien.Tests.Services
             orderItem.PriceSnapshot.Should().Be(78_400m); // 80.000 * (98.000/100.000) — giữ đúng tỉ lệ giảm 20%
         }
 
+        /// <summary>Seed 1 đợt ProductPriceUpdateOrder đã Executed cho <paramref name="product"/>, đổi giá
+        /// niêm yết từ <paramref name="oldPrice"/> sang <paramref name="newPrice"/> vào lúc executedAt.</summary>
+        private void SeedExecutedPriceUpdate(Product product, decimal oldPrice, decimal newPrice, DateTime executedAt)
+        {
+            var priceUpdateOrder = new ProductPriceUpdateOrder
+            {
+                Status = ProductPriceUpdateOrderStatus.Executed,
+                ProposedByUserId = _salesStaff.Id,
+                ScheduledEffectiveDate = executedAt.Date,
+                ExecutedAt = executedAt,
+            };
+            priceUpdateOrder.Items.Add(new ProductPriceUpdateOrderItem
+            {
+                ProductId = product.Id,
+                OldPrice = oldPrice,
+                NewPrice = newPrice,
+            });
+            _db.ProductPriceUpdateOrders.Add(priceUpdateOrder);
+            product.StandardListedPrice = newPrice;
+            _db.SaveChanges();
+        }
+
+        // L1-ORD-11l | EP-Valid | Đợt ProductPriceUpdateOrder Executed TRONG 24h gần nhất -> giá đàm
+        // phán hiệu lực vẫn tính theo giá niêm yết CŨ (OldPrice), chưa áp giá mới — đúng cửa sổ khoan
+        // 24h giống CartItem.PriceLockedAt. (BUGFIX: trước đây giá đàm phán đổi ngay lập tức, không có
+        // khoan, dù thông báo SYS_46 gửi khách hứa hẹn giữ giá 24h.)
+        [Fact]
+        public async Task L1_ORD_11l_PlaceOrder_ListedPriceChangedWithin24h_NegotiatedPriceStaysLocked()
+        {
+            var cart = SeedCartWithTotal(100_000_000m, qty: 1000);
+            var cartItem = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            var product = _db.Products.Single(p => p.Id == cartItem.ProductId);
+
+            var quotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 100_000_000m,
+                ValidUntil = DateTime.UtcNow.AddDays(7),
+            };
+            var version = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = quotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 80_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            version.Items.Add(new QuotationVersionItem
+            {
+                QuotationVersionId = version.Id,
+                ProductId = product.Id,
+                Quantity = 1000,
+                OriginalUnitPrice = 100_000m,
+                ProposedUnitPrice = 80_000m, // đàm phán xuống 80.000đ (giảm 20%)
+            });
+            quotation.AcceptedVersionId = version.Id;
+            quotation.Versions.Add(version);
+            _db.Quotations.Add(quotation);
+            _db.SaveChanges();
+
+            // Đợt cập nhật giá Executed 1 giờ trước (còn trong khoan 24h): 100.000đ -> 98.000đ.
+            SeedExecutedPriceUpdate(product, oldPrice: 100_000m, newPrice: 98_000m, executedAt: DateTime.UtcNow.AddHours(-1));
+
+            var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            var orderItem = _db.OrderItems.Single(oi => oi.OrderId == response.OrderId);
+            orderItem.PriceSnapshot.Should().Be(80_000m); // 80.000 * (100.000/100.000) — vẫn giá CŨ, chưa áp giá mới
+        }
+
+        // L1-ORD-11m | EP-Valid | Đợt Executed đã QUÁ 24h -> hết khoan, giá đàm phán hiệu lực áp theo
+        // giá niêm yết MỚI (hành vi cũ như L1-ORD-11j).
+        [Fact]
+        public async Task L1_ORD_11m_PlaceOrder_ListedPriceChangedOver24hAgo_NegotiatedPriceUsesNewPrice()
+        {
+            var cart = SeedCartWithTotal(100_000_000m, qty: 1000);
+            var cartItem = _db.CartItems.Single(ci => ci.CartId == cart.Id);
+            var product = _db.Products.Single(p => p.Id == cartItem.ProductId);
+
+            var quotation = new Quotation
+            {
+                Id = Guid.NewGuid(),
+                CustomerProfileId = _profile.Id,
+                SalesStaffId = _salesStaff.Id,
+                Status = QuotationStatus.CustomerAccepted,
+                OriginalTotal = 100_000_000m,
+                ValidUntil = DateTime.UtcNow.AddDays(7),
+            };
+            var version = new QuotationVersion
+            {
+                Id = Guid.NewGuid(),
+                QuotationId = quotation.Id,
+                VersionNumber = 1,
+                ProposedTotal = 80_000_000m,
+                Status = QuotationVersionStatus.CustomerAccepted,
+                CreatedByUserId = _salesStaff.Id,
+            };
+            version.Items.Add(new QuotationVersionItem
+            {
+                QuotationVersionId = version.Id,
+                ProductId = product.Id,
+                Quantity = 1000,
+                OriginalUnitPrice = 100_000m,
+                ProposedUnitPrice = 80_000m,
+            });
+            quotation.AcceptedVersionId = version.Id;
+            quotation.Versions.Add(version);
+            _db.Quotations.Add(quotation);
+            _db.SaveChanges();
+
+            // Đợt cập nhật giá Executed 25 giờ trước (đã quá khoan 24h): 100.000đ -> 98.000đ.
+            SeedExecutedPriceUpdate(product, oldPrice: 100_000m, newPrice: 98_000m, executedAt: DateTime.UtcNow.AddHours(-25));
+
+            var response = await _sut.PlaceOrderAsync(_customer.Id, new PlaceOrderRequestDto { PaymentMethod = PaymentMethod.COD });
+
+            var orderItem = _db.OrderItems.Single(oi => oi.OrderId == response.OrderId);
+            orderItem.PriceSnapshot.Should().Be(78_400m); // 80.000 * (98.000/100.000) — hết khoan, theo giá mới
+        }
+
         // L1-ORD-11k | EP-Valid | 1 dòng giỏ vừa bị khoá giá riêng (PriceLockedAt gần đây) do 1 đợt
         // ProductPriceUpdateOrder — KHÔNG bị chặn đặt hàng dù cả giỏ (Cart.UpdatedAt) đã cũ >24h.
         // Regression cho lỗi: PlaceOrderAsync trước đây tự đọc thẳng cartEntity.UpdatedAt, bỏ qua
@@ -1011,11 +1133,14 @@ namespace VietTien.Tests.Services
         [Fact]
         public async Task L1_ORD_27b_ConfirmDirectOrderPayment_Valid_PaidAndCompleted()
         {
+            // ConfirmDirectOrderPaymentAsync chỉ dùng cho bước "Xác nhận đã nhận tiền mặt" của luồng
+            // Mua hàng trực tiếp (POS) — PlaceDirectOrderAsync chỉ tạo đơn Cash hoặc SePay, không bao
+            // giờ COD (COD đi qua luồng giao hàng riêng, RecordDeliveryResultAsync).
             var order = SeedOrder(o =>
             {
-                o.PaymentMethod = PaymentMethod.COD;
+                o.PaymentMethod = PaymentMethod.Cash;
                 o.PaymentStatus = PaymentStatus.Pending;
-                o.OrderStatus = OrderStatus.PendingConfirmation;
+                o.OrderStatus = OrderStatus.Draft;
             });
 
             await _sut.ConfirmDirectOrderPaymentAsync(order.Id);
@@ -1023,6 +1148,25 @@ namespace VietTien.Tests.Services
             var updated = _db.Orders.Single(o => o.Id == order.Id);
             updated.PaymentStatus.Should().Be(PaymentStatus.Paid);
             updated.OrderStatus.Should().Be(OrderStatus.Completed);
+        }
+
+        // L1-ORD-27c | Notify (BUGFIX) | Không cho xác nhận "đã nhận tiền mặt" trên đơn thanh toán
+        // SePay — trước đây thiếu kiểm tra PaymentMethod nên có thể đánh dấu Paid mà không có tiền thật
+        // nào về, bỏ qua hoàn toàn bước đối soát qua ProcessSePayWebhookAsync.
+        [Fact]
+        public async Task L1_ORD_27c_ConfirmDirectOrderPayment_OnSePayOrder_Rejected()
+        {
+            var order = SeedOrder(o =>
+            {
+                o.PaymentMethod = PaymentMethod.SePay;
+                o.PaymentStatus = PaymentStatus.Pending;
+                o.OrderStatus = OrderStatus.Draft;
+            });
+
+            var act = () => _sut.ConfirmDirectOrderPaymentAsync(order.Id);
+
+            await act.Should().ThrowAsync<InvalidOperationException>();
+            _db.Orders.Single(o => o.Id == order.Id).PaymentStatus.Should().Be(PaymentStatus.Pending);
         }
 
         // L1-ORD-27c | State-Invalid | Xác nhận thu tiền lần 2 trên đơn đã Paid -> conflict
